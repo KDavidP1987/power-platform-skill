@@ -21,6 +21,9 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
   writes nothing. Idempotent; never renames, retypes or deletes; choice options append-only; lookup
   schema names must be lower case; manifest errors are refused before any call. Python 3 standard
   library only, with a self-test against a simulated Web API, run in CI.
+  On a real tenant, `--plan` ran read-only against two schemas deployed by the scripts it replaces
+  (71 and 195 items, one and three shared tables): 0 changes, every item found, every shared table a
+  reference. The apply path has run only against the simulated API so far.
 - `assets/tables.example.json`: an example manifest (a small request tracker) using every column
   type.
 - `references/dataverse.md` section 16: creating schema with the tool, plan first, what a green run
