@@ -1,0 +1,51 @@
+Screens:
+  scrVendorSpend:
+    Properties:
+      OnVisible: |-
+        =ClearCollect(colSpend, Filter(Purchases, Status = 'Purchase Status'.Open));
+        Set(gblSpendTotal, Sum(colSpend, Amount))
+    Children:
+      - lblTitle:
+          Control: Label
+          Properties:
+            Text: ="Vendor spend"
+            X: =24
+            Y: =16
+            Width: =400
+            Height: =40
+            Size: =20
+      - galSpend:
+          Control: Gallery
+          Variant: BrowseLayout_Vertical_TwoTextVariant_ver5.0
+          Properties:
+            Items: =colSpend
+            X: =24
+            Y: =120
+            Width: =900
+            Height: =560
+            TemplateSize: =64
+          Children:
+            - lblVendor:
+                Control: Label
+                Properties:
+                  Text: =ThisItem.Vendor.'Vendor Name'
+                  X: =12
+                  Y: =8
+                  Width: =500
+                  Height: =24
+            - lblAmount:
+                Control: Label
+                Properties:
+                  Text: =Text(ThisItem.Amount, "$#,##0.00")
+                  X: =700
+                  Y: =8
+                  Width: =200
+                  Height: =24
+      - lblTotal:
+          Control: Label
+          Properties:
+            Text: ="Total open: " & Text(gblSpendTotal, "$#,##0.00")
+            X: =24
+            Y: =690
+            Width: =600
+            Height: =30

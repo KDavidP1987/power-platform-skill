@@ -1,0 +1,108 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_commondataserviceforapps": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr4f2_sharedcommondataserviceforapps_x1"
+        },
+        "api": {
+          "name": "shared_commondataserviceforapps"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        }
+      },
+      "triggers": {
+        "When_an_order_is_modified": {
+          "type": "OpenApiConnectionWebhook",
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "SubscribeWebhookTrigger"
+            },
+            "parameters": {
+              "subscriptionRequest/message": 3,
+              "subscriptionRequest/entityname": "cr4f2_order",
+              "subscriptionRequest/scope": 4
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        }
+      },
+      "actions": {
+        "Get_the_lines": {
+          "type": "OpenApiConnection",
+          "runAfter": {},
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "ListRecords"
+            },
+            "parameters": {
+              "entityName": "cr4f2_orderlines",
+              "$filter": "_cr4f2_order_value eq @{triggerOutputs()?['body/cr4f2_orderid']}",
+              "$select": "cr4f2_orderlineid"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Only_open_orders": {
+          "type": "If",
+          "runAfter": {
+            "Get_the_lines": [
+              "Succeeded"
+            ]
+          },
+          "expression": {
+            "and": [
+              {
+                "not": {
+                  "equals": [
+                    "@triggerOutputs()?['body/cr4f2_status']",
+                    100000002
+                  ]
+                }
+              }
+            ]
+          },
+          "actions": {
+            "Apply_to_each_line": {
+              "type": "Foreach",
+              "runAfter": {},
+              "foreach": "@outputs('Get_the_lines')?['body/value']",
+              "actions": {
+                "Copy_the_discount": {
+                  "type": "OpenApiConnection",
+                  "runAfter": {},
+                  "inputs": {
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+                      "connectionName": "shared_commondataserviceforapps",
+                      "operationId": "UpdateRecord"
+                    },
+                    "parameters": {
+                      "entityName": "cr4f2_orderlines",
+                      "recordId": "@items('Apply_to_each_line')?['cr4f2_orderlineid']",
+                      "item/cr4f2_discount": "@triggerOutputs()?['body/cr4f2_discount']"
+                    },
+                    "authentication": "@parameters('$authentication')"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

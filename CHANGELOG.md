@@ -11,6 +11,19 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+### Changed
+
+- The evaluation was re-run on 0.5.1 and replaces the 0.1.0 results on `docs/evaluation.html` and in
+  the README: ten tasks (six new: a looping pair of flows, an allowlist-only notification flow, long
+  text in a gallery, a list with no filters asked for, theme intake before the first screen, and the
+  documentation set), two runs per configuration, 133/148 checks with the skill against 98/148
+  without. Three lenient 0.1.0 checks were tightened. The 1.0 evaluation criterion is now 90% and 20
+  points over the baseline across ten tasks, with no task lower with the skill (`ROADMAP.md`).
+
+### Added
+
+- `evals/`: the evaluation tasks, inputs, the run, grade and analysis harness, and the 0.5.1 results.
+
 ## [0.5.1] - 2026-10-02
 
 Beta hardening: what a second real build taught, the snippets it confirmed, and the roadmap to 1.0.

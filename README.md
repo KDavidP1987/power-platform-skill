@@ -6,7 +6,7 @@
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
 [![plugin 0.5.1](https://img.shields.io/badge/plugin-0.5.1-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
-[![evaluation 32/32 vs 14/32](https://img.shields.io/badge/evaluation-32%2F32%20vs%2014%2F32-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+[![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 # power-platform
 
@@ -19,8 +19,8 @@ performing the task in the published app, driven by Playwright. A clean compile 
 Version 0.5.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
-> On four realistic Power Platform tasks, the same model passed **32 of 32** graded checks with this
-> skill and **14 of 32** without it. The [evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+> On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
+> checks with this skill and **98 of 148** without it. The [evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 > shows every check, what went wrong without the skill, and the limits of the measurement.
 
 ## Status: public beta (0.x)
@@ -446,25 +446,40 @@ Configure them with `.claude/hooks/standards.config.json` (example in `assets/`)
 
 ## Evaluation
 
-Measured on version 0.1.0. The skill was evaluated the way skills should be: the same model, the same prompt, run once with
-the skill and once without, graded against checks written before the runs.
+Measured on version 0.5.1. The same model and prompt ran twice with the skill and twice without, in
+fresh sessions, graded against checks fixed before the runs: by the bundled checkers where they apply,
+otherwise by a grader that did not know which configuration it was reading.
 
 | Test | With the skill | Without |
 |---|---|---|
-| A Submit button that does nothing after a three-part release | **8/8** | 1/8 |
-| A cloud flow that writes to its own trigger table | **9/9** | 7/9 |
-| A Playwright check of an approval in the published app | **8/8** | 4/8 |
-| Search and a 3,500-row picker in a `.pa.yaml` screen | **7/7** | 2/7 |
-| **Total** | **32/32 (100%)** | **14/32 (44%)** |
+| A Submit button that does nothing after a three-part release | **8/8, 8/8** | 3/8, 3/8 |
+| A cloud flow that writes to its own trigger table | **9/9, 9/9** | 8/9, 8/9 |
+| A Playwright check of an approval in the published app | **7/8, 7/8** | 3/8, 4/8 |
+| Search and a 3,500-row picker in a `.pa.yaml` screen | **4/9, 6/9** | 2/9, 2/9 |
+| Two cloud flows that start each other | 6/6, 6/6 | 6/6, 6/6 |
+| Notifications that may reach only a tester allowlist | **7/7, 7/7** | 6/7, 6/7 |
+| Long text clipped in a gallery | **5/6, 6/6** | 4/6, 4/6 |
+| A list screen nobody asked to filter | 5/7, 6/7 | 6/7, 5/7 |
+| Theme intake before the first screen | **7/7, 6/7** | 5/7, 5/7 |
+| The documentation set for a handover | **7/7, 7/7** | 6/7, 6/7 |
+| **Total** | **133/148 (90%)** | **98/148 (66%)** |
 
-Triggering was tested separately on 20 requests, half of them near misses such as Power BI DAX,
-Dynamics 365 C# plug-ins, Power Automate Desktop and Logic Apps. The shipped description was right
-on 8 of 8 held-out requests, with no false triggers in any round.
+On 0.1.0 the first four tests scored 32/32 against 14/32, with one run each. The six newer tests separate
+the two less: the unaided model already catches an explicit two-flow loop and adds list filters by
+itself. Four checks still fail with the skill: the Playwright script makes its Dataverse confirmation
+optional, and the `.pa.yaml` answer keeps filtering a whole-table collection without explaining which
+aggregates and lookup filters do not delegate. The second is a regression from 0.1.0.
 
-The cost is real: about 1.8 times the tokens and about a minute more per task, spent reading the
-references. Each configuration ran once, and nothing ran against a live tenant. The
+Triggering was tested on 20 requests for 0.1.0, half of them near misses such as Power BI DAX,
+Dynamics 365 C# plug-ins, Power Automate Desktop and Logic Apps. The description has not changed since:
+it was right on 8 of 8 held-out requests, with no false triggers, and the skill loaded in all 20 runs
+where it was installed.
+
+The cost is real: about 2.9 times the tokens (most of them reference files read from cache), 1.2 times
+the output, and about 26 seconds more per task. Nothing ran against a live tenant. The
 [full evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
-([source](docs/evaluation.html)) shows every check and the limits of the measurement.
+([source](docs/evaluation.html)) shows every check and the limits of the measurement; the tasks,
+inputs and harness are in [`evals/`](evals/).
 
 ## Limits of this version
 
@@ -488,6 +503,7 @@ references. Each configuration ran once, and nothing ran against a live tenant. 
 .github/workflows/validate.yml  CI: validator, manifests, versions, every self-test
 .github/workflows/upkeep.yml    monthly: self-tests and Playwright version drift, opens an issue
 docs/evaluation.html            the evaluation report (served by GitHub Pages)
+evals/                          the evaluation tasks, inputs, harness and results
 scripts/                        repo validator and its version-agreement tests
 skills/power-platform/
   SKILL.md                      the method, the non-negotiables, where to look

@@ -1,0 +1,62 @@
+Screens:
+  scrRequests:
+    Properties:
+      Fill: =RGBA(245, 247, 250, 1)
+    Children:
+      - lblHeader:
+          Control: Label
+          Properties:
+            Text: ="Service requests"
+            X: =24
+            Y: =16
+            Width: =400
+            Height: =40
+            Size: =20
+      - galRequests:
+          Control: Gallery
+          Variant: BrowseLayout_Vertical_TwoTextOneImageVariant_ver5.0
+          Properties:
+            Items: =Sort('Service Requests', 'Created On', SortOrder.Descending)
+            X: =24
+            Y: =72
+            Width: =1000
+            Height: =600
+            TemplateSize: =72
+          Children:
+            - lblReqTitle:
+                Control: Label
+                Properties:
+                  Text: =ThisItem.Title
+                  X: =12
+                  Y: =6
+                  Width: =360
+                  Height: =24
+                  Size: =13
+                  FontWeight: =FontWeight.Semibold
+            - lblReqDescription:
+                Control: Label
+                Properties:
+                  Text: =ThisItem.Description
+                  X: =12
+                  Y: =32
+                  Width: =620
+                  Height: =34
+                  Size: =11
+            - lblReqRequester:
+                Control: Label
+                Properties:
+                  Text: =ThisItem.Requester.'Full Name'
+                  X: =660
+                  Y: =6
+                  Width: =200
+                  Height: =24
+                  Size: =12
+            - lblReqCategory:
+                Control: Label
+                Properties:
+                  Text: =ThisItem.Category
+                  X: =880
+                  Y: =6
+                  Width: =110
+                  Height: =24
+                  Size: =12

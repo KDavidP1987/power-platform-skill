@@ -1,0 +1,25 @@
+{
+ "tables": {
+  "Service Requests": {
+   "Title": 200,
+   "Description": 4000,
+   "Full Name": 100,
+   "Category": {
+    "maxLength": 40,
+    "values": [
+     "Hardware",
+     "Software",
+     "Access",
+     "Telecom",
+     "Facilities and Furniture"
+    ]
+   }
+  }
+ },
+ "columns": {
+  "Title": 200,
+  "Description": 4000,
+  "Full Name": 100,
+  "Category": 24
+ }
+}

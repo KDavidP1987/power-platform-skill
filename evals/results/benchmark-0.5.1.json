@@ -1,0 +1,2282 @@
+{
+  "metadata": {
+    "skill_name": "power-platform",
+    "skill_path": "skills/power-platform (0.5.1, commit 9d02a7f)",
+    "executor_model": "claude-opus-5-5 (Claude Code 2.1.287, headless)",
+    "analyzer_model": "claude-opus-5-5 (blinded headless grader)",
+    "timestamp": "2026-10-02T06:00:20Z",
+    "evals_run": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "runs_per_configuration": 2
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 136.5,
+        "tokens": 493525,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Names at least two distinct candidate causes among: stale cached column list, stale cached choice/option-set members, the imported app not running the new YAML (LoadFromYaml false / old build), a stale cached player build",
+          "passed": true,
+          "evidence": "diagnosis.md table names A 'Reviewer missing from the cached column list', B 'Escalated missing from choice cache 2', F 'Stale player cache / wrong build' and G 'LoadFromYaml: false'."
+        },
+        {
+          "text": "Gives at least two read-only checks to run before changing anything, and for EACH check says which named cause it confirms or rules out (a check that only applies to an unnamed or different cause does not count)",
+          "passed": true,
+          "evidence": "Step 3 maps each check-drift.py finding to a named cause ('column drift ... \u2192 A', 'choice drift naming Escalated \u2192 B'). Step 2's inspect-artifact.py check covers LoadFromYaml for candidate G."
+        },
+        {
+          "text": "Explains that Studio Preview and the compile resolve against live metadata while the published app uses the cached copy in the app",
+          "passed": true,
+          "evidence": "Section 1: 'Studio, Studio Preview and the compiler all read live metadata... The published player resolves formulas against that frozen copy.'"
+        },
+        {
+          "text": "Explains the silent no-op (a failing step abandons the rest of the formula without a message) and recommends surfacing errors (IfError/Notify/Errors())",
+          "passed": true,
+          "evidence": "Section 1: 'an error abandons every statement after it, silently: no write, no notification, no navigation'. Section 4.4 recommends If(IsError(Patch(...)), Notify(... Errors(cr4f2_request)...))."
+        },
+        {
+          "text": "Fix includes refreshing the data source in Studio (remove and re-add, or equivalent) followed by Save AND Publish from Studio, then re-shipping from git",
+          "passed": true,
+          "evidence": "Section 4.1: Remove and then Add data back, then 'Save, then Publish, from Studio'. Section 4.2: 'Re-ship from git' with ship-canvas.py."
+        },
+        {
+          "text": "States that a schema change and the canvas change depending on it should not ship in a single step",
+          "passed": true,
+          "evidence": "Prevention 1: 'Schema and the canvas change that uses it never ship in the same release.'"
+        },
+        {
+          "text": "Prevention includes an automated pre-ship check comparing live columns and choice members with the app's cached metadata",
+          "passed": true,
+          "evidence": "Prevention 3: 'Gate every ship on the finished artifact. Run check-drift.py on the zip (exit 1 or 2 blocks...)'. Step 3 says check-drift compares the app's cache with live metadata for column and choice drift."
+        },
+        {
+          "text": "Verification: perform the task in the published app on a fresh (uncached) player and confirm the written row in Dataverse",
+          "passed": true,
+          "evidence": "Section 4.6: 'On a freshly cleared player, with the new stamp confirmed, perform Submit as an ordinary user. Check the row in cr4f2_request (Reviewer set, Status = Escalated)'."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 154.0,
+        "tokens": 512479,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Names at least two distinct candidate causes among: stale cached column list, stale cached choice/option-set members, the imported app not running the new YAML (LoadFromYaml false / old build), a stale cached player build",
+          "passed": true,
+          "evidence": "diagnosis.md ranks 'A | Stale column list' and 'B | Stale choice members', describes the 'cached previous build' in IndexedDB, and covers 'LoadFromYaml false with stale Controls/*.json'. That is all four named causes."
+        },
+        {
+          "text": "Gives at least two read-only checks to run before changing anything, and for EACH check says which named cause it confirms or rules out (a check that only applies to an unnamed or different cause does not count)",
+          "passed": true,
+          "evidence": "Section 3.3 gives a separate read-only check for each cause: look for cr4f2_reviewer in TableDefinition ('Missing confirms A') and for Escalated in PicklistOptionSetAttribute ('Missing from the second confirms B'). Section 3.4 checks LoadFromYaml for the wrong-half cause, and 3.1 checks the build stamp or layout in a fresh window for the cached-build cause."
+        },
+        {
+          "text": "Explains that Studio Preview and the compile resolve against live metadata while the published app uses the cached copy in the app",
+          "passed": true,
+          "evidence": "Section 1 says: 'The published player resolves formulas against that frozen copy. Studio, Studio Preview and the compiler resolve against live metadata.' The table that follows repeats this for the compile and for Preview."
+        },
+        {
+          "text": "Explains the silent no-op (a failing step abandons the rest of the formula without a message) and recommends surfacing errors (IfError/Notify/Errors())",
+          "passed": true,
+          "evidence": "Section 1 says Power Fx 'abandons the rest of the behaviour formula. The Notify and Navigate after it never run. The player shows no banner'. Section 4.4 then gives an IsError(Patch(...)) / Notify(... First(Errors(Requests)).Message ...) pattern."
+        },
+        {
+          "text": "Fix includes refreshing the data source in Studio (remove and re-add, or equivalent) followed by Save AND Publish from Studio, then re-shipping from git",
+          "passed": true,
+          "evidence": "Section 4.2 steps 2\u20137 say to 'Remove Requests ... and Add data back', then 'Save and Publish. A save alone is not enough', then commit to git and 'Re-ship from git with the ship script'."
+        },
+        {
+          "text": "States that a schema change and the canvas change depending on it should not ship in a single step",
+          "passed": true,
+          "evidence": "Section 2 says: 'A schema change and the canvas change that depends on it cannot ship in one step.' Section 5.2 says: 'Split schema releases from app releases.'"
+        },
+        {
+          "text": "Prevention includes an automated pre-ship check comparing live columns and choice members with the app's cached metadata",
+          "passed": true,
+          "evidence": "Section 5.3 says: 'Gate every ship on the finished artifact. check-drift.py must exit 0: it catches a column a formula uses that the cache lacks, missing choice members...' Section 3.3 describes check-drift.py as comparing the cache with live metadata."
+        },
+        {
+          "text": "Verification: perform the task in the published app on a fresh (uncached) player and confirm the written row in Dataverse",
+          "passed": true,
+          "evidence": "Section 4.6 says to prove it 'in the published app, as an end-user role, on the stamped build ... Then query the table' using GET cr4f2_requests(<id>). Section 5.5 adds a Playwright walk run with '--fresh' that 'checks the row in Dataverse', and 3.1 calls for a fresh InPrivate window with the cache cleared."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 10,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 93.9,
+        "tokens": 259006,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Proposes separate documents per audience: at least the submitting user, the approver/manager, the administrator, and a developer/platform guide",
+          "passed": true,
+          "evidence": "handover.md section 1 proposes four separate guides: \"Employee guide (user guide)\", \"Approver guide (manager guide)\", \"Finance administrator guide\" and \"Developer and platform guide\", each with its own reader."
+        },
+        {
+          "text": "The developer/platform guide outline covers environment/solution, Dataverse tables, security roles, connections or connection references, and each flow (trigger and what it writes/sends)",
+          "passed": true,
+          "evidence": "The Guide 4 outline has chapter 2 \"Environment and solution\", 4 \"Dataverse tables\", 5 \"Security roles and data access\" and 8 \"Connections and connection references\". Chapter 9 says that for each flow it covers \"the trigger table and message... what it reads, writes and sends\"."
+        },
+        {
+          "text": "Screenshots are taken per role in the published app",
+          "passed": true,
+          "evidence": "Section 3 says: \"Capture in the published player, not Studio\". It also says screenshots are taken \"once per role, signed in as a test user who holds only that role\"."
+        },
+        {
+          "text": "Screenshots use test data, not real people's data (or the guides are kept out of public git for that reason)",
+          "passed": true,
+          "evidence": "Section 3 requires \"clearly fictitious test data, tagged as test\" and says \"Never create production rows to fill a screenshot\". It also says to \"Keep screenshots and generated output out of git\"."
+        },
+        {
+          "text": "States that statements must come from the app source or the live environment (button names as the controls say), not memory",
+          "passed": true,
+          "evidence": "Section 3, \"Read facts, don't recall them\", says to \"Quote button, tab and screen names exactly as the control labels in .pa.yaml show them\". It also says to read settings from live rows and flow behaviour from the flow definitions."
+        },
+        {
+          "text": "Documents carry a version and issue date (or are tied to a release/build)",
+          "passed": true,
+          "evidence": "Section 3 says \"Each cover carries the version, the issue date and the build stamp the screenshots were taken on\". Guide 4 also states its commit hash."
+        },
+        {
+          "text": "Includes a check that every screen and role is covered (an inventory or checklist)",
+          "passed": true,
+          "evidence": "shots.json lists \"the (screen, role) pairs each guide requires\". The plan says to run `doc_kit.py inventory shots.json`, which must pass and must be shown to fail when a shot is missing. The admin guide also has a role \u00d7 screen/action table."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 10,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 96.0,
+        "tokens": 261463,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Proposes separate documents per audience: at least the submitting user, the approver/manager, the administrator, and a developer/platform guide",
+          "passed": true,
+          "evidence": "handover.md \u00a71 table proposes four guides: Employee guide (user SOP), Approver guide (manager guide), Finance administrator guide, and Developer and platform guide."
+        },
+        {
+          "text": "The developer/platform guide outline covers environment/solution, Dataverse tables, security roles, connections or connection references, and each flow (trigger and what it writes/sends)",
+          "passed": true,
+          "evidence": "\u00a74.4 covers 'Environment and solution' (ch2), 'Dataverse tables' (ch4), 'Security roles and data access' (ch5), 'Connections and connection references' (ch8), and 'Cloud flows: for each of F1, F2 and F3, the trigger... what it writes and who it sends to' (ch9)."
+        },
+        {
+          "text": "Screenshots are taken per role in the published app",
+          "passed": true,
+          "evidence": "\u00a73.2 step 3: 'Capture with Playwright, one pass per role, in the published player'; \u00a73.1 requires one test user per role holding only that role."
+        },
+        {
+          "text": "Screenshots use test data, not real people's data (or the guides are kept out of public git for that reason)",
+          "passed": true,
+          "evidence": "\u00a73.1 calls for 'Clearly fictitious test data'; \u00a75 says 'using test data only'; \u00a73.2 step 8 says 'Do not commit out/, because screenshots carry names.'"
+        },
+        {
+          "text": "States that statements must come from the app source or the live environment (button names as the controls say), not memory",
+          "passed": true,
+          "evidence": "\u00a71: 'Do not write them from memory'; \u00a73.3: 'Every fact is read from source or the live environment. Button, tab and message text is quoted exactly as the control shows it.'"
+        },
+        {
+          "text": "Documents carry a version and issue date (or are tied to a release/build)",
+          "passed": true,
+          "evidence": "\u00a73.3: 'Each cover carries the version, the issue date and the build stamp.'"
+        },
+        {
+          "text": "Includes a check that every screen and role is covered (an inventory or checklist)",
+          "passed": true,
+          "evidence": "\u00a75 and \u00a73.2 step 2 set up a shots.json 'required' block of (screen, role) pairs, and 'The inventory check fails on any pair that has no shot'. \u00a76 makes 'doc_kit.py inventory passes' part of the definition of done."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 9,
+        "failed": 0,
+        "total": 9,
+        "time_seconds": 170.9,
+        "tokens": 734043,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "flow.json parses as JSON and has properties.definition with triggers and actions",
+          "passed": true,
+          "evidence": "script_checks.json reports flow_json parses: true and has_definition: true. flow.json has a trigger with subscriptionRequest settings and actions such as Get_request and UpdateRecord."
+        },
+        {
+          "text": "Trigger is the Dataverse webhook on cr4f2_request with subscriptionRequest/message = 3 (Update)",
+          "passed": true,
+          "evidence": "flow.json uses operationId \"SubscribeWebhookTrigger\" with \"subscriptionRequest/message\": 3 and \"subscriptionRequest/entityname\": \"cr4f2_request\"."
+        },
+        {
+          "text": "Every connection reference uses runtimeSource embedded (not invoker)",
+          "passed": true,
+          "evidence": "All three connection references in flow.json have \"runtimeSource\": \"embedded\" (lines 5, 14, 23). None uses invoker."
+        },
+        {
+          "text": "The write of cr4f2_locked is guarded by a condition that reads cr4f2_locked (sentinel), so the self-write cannot loop",
+          "passed": true,
+          "evidence": "The trigger condition requires not(equals(triggerOutputs()?['body/cr4f2_locked'], true)). The enclosing If also reads body('Get_request')?['cr4f2_locked'] before the UpdateRecord that sets item/cr4f2_locked to true. cr4f2_locked is also left out of filteringattributes."
+        },
+        {
+          "text": "lint-flows.mjs reports no errors on flow.json",
+          "passed": true,
+          "evidence": "script_checks.json shows lint_flows ran: true, errors: 0, error_messages: []."
+        },
+        {
+          "text": "The row is re-read (GetItem/ListRecords) rather than relying only on the trigger payload",
+          "passed": true,
+          "evidence": "A Get_request action uses operationId \"GetItem\" and selects cr4f2_status, cr4f2_locked and cr4f2_approveremail. notes.md says \"every field the flow uses comes from Get_request\"."
+        },
+        {
+          "text": "Email and Teams are not chained so that one runs after the other has Failed",
+          "passed": true,
+          "evidence": "Send_email_to_approver and Post_Teams_message both have \"runAfter\": {}, so they run as parallel siblings. Only Lock_request runs after them. notes.md: \"a Teams failure doesn't stop the email, and the reverse holds too\"."
+        },
+        {
+          "text": "notes.md covers the self-trigger loop risk and why the guard prevents it",
+          "passed": true,
+          "evidence": "notes.md section 1, 'Loop protection', explains that the update trigger hands the flow the whole row, so a status-only check would re-fire. It also explains that cr4f2_locked is excluded from filteringattributes and that \"Writing locked = true is exactly what makes this condition false.\""
+        },
+        {
+          "text": "notes.md covers deployment: connection references/consent and importing deactivated or turning on to validate",
+          "passed": true,
+          "evidence": "notes.md deployment step 2 maps each connection reference to a service-account connection. Step 1 says StateCode 0 / StatusCode 1 \"ships it off for its first import\". Step 5 says \"Import, then turn the flow on. Activation is the only step that compiles the definition\"."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 9,
+        "failed": 0,
+        "total": 9,
+        "time_seconds": 133.9,
+        "tokens": 659609,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "flow.json parses as JSON and has properties.definition with triggers and actions",
+          "passed": true,
+          "evidence": "script_checks.json shows flow_json parses:true, has_definition:true. flow.json has properties.definition.triggers (When_a_request_status_changes) and actions (Get_request, Lock_request, etc.)."
+        },
+        {
+          "text": "Trigger is the Dataverse webhook on cr4f2_request with subscriptionRequest/message = 3 (Update)",
+          "passed": true,
+          "evidence": "The trigger is OpenApiConnectionWebhook with operationId SubscribeWebhookTrigger, \"subscriptionRequest/message\": 3 and \"subscriptionRequest/entityname\": \"cr4f2_request\"."
+        },
+        {
+          "text": "Every connection reference uses runtimeSource embedded (not invoker)",
+          "passed": true,
+          "evidence": "All three connectionReferences (shared_commondataserviceforapps, shared_office365, shared_teams) have \"runtimeSource\": \"embedded\". None use invoker."
+        },
+        {
+          "text": "The write of cr4f2_locked is guarded by a condition that reads cr4f2_locked (sentinel), so the self-write cannot loop",
+          "passed": true,
+          "evidence": "The trigger condition is \"@and(equals(...cr4f2_status, 100000001), not(equals(triggerOutputs()?['body/cr4f2_locked'], true)))\", so it reads the sentinel that Lock_request sets with \"item/cr4f2_locked\": true. filteringattributes = cr4f2_status adds a second layer."
+        },
+        {
+          "text": "lint-flows.mjs reports no errors on flow.json",
+          "passed": true,
+          "evidence": "script_checks.json lint_flows: ran true, errors 0, error_messages []."
+        },
+        {
+          "text": "The row is re-read (GetItem/ListRecords) rather than relying only on the trigger payload",
+          "passed": true,
+          "evidence": "The Get_request action uses operationId GetItem with recordId from the trigger, and its description says \"Re-read the row: the update payload is not a reliable source for the other columns.\" Downstream values come from body('Get_request')."
+        },
+        {
+          "text": "Email and Teams are not chained so that one runs after the other has Failed",
+          "passed": true,
+          "evidence": "Send_approval_email and Post_Teams_chat_to_approver both have \"runAfter\": {} inside Has_approver_email. They are parallel siblings, not chained on Failed. notes.md: \"Email and Teams are parallel siblings.\""
+        },
+        {
+          "text": "notes.md covers the self-trigger loop risk and why the guard prevents it",
+          "passed": true,
+          "evidence": "notes.md \u00a71 'Loop protection' explains that the update trigger hands over the whole row, so a status-only guard \"would match again after the flow's own locked = true write\". It then explains how the filteringattributes and the cr4f2_locked <> true trigger condition stop this."
+        },
+        {
+          "text": "notes.md covers deployment: connection references/consent and importing deactivated or turning on to validate",
+          "passed": true,
+          "evidence": "notes.md deploy step 2 covers creating and binding the connection references at import, with a service-account owner. Step 6 says \"Import with the flow off for the first import, then turn it on once. Turning it on is the only server-side check of the definition.\""
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.875,
+        "passed": 7,
+        "failed": 1,
+        "total": 8,
+        "time_seconds": 190.0,
+        "tokens": 654200,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "verify-approve.mjs passes node --check (syntactically valid)",
+          "passed": true,
+          "evidence": "script_checks.json reports node_check ok: true with empty stderr."
+        },
+        {
+          "text": "Uses a persistent browser profile / saved auth state kept outside the repo",
+          "passed": true,
+          "evidence": "verify-approve.mjs uses chromium.launchPersistentContext(CFG.profile, ...), and the README says the session is kept in `~/.verify-approve-profile` (the home directory, outside the repo) and that the folder should 'never commit it'."
+        },
+        {
+          "text": "Locates the app inside its iframe (frames / frameLocator) rather than only the top page",
+          "passed": true,
+          "evidence": "appFrame() goes through page.frames(), skips page.mainFrame(), and returns the frame that holds canvas controls ('The app renders in an iframe')."
+        },
+        {
+          "text": "After filling the Comment box, blurs it (Tab) or otherwise commits the value before asserting/clicking",
+          "passed": true,
+          "evidence": "Line 383: `await box.fill(RUN_TAG); await page.keyboard.press('Tab');`, with a comment that a TextInput publishes .Value on blur. The empty-comment test at line 348 does the same."
+        },
+        {
+          "text": "Handles the stale cached player (old-version banner, cache disabled, or build-stamp check)",
+          "passed": true,
+          "evidence": "clearPlayerCache() deletes the IndexedDB databases, caches and service workers. ensureCurrent() handles the 'old version of this app' banner. BUILD_STAMP mismatch stops the run with exit code 2."
+        },
+        {
+          "text": "Confirms the effect in Dataverse by DEFAULT: the script queries the row through the Web API on every run (not behind an optional flag or a commented-out block) and fails when the row was not updated",
+          "passed": false,
+          "evidence": "The Dataverse query is optional and the default mode is read-only: the README says 'Optional but needed for a full PASS: Dataverse', and without it the script only records unverified('Dataverse not configured...') and can exit 3 'PASS IN THE APP ONLY'. A default run (without --allow-writes) never approves anything, so it never checks that a row was updated."
+        },
+        {
+          "text": "README states that an admin/owner session does not prove restrictions (non-admin needed)",
+          "passed": true,
+          "evidence": "README: 'If that account is an admin or the app owner, it passes every role or `Visible` gate... run it signed in as a non-admin approver and as a non-approver.'"
+        },
+        {
+          "text": "README or script addresses that the approval writes production data and how to restore/record it",
+          "passed": true,
+          "evidence": "README gates writes behind `--allow-writes` 'because this approval is real', offers `--restore` to write the original status and comment back through the Web API, and says report.json records 'which rows were changed'. The script adds 'left Approved - restore it' to the touched list."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.875,
+        "passed": 7,
+        "failed": 1,
+        "total": 8,
+        "time_seconds": 201.3,
+        "tokens": 487423,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "verify-approve.mjs passes node --check (syntactically valid)",
+          "passed": true,
+          "evidence": "script_checks.json reports node_check ok: true for verify-approve.mjs."
+        },
+        {
+          "text": "Uses a persistent browser profile / saved auth state kept outside the repo",
+          "passed": true,
+          "evidence": "verify-approve.mjs:52 sets `profileDir: cfg.profileDir ?? join(homedir(), '.canvas-browser-profile'), // outside the repo: holds live cookies`, and line 228 passes it to `chromium.launchPersistentContext(C.profileDir, ...)`."
+        },
+        {
+          "text": "Locates the app inside its iframe (frames / frameLocator) rather than only the top page",
+          "passed": true,
+          "evidence": "The app-finding helper loops `for (const f of page.frames())`, counts `div[data-control-name]` in each frame, and returns the best match. Its comment says \"the app renders in an iframe (sometimes cross-origin)\"."
+        },
+        {
+          "text": "After filling the Comment box, blurs it (Tab) or otherwise commits the value before asserting/clicking",
+          "passed": true,
+          "evidence": "verify-approve.mjs:349 and :376 call `await commentBox.press('Tab'); // TextInput publishes .Value on blur` before Approve is clicked."
+        },
+        {
+          "text": "Handles the stale cached player (old-version banner, cache disabled, or build-stamp check)",
+          "passed": true,
+          "evidence": "The script has `clearPlayerCache` (IndexedDB, Cache Storage and service workers, used with --fresh) and `handleStaleBanner`, which matches /old version of this app/ and clicks Refresh. A build-stamp check at :290-293 stops with CANNOT VERIFY when the stamp is not on screen."
+        },
+        {
+          "text": "Confirms the effect in Dataverse by DEFAULT: the script queries the row through the Web API on every run (not behind an optional flag or a commented-out block) and fails when the row was not updated",
+          "passed": false,
+          "evidence": "The Dataverse query is gated: `const dvEnabled = Boolean(C.dv && dvToken);` (:84). When the config or token is missing, the script only notes 'the database effect will NOT be checked (result at best PARTIAL)' and exits 3 instead of failing. So the Web API check is optional, not run every time."
+        },
+        {
+          "text": "README states that an admin/owner session does not prove restrictions (non-admin needed)",
+          "passed": true,
+          "evidence": "README.md:138-140 says: \"If that account is an admin, every gate passes. To check what an approver without admin rights sees, run it as that user. Dataverse privileges also need a test with a non-admin account\"."
+        },
+        {
+          "text": "README or script addresses that the approval writes production data and how to restore/record it",
+          "passed": true,
+          "evidence": "README.md:8 says: \"**It writes production data.** It approves a real request. It will not run without `--allow-writes`.\" README.md:39-41 says --restore patches the row back to its baseline. Without --restore, the script prints that the row was not restored and that the baseline is saved in report.json."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.444,
+        "passed": 4,
+        "failed": 5,
+        "total": 9,
+        "time_seconds": 130.3,
+        "tokens": 576611,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output .pa.yaml passes the bundled check-pa-yaml selftest rules (no colon-space in single-line values, no comments)",
+          "passed": true,
+          "evidence": "script_checks.json reports scrVendorSpend.pa.yaml as \"clean\": true, exit 0, with no findings."
+        },
+        {
+          "text": "The pre-existing 'Total open: ' colon-space defect in lblTotal is fixed",
+          "passed": true,
+          "evidence": "In outputs/scrVendorSpend.pa.yaml, lblTotal's Text is now a block scalar: `Text: |-` followed by `=\"Total open: \" & Text(gblSpendTotal, \"$#,##0.00\")`. notes.md item 4 describes this fix."
+        },
+        {
+          "text": "Search box is a TextInput using Value/Placeholder (not Default/HintText) and is read as .Value",
+          "passed": false,
+          "evidence": "txtVendorSearch is a `Classic/TextInput` that uses `Default: =\"\"` and `HintText: =\"Search vendor name\"`. The gallery reads it as `txtVendorSearch.Text`, not `.Value`."
+        },
+        {
+          "text": "ComboBox includes a ComboBoxDataField child naming the display field",
+          "passed": false,
+          "evidence": "cmbVendor is a `Classic/ComboBox` that sets only `DisplayFields: =[\"VendorName\"]`. It has no Children and no ComboBoxDataField."
+        },
+        {
+          "text": "Vendor picker does not load all ~3,500 vendors into a collection or Items without addressing the row/search-page limit (it is server-side searched/filtered, or the limit is explicitly handled)",
+          "passed": true,
+          "evidence": "The combo box gets its Items from `colSpendVendors`, which is built from open purchases rather than all Vendors. notes.md explains why: \"Binding it to all of Vendors would quietly hide many vendors\" (the 2,000-row cap and the ~900-item search issue)."
+        },
+        {
+          "text": "Gallery is filtered via a delegable query against the source rather than filtering a whole-table collection",
+          "passed": false,
+          "evidence": "The gallery Items is `Filter(colVendorSpend, ...)`. That filters an in-memory collection loaded in OnVisible by `ClearCollect(colVendorSpend, ForAll(Filter(Purchases, ...)))`, not a delegable query against Purchases."
+        },
+        {
+          "text": "notes.md mentions delegation and the 500/2,000-row limit",
+          "passed": true,
+          "evidence": "notes.md says: \"more open purchases than the app's data row limit (500 by default, 2,000 at most)\". It also says the proposed query \"runs fully on the server and has no row ceiling\", and the check steps mention \"delegation warnings\"."
+        },
+        {
+          "text": "notes.md says Sum (an aggregate) over the source does not delegate, as a separate point from lookups",
+          "passed": false,
+          "evidence": "notes.md never says Sum over the source fails to delegate. It only notes that gblSpendTotal can be incomplete because the collection is capped."
+        },
+        {
+          "text": "notes.md says filtering on a lookup's related column (e.g. Vendor.'Vendor Name') is not delegable, and the fix filters on the lookup itself or the vendor id",
+          "passed": false,
+          "evidence": "notes.md says filtering through a lookup in a Dataverse query \"compiles but fails when the app runs\", which is a runtime failure, not a delegation limit. The shipped fix filters an in-memory collection. Only the suggested future query uses `Vendor.Vendor = locVendorId`."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.667,
+        "passed": 6,
+        "failed": 3,
+        "total": 9,
+        "time_seconds": 129.6,
+        "tokens": 639532,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output .pa.yaml passes the bundled check-pa-yaml selftest rules (no colon-space in single-line values, no comments)",
+          "passed": true,
+          "evidence": "script_checks.json reports scrVendorSpend.pa.yaml as clean, exit 0, with no findings from check_pa_yaml."
+        },
+        {
+          "text": "The pre-existing 'Total open: ' colon-space defect in lblTotal is fixed",
+          "passed": true,
+          "evidence": "lblTotal now uses a block scalar: `Text: |-` followed by `=\"Total open: \" & Text(gblSpendTotal, ...)`. notes.md also says 'I moved it into a block scalar (`|-`)'."
+        },
+        {
+          "text": "Search box is a TextInput using Value/Placeholder (not Default/HintText) and is read as .Value",
+          "passed": true,
+          "evidence": "txtVendorSearch is `Control: TextInput` with `Placeholder:` and no Default or HintText. The gallery reads it as `txtVendorSearch.Value`, for example `IsBlank(txtVendorSearch.Value) || StartsWith(..., txtVendorSearch.Value)`."
+        },
+        {
+          "text": "ComboBox includes a ComboBoxDataField child naming the display field",
+          "passed": true,
+          "evidence": "cmbVendor has a child `cmbVendorNameField` with `Control: ComboBoxDataField`, `FieldDisplayName: =\"Vendor Name\"` and `FieldName: =\"new_vendorname\"` (flagged as a placeholder)."
+        },
+        {
+          "text": "Vendor picker does not load all ~3,500 vendors into a collection or Items without addressing the row/search-page limit (it is server-side searched/filtered, or the limit is explicitly handled)",
+          "passed": true,
+          "evidence": "The picker's Items is `Sort(Vendors, 'Vendor Name', SortOrder.Ascending)`, bound to the table rather than a collection. notes.md deals with the limit directly: it says to test a search past row 2,000 and gives a fallback, `Filter(Vendors, StartsWith('Vendor Name', txt.Value))`."
+        },
+        {
+          "text": "Gallery is filtered via a delegable query against the source rather than filtering a whole-table collection",
+          "passed": false,
+          "evidence": "The gallery's Items is `Filter(colSpend, ...)`, and colSpend comes from `ClearCollect(colSpend, Filter(Purchases, ...))`. That filters a collection loaded in memory, not a delegable query against Purchases. The delegable version appears only as a future option in notes.md."
+        },
+        {
+          "text": "notes.md mentions delegation and the 500/2,000-row limit",
+          "passed": true,
+          "evidence": "notes.md says the lookup filter 'is not delegable' and that `ClearCollect` brings in 'at most the app's data row limit (500 by default, 2,000 maximum)'."
+        },
+        {
+          "text": "notes.md says Sum (an aggregate) over the source does not delegate, as a separate point from lookups",
+          "passed": false,
+          "evidence": "notes.md never says that Sum over the source does not delegate. It recommends taking 'the total from a delegated `Sum` or a rollup instead of `Sum(colSpend)`', which suggests Sum delegates. That is the opposite of the required point."
+        },
+        {
+          "text": "notes.md says filtering on a lookup's related column (e.g. Vendor.'Vendor Name') is not delegable, and the fix filters on the lookup itself or the vendor id",
+          "passed": false,
+          "evidence": "notes.md does say reading `Vendor.'Vendor Name'` 'inside a server-side Dataverse filter ... is not delegable'. But its fix for the name search is a new copied text column, not filtering on the lookup or the vendor id, and the delivered gallery still filters colSpend in memory."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 5,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 128.4,
+        "tokens": 462160,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "review.md identifies a loop BETWEEN the two flows (each one's write starts the other), naming both flows",
+          "passed": true,
+          "evidence": "review.md \u00a71 is titled \"Blocker: the two flows trigger each other forever\". Its diagram shows RecalcOrder updating cr4f2_order, which starts CopyDiscount, which updates every cr4f2_orderline, which starts RecalcOrder again. Both flows are named."
+        },
+        {
+          "text": "review.md explains why each flow's own condition does not stop it (the If runs inside an already-started run, and/or the trigger has no filtering attributes, and/or utcNow() makes every write a change)",
+          "passed": true,
+          "evidence": "review.md gives all three reasons. The conditions \"are If actions inside the flows, not trigger conditions. By the time an If runs, the run has already started\". It also says \"Neither Update trigger has `filteringattributes`\" and \"RecalcOrder always writes `cr4f2_recalculatedon = utcNow()`, so every pass really changes the order\"."
+        },
+        {
+          "text": "Both fixed flows set subscriptionRequest/filteringattributes on their update trigger",
+          "passed": true,
+          "evidence": "fixed/OrderChanged-CopyDiscount.json:41 has \"subscriptionRequest/filteringattributes\": \"cr4f2_discount\". fixed/OrderLineChanged-RecalcOrder.json:41 has \"subscriptionRequest/filteringattributes\": \"cr4f2_amount,statecode,cr4f2_order\"."
+        },
+        {
+          "text": "The fix breaks the cycle with a trigger-level condition or column filtering (not only an inner If)",
+          "passed": true,
+          "evidence": "The cycle is broken by column filtering on the triggers: RecalcOrder writes cr4f2_total/recalculatedon, which is not in CopyDiscount's cr4f2_discount filter, and CopyDiscount writes line cr4f2_discount, which is not in RecalcOrder's filter. review.md calls this the \"Primary loop break: `filteringattributes`\". It also moves the conditions into trigger conditions."
+        },
+        {
+          "text": "lint-flows.mjs run over BOTH fixed flows together reports no errors (no trigger-cycle, no update-trigger-unfiltered)",
+          "passed": true,
+          "evidence": "In script_checks.json, lint_flows_fixed_together ran over both files with \"errors\": 0 and empty error_messages."
+        },
+        {
+          "text": "Both fixed files still parse as JSON with properties.definition, and keep the original purpose (total recalculated, discount copied)",
+          "passed": true,
+          "evidence": "script_checks.json shows both files with parses: true and has_definition: true. RecalcOrder still recalculates the total (Sum_active_line_amounts FetchXML sum, then writes item/cr4f2_total), and CopyDiscount still copies item/cr4f2_discount from the trigger order to its lines."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 5,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 154.8,
+        "tokens": 472336,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "review.md identifies a loop BETWEEN the two flows (each one's write starts the other), naming both flows",
+          "passed": true,
+          "evidence": "review.md finding 1 is titled \"the two flows loop forever\" and walks the cycle: \"Someone edits an order line. **RecalcOrder** runs and updates the order... That update fires **CopyDiscount**... Each of those N line writes fires **RecalcOrder** again.\""
+        },
+        {
+          "text": "review.md explains why each flow's own condition does not stop it (the If runs inside an already-started run, and/or the trigger has no filtering attributes, and/or utcNow() makes every write a change)",
+          "passed": true,
+          "evidence": "Under \"Why the conditions don't stop it\", review.md says \"The Update triggers had no `filteringattributes`\" and \"Both conditions are `If` actions inside the flow, not trigger conditions. The run has already started, and is billed, before they are checked.\""
+        },
+        {
+          "text": "Both fixed flows set subscriptionRequest/filteringattributes on their update trigger",
+          "passed": true,
+          "evidence": "OrderChanged-CopyDiscount.json:41 has \"subscriptionRequest/filteringattributes\": \"cr4f2_discount,cr4f2_status\". OrderLineChanged-RecalcOrder.json:46 has \"subscriptionRequest/filteringattributes\": \"cr4f2_amount,statecode,cr4f2_order\"."
+        },
+        {
+          "text": "The fix breaks the cycle with a trigger-level condition or column filtering (not only an inner If)",
+          "passed": true,
+          "evidence": "The cycle is broken by column filtering: RecalcOrder ignores cr4f2_discount and CopyDiscount ignores cr4f2_total and cr4f2_recalculatedon. Trigger conditions were also added in both files (line 26-28), for example \"@not(equals(triggerOutputs()?['body/cr4f2_status'], 100000002))\"."
+        },
+        {
+          "text": "lint-flows.mjs run over BOTH fixed flows together reports no errors (no trigger-cycle, no update-trigger-unfiltered)",
+          "passed": true,
+          "evidence": "In script_checks.json, lint_flows_fixed_together shows ran: true over both files, with errors: 0 and error_messages: []."
+        },
+        {
+          "text": "Both fixed files still parse as JSON with properties.definition, and keep the original purpose (total recalculated, discount copied)",
+          "passed": true,
+          "evidence": "script_checks.json shows parses: true and has_definition: true for both files. RecalcOrder still writes \"item/cr4f2_total\" (now a sum of amounts), and CopyDiscount still writes \"item/cr4f2_discount\": \"@triggerOutputs()?['body/cr4f2_discount']\" to the lines."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 6,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 224.5,
+        "tokens": 583967,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "flow.json parses and its trigger is an Update on cr4f2_leaverequest with filteringattributes including cr4f2_status",
+          "passed": true,
+          "evidence": "script_checks.json reports \"parses\": true. In flow.json the trigger has \"subscriptionRequest/message\": 3 (Update), \"subscriptionRequest/entityname\": \"cr4f2_leaverequest\" and \"subscriptionRequest/filteringattributes\": \"cr4f2_status\"."
+        },
+        {
+          "text": "Live sending requires an explicit mode value (e.g. a NotifyMode setting equal to an exact word); anything else, including a missing or blank setting, is treated as test",
+          "passed": true,
+          "evidence": "Is_live is `and(equals(trim(coalesce(first(...Read_notify_mode...)?['cr4f2_value'], '')), 'Production'), equals(outputs('Pinned_testers'), ''))`. A missing or blank row coalesces to '' and counts as test mode, and the match is case-sensitive."
+        },
+        {
+          "text": "In test mode BOTH the To and the Cc resolve only from the allowlist (no expression path addresses cr4f2_requesteremail or cr4f2_manageremail unless live)",
+          "passed": true,
+          "evidence": "Safe_to_requester = `if(outputs('Is_live'), outputs('Real_to_requester'), outputs('Allowlist'))` and Safe_to_manager_cc = `if(outputs('Is_live'), outputs('Real_cc_manager'), '')`. Send_submitted_email uses only these for To and Cc. In test mode the Cc is blank, so it resolves to no address at all and never to a real one."
+        },
+        {
+          "text": "An empty or missing allowlist in test mode sends nothing (it does not fall back to the real recipients)",
+          "passed": true,
+          "evidence": "Allowlist is the settings value intersected with Pinned_testers, and is never a fallback to the real recipients. Allowed_to_send requires `not equals(outputs('Safe_to_requester'), '')`, so an empty allowlist sends nothing. notes.md negative test (c) expects \"nothing sent\"."
+        },
+        {
+          "text": "Test-mode messages are marked (subject prefix or banner naming the intended recipient)",
+          "passed": true,
+          "evidence": "The subject is prefixed `if(outputs('Is_live'), '', 'TEST - NOT A REAL REQUEST - ')`. The body banner says \"In production it would have gone to: ', outputs('Real_to_requester') ... ', with Cc to: ', outputs('Real_cc_manager')\"."
+        },
+        {
+          "text": "lint-flows.mjs reports no errors on flow.json",
+          "passed": true,
+          "evidence": "script_checks.json lint_flows shows \"errors\": 0 for flow.json."
+        },
+        {
+          "text": "notes.md says how to prove nobody else was emailed from evidence (e.g. reading the run history's actual recipients), not only from reading the source",
+          "passed": true,
+          "evidence": "In notes.md, under \"Proving before go-live that nobody else was emailed\", item 3 says to read every run's `Send_submitted_email` inputsLink To/Cc, with a floor of runs > 0. Item 4 adds an Exchange message trace on the sender address. Both are evidence-based checks, not source review."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 6,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 249.2,
+        "tokens": 645068,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "flow.json parses and its trigger is an Update on cr4f2_leaverequest with filteringattributes including cr4f2_status",
+          "passed": true,
+          "evidence": "script_checks.json reports that flow.json parses (\"parses\": true). The trigger has \"subscriptionRequest/message\": 3, \"subscriptionRequest/entityname\": \"cr4f2_leaverequest\" and \"subscriptionRequest/filteringattributes\": \"cr4f2_status\"."
+        },
+        {
+          "text": "Live sending requires an explicit mode value (e.g. a NotifyMode setting equal to an exact word); anything else, including a missing or blank setting, is treated as test",
+          "passed": true,
+          "evidence": "Is_live = and(equals(outputs('Release_pin'), 'LIVE'), equals(outputs('Mode_setting'), 'Production')). Mode_setting becomes '' when the NotifyMode row is missing or duplicated, so a blank, missing or misspelled setting means test mode. Release_pin is pinned to \"TEST\"."
+        },
+        {
+          "text": "In test mode BOTH the To and the Cc resolve only from the allowlist (no expression path addresses cr4f2_requesteremail or cr4f2_manageremail unless live)",
+          "passed": true,
+          "evidence": "Safe_to_requester = if(outputs('Is_live'), outputs('Real_to'), outputs('Allowlist')) and Safe_to_manager_cc = if(outputs('Is_live'), outputs('Real_cc'), ''). The send uses only these for To and Cc, so Real_to and Real_cc (built from requesteremail and manageremail) are reachable only in the live branch."
+        },
+        {
+          "text": "An empty or missing allowlist in test mode sends nothing (it does not fall back to the real recipients)",
+          "passed": true,
+          "evidence": "The Allowlist Compose returns '' when there are no valid entries. The send is wrapped in Allowed_send_requester, which requires not(equals(outputs('Safe_to_requester'), '')). Test mode never falls back to Real_to."
+        },
+        {
+          "text": "Test-mode messages are marked (subject prefix or banner naming the intended recipient)",
+          "passed": true,
+          "evidence": "The subject starts with @{outputs('Test_prefix')} ('TEST - NOT LIVE - ' according to the notes). Test_banner adds 'TEST MESSAGE ... In live mode it would have gone To: <Real_to> Cc: <Real_cc>' to the body."
+        },
+        {
+          "text": "lint-flows.mjs reports no errors on flow.json",
+          "passed": true,
+          "evidence": "script_checks.json lint_flows: \"errors\": 0 for flow.json. The --require-safe-recipients run also printed \"ok    flow\"."
+        },
+        {
+          "text": "notes.md says how to prove nobody else was emailed from evidence (e.g. reading the run history's actual recipients), not only from reading the source",
+          "passed": true,
+          "evidence": "Section B of notes.md, 'From run history', says to read the Safe_to_* outputs and Send_submitted_email inputs for every run through the runs/actions API, with pass criteria and minimum run counts. Section C adds an Exchange message trace (Get-MessageTraceV2) and the sender's Sent Items as evidence that doesn't come from the source."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 7,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.833,
+        "passed": 5,
+        "failed": 1,
+        "total": 6,
+        "time_seconds": 75.1,
+        "tokens": 259860,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The output .pa.yaml passes the bundled check-pa-yaml rules (no colon-space in single-line values, no comments)",
+          "passed": false,
+          "evidence": "script_checks.json reports check_pa_yaml clean:false with exit 2. It flags comments at lines 15-17, 28, 80 and 93-95 of scrRequests.pa.yaml, e.g. '# List: one fixed-height row per request...'."
+        },
+        {
+          "text": "check-canvas-format.mjs with the provided column lengths reports no text-overflow error on the output",
+          "passed": true,
+          "evidence": "check_canvas_format_with_schema reports \"text_overflow_errors\": []. notes.md also says the fixed screen has 0 overflow errors."
+        },
+        {
+          "text": "The full description remains reachable (tooltip, detail view or a flexible-height row), not just truncated",
+          "passed": true,
+          "evidence": "Each row label has a Tooltip holding the full value, e.g. 'Tooltip: =ThisItem.Description'. There is also a detail pane, 'lblDetailDescription' with 'Text: =galRequests.Selected.Description', that shows the full text."
+        },
+        {
+          "text": "Clamped values show a visible truncation marker (e.g. an ellipsis) rather than a silent cut",
+          "passed": true,
+          "evidence": "Clamped values append an ellipsis marker, e.g. 'If(Len(v) > 82, Left(v, 79) & \"...\", v)', and Title and Requester do the same."
+        },
+        {
+          "text": "No label inside the gallery row relies on Overflow.Scroll",
+          "passed": true,
+          "evidence": "No label in the gallery row (lblReqTitle, lblReqRequester, lblReqCategory, lblReqDescription) sets Overflow. Overflow.Scroll appears only on lblDetailDescription, which sits outside the gallery."
+        },
+        {
+          "text": "notes.md explains the approach chosen for long text and its trade-off",
+          "passed": true,
+          "evidence": "notes.md describes clamping with \"...\" plus tooltips and a detail pane. It gives the trade-off: tooltips don't appear on touch devices, so the scrolling detail pane covers them, and the clamp lengths are estimates that may need adjusting."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 7,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 104.8,
+        "tokens": 522974,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The output .pa.yaml passes the bundled check-pa-yaml rules (no colon-space in single-line values, no comments)",
+          "passed": true,
+          "evidence": "script_checks.json check_pa_yaml for scrRequests.pa.yaml reports \"clean\": true, exit 0, with no findings."
+        },
+        {
+          "text": "check-canvas-format.mjs with the provided column lengths reports no text-overflow error on the output",
+          "passed": true,
+          "evidence": "script_checks.json check_canvas_format_with_schema reports \"text_overflow_errors\": []. Its only other finding is a filter suggestion, which is not a text-overflow error."
+        },
+        {
+          "text": "The full description remains reachable (tooltip, detail view or a flexible-height row), not just truncated",
+          "passed": true,
+          "evidence": "scrRequests.pa.yaml adds lblDetailDescription, a detail-pane label outside the gallery, with Text: =galRequests.Selected.Description and Overflow.Scroll. Row labels use Select(Parent), so clicking a row opens its full description there."
+        },
+        {
+          "text": "Clamped values show a visible truncation marker (e.g. an ellipsis) rather than a silent cut",
+          "passed": true,
+          "evidence": "In the gallery, the Title, Requester and Description labels use If(Len(v) > N, Left(v, N-3) & \"...\", v), so a clamped value ends in \"...\". Category is not clamped because its row label is wide enough for the longest value."
+        },
+        {
+          "text": "No label inside the gallery row relies on Overflow.Scroll",
+          "passed": true,
+          "evidence": "The only Overflow.Scroll is on lblDetailDescription, which is a screen-level child outside galRequests. None of the four gallery row labels (lblReqTitle, lblReqRequester, lblReqCategory, lblReqDescription) set Overflow."
+        },
+        {
+          "text": "notes.md explains the approach chosen for long text and its trade-off",
+          "passed": true,
+          "evidence": "notes.md explains the approach: values are clamped with \"...\", Title and Requester get tooltips, and a detail pane shows the full text. It names a trade-off: Description has no tooltip \"because a 4,000-character hover box would be unreadable\", and the clamp limits are conservative, \"so a few rows may cut a little earlier than strictly needed.\""
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 8,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.714,
+        "passed": 5,
+        "failed": 2,
+        "total": 7,
+        "time_seconds": 155.1,
+        "tokens": 676118,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The gallery can be narrowed by Category (a dropdown or similar control feeding Items)",
+          "passed": true,
+          "evidence": "scrEquipment.pa.yaml line 61 defines a Category dropdown, eqpCategoryFilter, with `Items: =Choices('Equipment'.Category)`. Line 221 feeds it into the gallery's Items: `IsBlank(eqpCategoryFilter.Selected.Value) || Category = eqpCategoryFilter.Selected.Value`."
+        },
+        {
+          "text": "The gallery can be narrowed by Status",
+          "passed": true,
+          "evidence": "Line 77 defines a Status dropdown, eqpStatusFilter, with `Items: =Choices('Equipment'.Status)`. Line 222 applies it in the gallery's Filter: `IsBlank(eqpStatusFilter.Selected.Value) || Status = eqpStatusFilter.Selected.Value`."
+        },
+        {
+          "text": "There is a search on Name feeding the gallery's Items",
+          "passed": true,
+          "evidence": "eqpSearch (line 38, hint 'Search by name (starts with)') feeds the gallery's Items through `q: Trim(eqpSearch.Text)` and `IsBlank(q) || StartsWith(Name, q)` (lines 216 and 224)."
+        },
+        {
+          "text": "The filters offer an 'all' state (blank or an explicit All) so the unfiltered list is reachable",
+          "passed": true,
+          "evidence": "Each dropdown has `Default: =Blank()`, and each predicate begins with `IsBlank(...) ||`. notes.md says each filter 'starts empty, and empty means All', and a Clear filters button resets them all (lines 112-115)."
+        },
+        {
+          "text": "The Items query stays delegable for ~1,800 rows (Filter on the source, no whole-table collection), or the limit is explicitly handled",
+          "passed": true,
+          "evidence": "The gallery's Items runs `Filter('Equipment', ...)` directly on the Dataverse source (line 220), using equality and StartsWith predicates. There is no ClearCollect. notes.md says the gallery is 'bound directly to the Dataverse Equipment table (not to a collection)' and names the 500/2,000 row limit."
+        },
+        {
+          "text": "The output passes the bundled check-pa-yaml rules",
+          "passed": false,
+          "evidence": "In script_checks.json, check_pa_yaml has clean=false and exit 2. Line 93, `{Value: l.Name, Id: l.Location}`, has a colon-space inside a single-line Power Fx value. The final response wrongly says the YAML syntax check passed."
+        },
+        {
+          "text": "notes.md states which filters/sort were chosen as defaults and invites changes (or asks which ones are wanted)",
+          "passed": false,
+          "evidence": "notes.md lists the chosen filters (search, Category, Status, Location) and the 'sort by Name, A to Z' under 'Filters, applied by default', and explains that 'Nobody said how this list should be narrowed'. It never invites changes to the filter or sort choices and never asks which ones are wanted. Its only invitations are about names, theme tokens and modern controls ('tell me and I will convert it')."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 8,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.857,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 147.6,
+        "tokens": 629950,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The gallery can be narrowed by Category (a dropdown or similar control feeding Items)",
+          "passed": true,
+          "evidence": "scrEquipment.pa.yaml: the eqpCategory dropdown has `Items: =Choices(Equipment.Category)`, and the gallery Items include `IsBlank(eqpCategory.Selected) || Category = eqpCategory.Selected.Value`."
+        },
+        {
+          "text": "The gallery can be narrowed by Status",
+          "passed": true,
+          "evidence": "scrEquipment.pa.yaml: the eqpStatus dropdown (`Choices(Equipment.Status)`) feeds the gallery Items through `IsBlank(eqpStatus.Selected) || Status = eqpStatus.Selected.Value`."
+        },
+        {
+          "text": "There is a search on Name feeding the gallery's Items",
+          "passed": true,
+          "evidence": "The gallery Items in scrEquipment.pa.yaml include `IsBlank(eqpSearch.Text) || StartsWith(Name, eqpSearch.Text)`."
+        },
+        {
+          "text": "The filters offer an 'all' state (blank or an explicit All) so the unfiltered list is reachable",
+          "passed": true,
+          "evidence": "Each dropdown sets `AllowEmptySelection: =true` and `Default: =Blank()`, and its caption reads \"(blank = all)\". The eqpClear button resets every filter. notes.md says they 'start empty, and empty means All'."
+        },
+        {
+          "text": "The Items query stays delegable for ~1,800 rows (Filter on the source, no whole-table collection), or the limit is explicitly handled",
+          "passed": true,
+          "evidence": "The gallery Items are `Sort(Filter(Equipment, ...), Name, ...)` bound directly to the source with StartsWith, equality and IsBlank clauses. notes.md says 'Bound **directly** to `Filter(Equipment, ...)`, with no collection'. The only non-delegable piece is the small Locations dropdown, and the notes call it out."
+        },
+        {
+          "text": "The output passes the bundled check-pa-yaml rules",
+          "passed": true,
+          "evidence": "script_checks.json shows check_pa_yaml for scrEquipment.pa.yaml with clean: true, exit 0 and no findings."
+        },
+        {
+          "text": "notes.md states which filters/sort were chosen as defaults and invites changes (or asks which ones are wanted)",
+          "passed": false,
+          "evidence": "notes.md describes the chosen filters (Category, Status, Location) and the sort ('Name A to Z'). It never asks the user which filters or sort they want or invites changes to them. The only 'if your\u2026' line is about renaming a column's display name."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 9,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 89.8,
+        "tokens": 358934,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "plan.md asks for the brand/theme inputs (at least three of: palette, colours to avoid, fonts, logo or imagery, iconography or symbols, light/dark) before any screen is built",
+          "passed": true,
+          "evidence": "plan.md section 2.2 'Theme intake (before step 2, and so before any screen in step 7)' asks for the palette, including colours the brand forbids, plus fonts, logo and imagery, icons and symbolism, and light/dark mode."
+        },
+        {
+          "text": "The build order puts theme definition before the first screen",
+          "passed": true,
+          "evidence": "Step 2 'Theme intake recorded' and Step 6 'Theme tokens in App.pa.yaml' both come before Step 7, which builds the screens. The plan says the theme step 'happens before any screen exists'."
+        },
+        {
+          "text": "Colours and fonts are defined once (theme tokens, named formulas or variables) and referenced by screens, not literal per control",
+          "passed": true,
+          "evidence": "Step 6: 'Define every colour and font from theme.json once, as named formulas or tokens', and 'check-canvas-format.mjs fails any screen that uses a literal colour or font'. Step 7 says every screen is 'built on tokens only'."
+        },
+        {
+          "text": "plan.md asks what the landing page should show per role or audience",
+          "passed": true,
+          "evidence": "Section 2.2 asks for the 'Home page: what each role must see first', with the example 'staff see \"My upcoming bookings\" first, admins see \"Today's room usage\"'."
+        },
+        {
+          "text": "plan.md asks which filters, search or grouping the room list needs (or states a default)",
+          "passed": true,
+          "evidence": "L1 asks 'Which columns do people scan by?' and gives a default: filters for building, minimum capacity, equipment and accessible, plus a name search, sorting, a row count and an 'available at <time>' filter."
+        },
+        {
+          "text": "The build order creates the Dataverse schema before the screens that bind it",
+          "passed": true,
+          "evidence": "Step 3 creates the Rooms and Bookings schema. Data sources are added in Step 5 and screens are built in Step 7, so the schema comes first."
+        },
+        {
+          "text": "plan.md includes verifying in the published app, not only in Studio",
+          "passed": true,
+          "evidence": "Step 8: 'Perform the task in the published app with Playwright as the standard user... then query the Bookings table to confirm the rows'. S1 also requires this in the published app."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 9,
+      "configuration": "with_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.857,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 64.3,
+        "tokens": 247659,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "plan.md asks for the brand/theme inputs (at least three of: palette, colours to avoid, fonts, logo or imagery, iconography or symbols, light/dark) before any screen is built",
+          "passed": true,
+          "evidence": "plan.md section 1a is titled 'Theme and look. I need this before I build any screen'. It asks for the palette and forbidden colours (T1), fonts (T2), logo and imagery (T3), icons and symbols (T4), and light/dark (T8)."
+        },
+        {
+          "text": "The build order puts theme definition before the first screen",
+          "passed": true,
+          "evidence": "The build order runs 'Phase 1: Theme intake \u2192 canvas/theme.json' and 'Phase 4: Theme tokens in App.pa.yaml' before 'Phase 5: Screens. Every screen uses only the tokens'."
+        },
+        {
+          "text": "Colours and fonts are defined once (theme tokens, named formulas or variables) and referenced by screens, not literal per control",
+          "passed": true,
+          "evidence": "Phase 4 says 'Define every colour and font token once (named formulas)', and Phase 5 says 'Every screen uses only the tokens', with a format check for 'no literal colours' (R1)."
+        },
+        {
+          "text": "plan.md asks what the landing page should show per role or audience",
+          "passed": false,
+          "evidence": "T5 asks only 'Home screen: what must someone see first?' and gives one default for everyone. Staff and facilities admin roles are defined, but the plan never asks what the landing page should show for each role or audience."
+        },
+        {
+          "text": "plan.md asks which filters, search or grouping the room list needs (or states a default)",
+          "passed": true,
+          "evidence": "Section 1c, L1\u2013L3, asks 'What do people filter the room list by?', about search and sort, and about an availability filter, with defaults such as 'Building, floor, minimum capacity, AV, step-free'."
+        },
+        {
+          "text": "The build order creates the Dataverse schema before the screens that bind it",
+          "passed": true,
+          "evidence": "'Phase 2: Schema (Dataverse), before any screen binds to it' comes before Phase 5, where the screens are built."
+        },
+        {
+          "text": "plan.md includes verifying in the published app, not only in Studio",
+          "passed": true,
+          "evidence": "Phase 6 says 'Use Playwright on the published app (after refreshing past any cached build and confirming the build stamp), signed in as a staff test user', and repeats the test as a facilities admin."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.375,
+        "passed": 3,
+        "failed": 5,
+        "total": 8,
+        "time_seconds": 141.9,
+        "tokens": 115737,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Names at least two distinct candidate causes among: stale cached column list, stale cached choice/option-set members, the imported app not running the new YAML (LoadFromYaml false / old build), a stale cached player build",
+          "passed": true,
+          "evidence": "diagnosis.md names cause D1, \"Client caching. Users with the app open\u2026 keep the version they loaded\" (a stale cached player build). It also names D3, \"Git didn't contain the latest app\u2026 the import shipped a mix\" (the imported app is an old build)."
+        },
+        {
+          "text": "Gives at least two read-only checks to run before changing anything, and for EACH check says which named cause it confirms or rules out (a check that only applies to an unnamed or different cause does not count)",
+          "passed": true,
+          "evidence": "Check 6 (\"Session details\u2026 compare it with Apps \u2192 Details \u2192 Versions\") is tied to cause D, client caching. Check 7 (\"Compare the git commit time of the canvas source with the time you last saved in Studio (D3)\") is tied to the stale-git/old-build cause."
+        },
+        {
+          "text": "Explains that Studio Preview and the compile resolve against live metadata while the published app uses the cached copy in the app",
+          "passed": false,
+          "evidence": "The response says Studio type-checks \"against the metadata the app had in the source (dev) environment\" and contrasts that with the target environment. It never says the published app uses a cached copy of the metadata stored inside the app."
+        },
+        {
+          "text": "Explains the silent no-op (a failing step abandons the rest of the formula without a message) and recommends surfacing errors (IfError/Notify/Errors())",
+          "passed": false,
+          "evidence": "It recommends IfError/Notify. But it says \"an unhandled Patch error shows a red banner\" and blames the silence on swallowed errors or guards. It never explains that a failing step abandons the rest of the formula without a message."
+        },
+        {
+          "text": "Fix includes refreshing the data source in Studio (remove and re-add, or equivalent) followed by Save AND Publish from Studio, then re-shipping from git",
+          "passed": false,
+          "evidence": "No step refreshes the data source in Studio, and nothing says to remove and re-add it, then Save and Publish. The fix is only \"export, commit, rebuild and re-import\" through the solution."
+        },
+        {
+          "text": "States that a schema change and the canvas change depending on it should not ship in a single step",
+          "passed": true,
+          "evidence": "Prevention item 8: \"Ship schema before behaviour\u2026 release new columns, choice values and role changes first. Verify them in the target. Release the app change that depends on them afterwards.\""
+        },
+        {
+          "text": "Prevention includes an automated pre-ship check comparing live columns and choice members with the app's cached metadata",
+          "passed": false,
+          "evidence": "Prevention includes Solution Checker, a PR checklist and a post-deploy smoke test. None of these is an automated check comparing live columns and choice members with the app's cached metadata."
+        },
+        {
+          "text": "Verification: perform the task in the published app on a fresh (uncached) player and confirm the written row in Dataverse",
+          "passed": false,
+          "evidence": "The Verify section has the user submit as a non-admin and \"confirm a row is created with Reviewer set and Status = Escalated\". It never says to use a fresh, uncached player; telling users to close and reopen the app is a separate step for users, not part of verification."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.375,
+        "passed": 3,
+        "failed": 5,
+        "total": 8,
+        "time_seconds": 128.8,
+        "tokens": 112471,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Names at least two distinct candidate causes among: stale cached column list, stale cached choice/option-set members, the imported app not running the new YAML (LoadFromYaml false / old build), a stale cached player build",
+          "passed": true,
+          "evidence": "diagnosis.md names cause C, 'Stale app version on the client (cached player, browser, Teams or mobile cache)'. It also names cause D, where 'the .msapp committed to git is older than what you tested in Studio'. That is two of the listed causes: a stale cached player build and an imported app not running the new build."
+        },
+        {
+          "text": "Gives at least two read-only checks to run before changing anything, and for EACH check says which named cause it confirms or rules out (a check that only applies to an unnamed or different cause does not count)",
+          "passed": true,
+          "evidence": "Step 1 is read-only and is labelled as separating causes C and D, for example: 'Same ID, older published date for some users \u2192 client cache. That is cause C' and 'layout is old \u2192 the git build is stale. That is cause D'. Step 3 is headed 'Check Dataverse metadata in the target (confirms or rules out B)'. Each check is tied to a cause the response names."
+        },
+        {
+          "text": "Explains that Studio Preview and the compile resolve against live metadata while the published app uses the cached copy in the app",
+          "passed": false,
+          "evidence": "The response never says the published app uses a metadata copy cached inside the app. It only says 'The app compiles against dev metadata', and it puts the Studio/published difference down to environments and security privileges."
+        },
+        {
+          "text": "Explains the silent no-op (a failing step abandons the rest of the formula without a message) and recommends surfacing errors (IfError/Notify/Errors())",
+          "passed": false,
+          "evidence": "The response does recommend IfError, Notify and App.OnError. But it explains the silence as error handling that swallows the error, and even says that without such handling 'a failed Patch in a published app would normally show a red banner'. It never explains that a failing step abandons the rest of the formula with no message."
+        },
+        {
+          "text": "Fix includes refreshing the data source in Studio (remove and re-add, or equivalent) followed by Save AND Publish from Studio, then re-shipping from git",
+          "passed": false,
+          "evidence": "The fix never refreshes, removes or re-adds the data source in Studio. Cause D says 'Open the app in dev Studio, then Save and Publish', then export and re-import, but there is no data-source refresh step."
+        },
+        {
+          "text": "States that a schema change and the canvas change depending on it should not ship in a single step",
+          "passed": true,
+          "evidence": "Prevention step 1 says: 'Ship schema and roles first, verify them, then ship the app change.' The final response also says to 'ship database changes before the app changes that depend on them.'"
+        },
+        {
+          "text": "Prevention includes an automated pre-ship check comparing live columns and choice members with the app's cached metadata",
+          "passed": false,
+          "evidence": "No automated check compares live columns and choice members with the app's cached metadata. The only CI check proposed is 'that the built .msapp / .pa.yaml contains the changes in the PR', plus Solution Checker."
+        },
+        {
+          "text": "Verification: perform the task in the published app on a fresh (uncached) player and confirm the written row in Dataverse",
+          "passed": false,
+          "evidence": "Verification repeats Live Monitor in the published app as a non-admin user and confirms 'the row in the target has Reviewer set and Status = Escalated'. It never requires a fresh, uncached player session."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 10,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.857,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 119.2,
+        "tokens": 109979,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Proposes separate documents per audience: at least the submitting user, the approver/manager, the administrator, and a developer/platform guide",
+          "passed": true,
+          "evidence": "In handover.md \u00a72, the audience table proposes separate documents: \"D1 Employee quick-start\" for submitters, \"D2 Approver guide\", \"D3 Finance admin guide\", and \"D6 Technical reference; D7 Deployment and ALM guide\" for the future maker or owner."
+        },
+        {
+          "text": "The developer/platform guide outline covers environment/solution, Dataverse tables, security roles, connections or connection references, and each flow (trigger and what it writes/sends)",
+          "passed": true,
+          "evidence": "The D6 outline covers the solution and environments (\u00a71), a per-table data dictionary (\u00a73), the three roles in a privilege matrix (\u00a74), and connection references (\u00a77). \u00a76 gives F1, F2 and F3 each a subsection with \"Trigger (table, change type, filter columns...)\", a step outline and connection references, and A5 says what each flow writes or sends."
+        },
+        {
+          "text": "Screenshots are taken per role in the published app",
+          "passed": true,
+          "evidence": "In \u00a73.2: \"Run each task end to end in the pilot environment with a test account **for each role** and take screenshots as you go.\""
+        },
+        {
+          "text": "Screenshots use test data, not real people's data (or the guides are kept out of public git for that reason)",
+          "passed": true,
+          "evidence": "\u00a73.1 rule 3: \"Screenshots from the pilot environment, using test data. Never show real employee names or amounts.\" The \u00a76 risk table also lists \"Real personal data appears in screenshots\"."
+        },
+        {
+          "text": "States that statements must come from the app source or the live environment (button names as the controls say), not memory",
+          "passed": true,
+          "evidence": "\u00a73.1 rule 6: \"Write the technical docs from the artefacts, not from memory\". \u00a73.2 says to build D6 from the unmanaged solution export (customizations.xml, Workflows/*.json) and to write the user guides by running each task in the live pilot environment. Button names are not mentioned explicitly."
+        },
+        {
+          "text": "Documents carry a version and issue date (or are tied to a release/build)",
+          "passed": true,
+          "evidence": "\u00a73.1 rule 5: \"Every document has a header block: owner, audience, version, last reviewed date, related docs.\""
+        },
+        {
+          "text": "Includes a check that every screen and role is covered (an inventory or checklist)",
+          "passed": false,
+          "evidence": "There is no check that the guides cover every screen and every role. The D8 asset inventory lists components and owners, and the \u00a77 done checklist covers publishing, hallway tests and sign-off, but neither checks screen-by-screen or role-by-role coverage."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 10,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.857,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 98.1,
+        "tokens": 107071,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Proposes separate documents per audience: at least the submitting user, the approver/manager, the administrator, and a developer/platform guide",
+          "passed": true,
+          "evidence": "handover.md \u00a73 lists separate documents for each audience: D1 Employee Quick-Start Guide (submitters), D2 Approver Guide (approvers / line managers), D5 Finance Admin Guide (finance admins) and D7 Solution Technical Reference (future maintainers and developers). It also adds D6 Operations Runbook and others."
+        },
+        {
+          "text": "The developer/platform guide outline covers environment/solution, Dataverse tables, security roles, connections or connection references, and each flow (trigger and what it writes/sends)",
+          "passed": true,
+          "evidence": "D7's outline covers ALM (solution, publisher prefix, environments), the data model (tables, columns, relationships), the security model (role-to-privilege matrix per table) and configuration (environment variables and connection references). It also has a section for each of F1\u2013F3 giving the trigger and filter conditions, connectors and the data it writes, and A1 says F2 emails the employee."
+        },
+        {
+          "text": "Screenshots are taken per role in the published app",
+          "passed": true,
+          "evidence": "\u00a74 step 2: \"Walk each role's path in Test while taking screenshots ... Use test accounts set up for each role.\" This produces the screenshot set for D1, D2 and D5 from the running app."
+        },
+        {
+          "text": "Screenshots use test data, not real people's data (or the guides are kept out of public git for that reason)",
+          "passed": true,
+          "evidence": "\u00a72 point 5: \"take screenshots from Test with realistic but fake data (no real names or amounts).\""
+        },
+        {
+          "text": "States that statements must come from the app source or the live environment (button names as the controls say), not memory",
+          "passed": true,
+          "evidence": "\u00a72 point 3 says to pull the data model, flows, roles and environment variables \"from the solution itself ... so the reference sections match what is deployed.\" \u00a74 step 4 says to use \"the status names and button labels exactly as they appear in the app.\""
+        },
+        {
+          "text": "Documents carry a version and issue date (or are tied to a release/build)",
+          "passed": true,
+          "evidence": "Publishing section: \"Give every document a version, a last-updated date and an owner in its header, and update the docs as part of each solution release.\" D4 also includes a \"Version number and release date.\""
+        },
+        {
+          "text": "Includes a check that every screen and role is covered (an inventory or checklist)",
+          "passed": false,
+          "evidence": "\u00a74 step 1 lists app screens in the inventory, and D8 has test scenarios per role. But no checklist or matrix confirms that every screen and every role is covered by the guides. The \u00a77 checklist only covers confirming the assumptions."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.889,
+        "passed": 8,
+        "failed": 1,
+        "total": 9,
+        "time_seconds": 98.7,
+        "tokens": 151650,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "flow.json parses as JSON and has properties.definition with triggers and actions",
+          "passed": true,
+          "evidence": "script_checks.json reports flow_json parses: true and has_definition: true. flow.json contains properties.definition with both a \"triggers\" object and an \"actions\" object."
+        },
+        {
+          "text": "Trigger is the Dataverse webhook on cr4f2_request with subscriptionRequest/message = 3 (Update)",
+          "passed": true,
+          "evidence": "The trigger is type OpenApiConnectionWebhook with operationId SubscribeWebhookTrigger on shared_commondataserviceforapps. Its parameters include \"subscriptionRequest/message\": 3 and \"subscriptionRequest/entityname\": \"cr4f2_request\"."
+        },
+        {
+          "text": "Every connection reference uses runtimeSource embedded (not invoker)",
+          "passed": true,
+          "evidence": "All three connection references (shared_commondataserviceforapps, shared_office365, shared_teams) have \"runtimeSource\": \"embedded\" with a connectionReferenceLogicalName. None use invoker."
+        },
+        {
+          "text": "The write of cr4f2_locked is guarded by a condition that reads cr4f2_locked (sentinel), so the self-write cannot loop",
+          "passed": true,
+          "evidence": "The trigger's filterexpression is \"cr4f2_status eq 100000001 and cr4f2_locked ne true\", so the flow only reaches the write while the sentinel is unset. filteringattributes is \"cr4f2_status\", so the flow's own write of cr4f2_locked does not fire it again. The guard is a server-side trigger condition, not an If action inside the flow."
+        },
+        {
+          "text": "lint-flows.mjs reports no errors on flow.json",
+          "passed": true,
+          "evidence": "script_checks.json reports lint_flows ran on flow.json with errors: 0 and an empty error_messages list."
+        },
+        {
+          "text": "The row is re-read (GetItem/ListRecords) rather than relying only on the trigger payload",
+          "passed": false,
+          "evidence": "No GetItem or ListRecords action exists. Email, Teams, Lock_the_request and the terminate message all read triggerOutputs()?['body/...'], for example \"emailMessage/To\": \"@triggerOutputs()?['body/cr4f2_approveremail']\"."
+        },
+        {
+          "text": "Email and Teams are not chained so that one runs after the other has Failed",
+          "passed": true,
+          "evidence": "Send_approval_email and Post_Teams_chat_to_approver both have \"runAfter\": {}, so they run in parallel. notes.md says \"Email and Teams run in parallel. They don't depend on each other\"."
+        },
+        {
+          "text": "notes.md covers the self-trigger loop risk and why the guard prevents it",
+          "passed": true,
+          "evidence": "notes.md's 'No trigger loop' item says the flow's own update only writes cr4f2_locked, \"which is not a filtering attribute, so it does not trigger the flow again\". It adds that the cr4f2_locked ne true filter stops duplicate notifications."
+        },
+        {
+          "text": "notes.md covers deployment: connection references/consent and importing deactivated or turning on to validate",
+          "passed": true,
+          "evidence": "notes.md says to \"Bind the connection references\" using pac solution create-settings or the import wizard, with service-account connections. It also says to \"Turn the flow on after import\" and to \"Test\" that there is \"no second run triggered by the lock\"."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.889,
+        "passed": 8,
+        "failed": 1,
+        "total": 9,
+        "time_seconds": 97.7,
+        "tokens": 184076,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "flow.json parses as JSON and has properties.definition with triggers and actions",
+          "passed": true,
+          "evidence": "script_checks.json reports flow_json parses:true and has_definition:true. flow.json contains properties.definition with both \"triggers\" (When_a_request_is_submitted) and \"actions\"."
+        },
+        {
+          "text": "Trigger is the Dataverse webhook on cr4f2_request with subscriptionRequest/message = 3 (Update)",
+          "passed": true,
+          "evidence": "The trigger is type \"OpenApiConnectionWebhook\" with operationId \"SubscribeWebhookTrigger\", \"subscriptionRequest/message\": 3 and \"subscriptionRequest/entityname\": \"cr4f2_request\"."
+        },
+        {
+          "text": "Every connection reference uses runtimeSource embedded (not invoker)",
+          "passed": true,
+          "evidence": "All three connectionReferences (shared_commondataserviceforapps, shared_office365, shared_teams) have \"runtimeSource\": \"embedded\"."
+        },
+        {
+          "text": "The write of cr4f2_locked is guarded by a condition that reads cr4f2_locked (sentinel), so the self-write cannot loop",
+          "passed": true,
+          "evidence": "The run is gated by a trigger condition, \"@not(equals(triggerOutputs()?['body/cr4f2_locked'], true))\", and by a filterexpression containing \"(cr4f2_locked eq false or cr4f2_locked eq null)\". With filteringattributes=cr4f2_status, the flow's own write of cr4f2_locked cannot start another run."
+        },
+        {
+          "text": "lint-flows.mjs reports no errors on flow.json",
+          "passed": true,
+          "evidence": "script_checks.json lint_flows: ran true, errors 0, error_messages []."
+        },
+        {
+          "text": "The row is re-read (GetItem/ListRecords) rather than relying only on the trigger payload",
+          "passed": false,
+          "evidence": "No GetItem or ListRecords action exists; every value comes from triggerOutputs(). notes.md says this outright: \"Row data comes from the trigger payload... No extra 'Get a row' call is made.\""
+        },
+        {
+          "text": "Email and Teams are not chained so that one runs after the other has Failed",
+          "passed": true,
+          "evidence": "Send_approval_email and Post_Teams_chat_to_approver both have \"runAfter\": {} inside the Notify_approver scope, so they run in parallel and neither depends on the other failing."
+        },
+        {
+          "text": "notes.md covers the self-trigger loop risk and why the guard prevents it",
+          "passed": true,
+          "evidence": "notes.md item 2, \"No infinite loop\": \"The flow's own update writes only cr4f2_locked. That column is not in the select-columns list, and the row is locked after the update anyway, so the flow's write cannot start another run.\""
+        },
+        {
+          "text": "notes.md covers deployment: connection references/consent and importing deactivated or turning on to validate",
+          "passed": true,
+          "evidence": "notes.md deployment steps 2\u20133 cover creating the three connection references and binding connections (deployment settings or import wizard). Step 4 says \"Turn the flow on after import. Flows whose connection references were unbound at import time are imported Off.\""
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.375,
+        "passed": 3,
+        "failed": 5,
+        "total": 8,
+        "time_seconds": 165.5,
+        "tokens": 247265,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "verify-approve.mjs passes node --check (syntactically valid)",
+          "passed": true,
+          "evidence": "script_checks.json reports node_check ok:true with empty stderr for verify-approve.mjs."
+        },
+        {
+          "text": "Uses a persistent browser profile / saved auth state kept outside the repo",
+          "passed": false,
+          "evidence": "The session is saved with storageState, not a persistent profile, and it defaults to a path inside the working directory: `storageState: env.STORAGE_STATE || 'auth/state.json'`. The README only says not to commit it; it doesn't keep it outside the repo."
+        },
+        {
+          "text": "Locates the app inside its iframe (frames / frameLocator) rather than only the top page",
+          "passed": true,
+          "evidence": "verify-approve.mjs:90 uses `page.frameLocator('iframe#fullscreen-app-host, iframe[name=\"fullscreen-app-host\"]')` to reach the app controls."
+        },
+        {
+          "text": "After filling the Comment box, blurs it (Tab) or otherwise commits the value before asserting/clicking",
+          "passed": true,
+          "evidence": "verify-approve.mjs:154-158 has the comment 'Canvas text inputs commit their value on blur, so Tab out after typing.' followed by `await box.press('Tab');`."
+        },
+        {
+          "text": "Handles the stale cached player (old-version banner, cache disabled, or build-stamp check)",
+          "passed": false,
+          "evidence": "Nothing handles a stale cached player. The README says 'It doesn't confirm which solution version is live... Check the app's version or publish date separately'."
+        },
+        {
+          "text": "Confirms the effect in Dataverse by DEFAULT: the script queries the row through the Web API on every run (not behind an optional flag or a commented-out block) and fails when the row was not updated",
+          "passed": false,
+          "evidence": "The script never queries Dataverse. The README says 'It doesn't query Dataverse or SharePoint to confirm that the right column holds the comment'. DATA_URL_RE is used only to watch network traffic."
+        },
+        {
+          "text": "README states that an admin/owner session does not prove restrictions (non-admin needed)",
+          "passed": false,
+          "evidence": "The README only says it doesn't cover 'other security roles, users without write permission'. It never says that an admin or owner session can't prove the restrictions work."
+        },
+        {
+          "text": "README or script addresses that the approval writes production data and how to restore/record it",
+          "passed": false,
+          "evidence": "The README warns 'This script **really approves a record** and writes data. Run it against a test or dev environment'. It gives no way to restore the approved row and no procedure for recording the production change."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.5,
+        "passed": 4,
+        "failed": 4,
+        "total": 8,
+        "time_seconds": 175.3,
+        "tokens": 218402,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "verify-approve.mjs passes node --check (syntactically valid)",
+          "passed": true,
+          "evidence": "script_checks.json reports node_check ok: true with empty stderr for verify-approve.mjs."
+        },
+        {
+          "text": "Uses a persistent browser profile / saved auth state kept outside the repo",
+          "passed": false,
+          "evidence": "The script uses `chromium.launchPersistentContext(cfg.profileDir, \u2026)`, but `profileDir` defaults to `path.resolve(process.env.PROFILE_DIR ?? '.auth/profile')`. That path is inside the project directory, and the README only says it is git-ignored, so the saved state is not kept outside the repo."
+        },
+        {
+          "text": "Locates the app inside its iframe (frames / frameLocator) rather than only the top page",
+          "passed": true,
+          "evidence": "verify-approve.mjs defines `APP_FRAME = 'iframe#fullscreen-app-host, \u2026'` and uses `page.frameLocator(APP_FRAME).first()` to find controls inside the player iframe."
+        },
+        {
+          "text": "After filling the Comment box, blurs it (Tab) or otherwise commits the value before asserting/clicking",
+          "passed": true,
+          "evidence": "verify-approve.mjs lines 127-128: \"// Power Apps commits text input values on blur (DelayOutput / OnChange).\" followed by `await input.press('Tab');`."
+        },
+        {
+          "text": "Handles the stale cached player (old-version banner, cache disabled, or build-stamp check)",
+          "passed": false,
+          "evidence": "Nothing handles a stale cached player: there is no old-version banner detection, no cache disabling and no build-stamp check. The only related text is an error message saying the published version may lack the feature."
+        },
+        {
+          "text": "Confirms the effect in Dataverse by DEFAULT: the script queries the row through the Web API on every run (not behind an optional flag or a commented-out block) and fails when the row was not updated",
+          "passed": false,
+          "evidence": "The script never queries Dataverse. The README says it \"does not read the record back\" and suggests the user \"add a query against the data source (Dataverse Web API \u2026)\"."
+        },
+        {
+          "text": "README states that an admin/owner session does not prove restrictions (non-admin needed)",
+          "passed": false,
+          "evidence": "The README does not say that an admin or owner session fails to prove restrictions. It only notes that \"The result only covers the signed-in test account. Other users may lack permissions\"."
+        },
+        {
+          "text": "README or script addresses that the approval writes production data and how to restore/record it",
+          "passed": true,
+          "evidence": "The README warns \"`--commit` mode **approves a real request** in whatever environment `APP_URL` points to. Use a test/dev environment\". It also says result.json \"records each step, the request title and the exact comment text, so you can find the record afterward\". No restore procedure is given, but recording is covered."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.222,
+        "passed": 2,
+        "failed": 7,
+        "total": 9,
+        "time_seconds": 67.6,
+        "tokens": 104652,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output .pa.yaml passes the bundled check-pa-yaml selftest rules (no colon-space in single-line values, no comments)",
+          "passed": false,
+          "evidence": "script_checks.json: check_pa_yaml for scrVendorSpend.pa.yaml is clean:false, exit 2. It flags line 77, a colon-space inside a single-line value."
+        },
+        {
+          "text": "The pre-existing 'Total open: ' colon-space defect in lblTotal is fixed",
+          "passed": false,
+          "evidence": "lblTotal still contains `Text: =\"Total open: \" & Text(gblSpendTotal, \"$#,##0.00\")`, so the colon-space defect is still there."
+        },
+        {
+          "text": "Search box is a TextInput using Value/Placeholder (not Default/HintText) and is read as .Value",
+          "passed": false,
+          "evidence": "txtVendorSearch is `Classic/TextInput` and uses `Default: =\"\"` and `HintText`. The gallery reads it as `txtVendorSearch.Text`, not `.Value`."
+        },
+        {
+          "text": "ComboBox includes a ComboBoxDataField child naming the display field",
+          "passed": false,
+          "evidence": "cmbVendor sets `DisplayFields`/`SearchFields` to `[\"cr_vendorname\"]` but has no ComboBoxDataField child."
+        },
+        {
+          "text": "Vendor picker does not load all ~3,500 vendors into a collection or Items without addressing the row/search-page limit (it is server-side searched/filtered, or the limit is explicitly handled)",
+          "passed": true,
+          "evidence": "cmbVendor has `Items: =Vendors` with no wrapper. notes.md explains that this keeps the type-ahead search delegated to Dataverse, and that the unfiltered dropdown only loads the first batch."
+        },
+        {
+          "text": "Gallery is filtered via a delegable query against the source rather than filtering a whole-table collection",
+          "passed": false,
+          "evidence": "galSpend.Items still filters the whole-table collection: `Filter(colSpend, ...)`. The delegable `Filter(Purchases, ...)` is only offered as an optional suggestion in notes.md."
+        },
+        {
+          "text": "notes.md mentions delegation and the 500/2,000-row limit",
+          "passed": true,
+          "evidence": "notes.md has a section titled 'Delegation / row limits'. It says colSpend is 'capped by the app's data row limit (default 500, max 2,000 in Settings)'."
+        },
+        {
+          "text": "notes.md says Sum (an aggregate) over the source does not delegate, as a separate point from lookups",
+          "passed": false,
+          "evidence": "notes.md never says that Sum over the source does not delegate. It only says gblSpendTotal misses rows because the collection is capped."
+        },
+        {
+          "text": "notes.md says filtering on a lookup's related column (e.g. Vendor.'Vendor Name') is not delegable, and the fix filters on the lookup itself or the vendor id",
+          "passed": false,
+          "evidence": "notes.md says 'The vendor-name text search over the lookup can't be delegated', and its suggested fix filters on `Vendor.Vendor = cmbVendor.Selected.Vendor`. But it also says the 'in' search works on colSpend because 'delegation doesn't apply', and it treats the delegable fix as optional. Read strictly, this is partial."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.222,
+        "passed": 2,
+        "failed": 7,
+        "total": 9,
+        "time_seconds": 62.5,
+        "tokens": 102926,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output .pa.yaml passes the bundled check-pa-yaml selftest rules (no colon-space in single-line values, no comments)",
+          "passed": false,
+          "evidence": "script_checks.json: check_pa_yaml for scrVendorSpend.pa.yaml is clean:false, exit 2, and flags line 87 for a colon-space inside a single-line value."
+        },
+        {
+          "text": "The pre-existing 'Total open: ' colon-space defect in lblTotal is fixed",
+          "passed": false,
+          "evidence": "lblTotal still has `Text: =\"Total open: \" & Text(gblSpendTotal, \"$#,##0.00\")`, and notes.md says 'lblTotal are unchanged'."
+        },
+        {
+          "text": "Search box is a TextInput using Value/Placeholder (not Default/HintText) and is read as .Value",
+          "passed": false,
+          "evidence": "txtSearch is Classic/TextInput with `Default: =\"\"` and `HintText`, and the gallery reads `txtSearch.Text`, not .Value."
+        },
+        {
+          "text": "ComboBox includes a ComboBoxDataField child naming the display field",
+          "passed": false,
+          "evidence": "cmbVendor sets `DisplayFields`/`SearchFields: =[\"cr_vendorname\"]` but has no ComboBoxDataField child; its only properties are under Properties."
+        },
+        {
+          "text": "Vendor picker does not load all ~3,500 vendors into a collection or Items without addressing the row/search-page limit (it is server-side searched/filtered, or the limit is explicitly handled)",
+          "passed": true,
+          "evidence": "cmbVendor `Items: =Vendors` is bound straight to the table with IsSearchable, and notes.md explains that search runs on the server and the dropdown shows only the first batch until the user types."
+        },
+        {
+          "text": "Gallery is filtered via a delegable query against the source rather than filtering a whole-table collection",
+          "passed": false,
+          "evidence": "galSpend.Items is `Filter(colSpend, ...)`, a filter over a collection loaded by ClearCollect. The delegable version against Purchases is only suggested in the notes."
+        },
+        {
+          "text": "notes.md mentions delegation and the 500/2,000-row limit",
+          "passed": true,
+          "evidence": "notes.md: '`ClearCollect` only pulls up to the data row limit (500 by default, max 2,000)' under the heading 'Delegation and row limits'."
+        },
+        {
+          "text": "notes.md says Sum (an aggregate) over the source does not delegate, as a separate point from lookups",
+          "passed": false,
+          "evidence": "notes.md never says Sum over the source does not delegate. It only mentions that gblSpendTotal is missing rows because of the collection cap, and suggests Sum(galSpend.AllItems, Amount) to follow the filters."
+        },
+        {
+          "text": "notes.md says filtering on a lookup's related column (e.g. Vendor.'Vendor Name') is not delegable, and the fix filters on the lookup itself or the vendor id",
+          "passed": false,
+          "evidence": "notes.md never says filtering on Vendor.'Vendor Name' is not delegable. It suggests 'lookup = cmbVendor.Selected', but the shipped gallery still filters with `txtSearch.Text in Vendor.'Vendor Name'`."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 5,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 107.6,
+        "tokens": 284617,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "review.md identifies a loop BETWEEN the two flows (each one's write starts the other), naming both flows",
+          "passed": true,
+          "evidence": "review.md \u00a71 is headed \"Blocker: the two flows trigger each other forever\". Its diagram shows RecalcOrder updating cr4f2_order, which fires CopyDiscount, which updates every line, which fires RecalcOrder again, and both flows are named."
+        },
+        {
+          "text": "review.md explains why each flow's own condition does not stop it (the If runs inside an already-started run, and/or the trigger has no filtering attributes, and/or utcNow() makes every write a change)",
+          "passed": true,
+          "evidence": "review.md says \"Neither trigger has filtering attributes... so each one fires on an update to any column\". It explains that both conditions pass for active lines on open orders and that \"cr4f2_recalculatedon = utcNow() means the order really is different every time.\""
+        },
+        {
+          "text": "Both fixed flows set subscriptionRequest/filteringattributes on their update trigger",
+          "passed": true,
+          "evidence": "OrderChanged-CopyDiscount.json:36 has \"subscriptionRequest/filteringattributes\": \"cr4f2_discount\". OrderLineChanged-RecalcOrder.json:36 has \"cr4f2_amount,statecode,cr4f2_order\"."
+        },
+        {
+          "text": "The fix breaks the cycle with a trigger-level condition or column filtering (not only an inner If)",
+          "passed": true,
+          "evidence": "The cycle is broken by column filtering on both triggers. CopyDiscount writes only cr4f2_discount, which RecalcOrder doesn't listen to, and RecalcOrder writes cr4f2_total/cr4f2_recalculatedon, which CopyDiscount doesn't listen to. Trigger conditions were also added (e.g. the status check moved to a trigger condition)."
+        },
+        {
+          "text": "lint-flows.mjs run over BOTH fixed flows together reports no errors (no trigger-cycle, no update-trigger-unfiltered)",
+          "passed": true,
+          "evidence": "In script_checks.json, lint_flows_fixed_together ran over both files and reported errors: 0 with empty error_messages."
+        },
+        {
+          "text": "Both fixed files still parse as JSON with properties.definition, and keep the original purpose (total recalculated, discount copied)",
+          "passed": true,
+          "evidence": "script_checks.json shows that both files parse and have_definition is true. RecalcOrder still writes item/cr4f2_total from a FetchXML sum. CopyDiscount still writes item/cr4f2_discount from the trigger's cr4f2_discount."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 5,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 149.3,
+        "tokens": 290068,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "review.md identifies a loop BETWEEN the two flows (each one's write starts the other), naming both flows",
+          "passed": true,
+          "evidence": "review.md Finding 1 is headed \"the two flows call each other forever\". It traces the chain: RecalcOrder updates the order, which fires CopyDiscount, which updates every line, which fires RecalcOrder again."
+        },
+        {
+          "text": "review.md explains why each flow's own condition does not stop it (the If runs inside an already-started run, and/or the trigger has no filtering attributes, and/or utcNow() makes every write a change)",
+          "passed": true,
+          "evidence": "review.md says \"its 'order modified' trigger has no filtering attributes, so *any* column change fires it\". It adds that \"Only open orders\" is true for every open order and that \"`cr4f2_recalculatedon = utcNow()` guarantees the order row really changes on every pass\"."
+        },
+        {
+          "text": "Both fixed flows set subscriptionRequest/filteringattributes on their update trigger",
+          "passed": true,
+          "evidence": "CopyDiscount has \"subscriptionRequest/filteringattributes\": \"cr4f2_discount\". RecalcOrder has \"subscriptionRequest/filteringattributes\": \"cr4f2_amount,statecode,cr4f2_order\"."
+        },
+        {
+          "text": "The fix breaks the cycle with a trigger-level condition or column filtering (not only an inner If)",
+          "passed": true,
+          "evidence": "The cycle is broken by trigger column filtering. CopyDiscount fires only on cr4f2_discount, which RecalcOrder never writes. RecalcOrder ignores discount writes. The OData filter is only an added safeguard."
+        },
+        {
+          "text": "lint-flows.mjs run over BOTH fixed flows together reports no errors (no trigger-cycle, no update-trigger-unfiltered)",
+          "passed": true,
+          "evidence": "In script_checks.json, lint_flows_fixed_together shows ran: true over both files, with errors: 0 and error_messages: []."
+        },
+        {
+          "text": "Both fixed files still parse as JSON with properties.definition, and keep the original purpose (total recalculated, discount copied)",
+          "passed": true,
+          "evidence": "script_checks.json shows parses: true and has_definition: true for both files. RecalcOrder still writes item/cr4f2_total, now as a FetchXML sum of cr4f2_amount. CopyDiscount still copies item/cr4f2_discount onto the order's lines."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 6,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.857,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 243.0,
+        "tokens": 372426,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "flow.json parses and its trigger is an Update on cr4f2_leaverequest with filteringattributes including cr4f2_status",
+          "passed": false,
+          "evidence": "flow.json parses (script_checks: parses true), and filteringattributes is \"cr4f2_status\" on cr4f2_leaverequest. But the trigger uses \"subscriptionRequest/message\": 4 (Added or Modified), not an Update-only trigger (3). notes.md even says \"Use `message: 3` if you want update-only\"."
+        },
+        {
+          "text": "Live sending requires an explicit mode value (e.g. a NotifyMode setting equal to an exact word); anything else, including a missing or blank setting, is treated as test",
+          "passed": true,
+          "evidence": "Compose_Is_Live is \"@equals(parameters('Notification Mode (cr4f2_NotificationMode)'), 'Live')\" and the env var's defaultValue is \"Test\". Any value other than exactly 'Live', including blank, is test mode."
+        },
+        {
+          "text": "In test mode BOTH the To and the Cc resolve only from the allowlist (no expression path addresses cr4f2_requesteremail or cr4f2_manageremail unless live)",
+          "passed": true,
+          "evidence": "In test mode, Filter_Allowed_To and Filter_Allowed_Cc keep an address only when \"or(outputs('Compose_Is_Live'), contains(body('Filter_Allowlist'), item()))\" holds. Compose_Final_To and Compose_Final_Cc take only those filtered results, and Filter_Final_Violations/Terminate_tripwire check them against the allowlist again. So test-mode To and Cc can contain only allowlisted addresses."
+        },
+        {
+          "text": "An empty or missing allowlist in test mode sends nothing (it does not fall back to the real recipients)",
+          "passed": true,
+          "evidence": "Condition_Allowlist_usable_in_Test_mode (not live and length(Filter_Allowlist) = 0) leads to Terminate_no_allowlist with \"No email was sent.\" A missing or duplicated row produces an empty list through the if(equals(length(...),1)...) guard."
+        },
+        {
+          "text": "Test-mode messages are marked (subject prefix or banner naming the intended recipient)",
+          "passed": true,
+          "evidence": "The subject is \"@{if(outputs('Compose_Is_Live'), '', '[TEST] ')}Leave request submitted...\". In test mode the body also gets Compose_Test_Banner, which lists \"Intended To: ...\", \"Intended Cc: ...\" and the suppressed addresses."
+        },
+        {
+          "text": "lint-flows.mjs reports no errors on flow.json",
+          "passed": true,
+          "evidence": "script_checks.json lint_flows: \"errors\": 0, \"error_messages\": []."
+        },
+        {
+          "text": "notes.md says how to prove nobody else was emailed from evidence (e.g. reading the run history's actual recipients), not only from reading the source",
+          "passed": true,
+          "evidence": "notes.md, 'Proving before go-live that nobody else was emailed', says to export the Exchange message trace of everything sent by the flow's mailbox and run check-message-trace.ps1 against the allowlist. It also says to export run history, check that Compose_Audit's testModeViolations = [] for every run, and run a positive control with non-tester requesters."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 6,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.857,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 208.4,
+        "tokens": 267714,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "flow.json parses and its trigger is an Update on cr4f2_leaverequest with filteringattributes including cr4f2_status",
+          "passed": false,
+          "evidence": "flow.json parses and has filteringattributes \"cr4f2_status\" on entity \"cr4f2_leaverequest\". But the trigger uses \"subscriptionRequest/message\": 4, which is Added or Modified (Create or Update), not an Update-only trigger. notes.md confirms this: 'Trigger | \"Added or Modified\" (message 4)'."
+        },
+        {
+          "text": "Live sending requires an explicit mode value (e.g. a NotifyMode setting equal to an exact word); anything else, including a missing or blank setting, is treated as test",
+          "passed": true,
+          "evidence": "Compose_IsLive is `equals(coalesce(parameters('Notify Mode (cr4f2_NotifyMode)'), ''), 'LIVE')` and also requires a matching environment ID. notes.md: 'Anything else gives TEST: blank, `Live`, `live `, a missing environment variable...'"
+        },
+        {
+          "text": "In test mode BOTH the To and the Cc resolve only from the allowlist (no expression path addresses cr4f2_requesteremail or cr4f2_manageremail unless live)",
+          "passed": true,
+          "evidence": "In test mode, Compose_Permitted_requester and Compose_Permitted_manager return an address only if `contains(body('Filter_Allowlist_entries'), ...)`, an exact match against the allowlist array; otherwise they return ''. Before sending, Guard_recipients_are_permitted checks again that both Final_To and Final_Cc are exact allowlist entries unless live. So test-mode recipients are always allowlist members. (The info-only strict lint objects to the Compose_Final_* naming, not to any real leak.)"
+        },
+        {
+          "text": "An empty or missing allowlist in test mode sends nothing (it does not fall back to the real recipients)",
+          "passed": true,
+          "evidence": "Check_allowlist_setting_is_valid ends the run as Failed with 'NotifyAllowlistInvalid ... No email was sent.' unless there is exactly one row. A blank row value gives an empty filtered allowlist, so neither address is permitted and the guard's else branch logs 'No email sent'. There is no fallback to the real recipients."
+        },
+        {
+          "text": "Test-mode messages are marked (subject prefix or banner naming the intended recipient)",
+          "passed": true,
+          "evidence": "The subject has `if(...IsLive..., '', '[TEST] ')`, and the body has a 'TEST MODE' banner listing 'Intended To: ' requester and 'Intended Cc: ' manager."
+        },
+        {
+          "text": "lint-flows.mjs reports no errors on flow.json",
+          "passed": true,
+          "evidence": "script_checks.json lint_flows: \"errors\": 0 for flow.json."
+        },
+        {
+          "text": "notes.md says how to prove nobody else was emailed from evidence (e.g. reading the run history's actual recipients), not only from reading the source",
+          "passed": true,
+          "evidence": "notes.md 'How to prove before go-live that nobody else was emailed' says to run an Exchange message trace (`Get-MessageTraceV2 -SenderAddress ...`), export every distinct RecipientAddress and diff it against the allowlist. It also covers Sent Items and checking each run's Compose_Notification_decision finalTo/finalCc in the run-history export."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 7,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.667,
+        "passed": 4,
+        "failed": 2,
+        "total": 6,
+        "time_seconds": 65.7,
+        "tokens": 140134,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The output .pa.yaml passes the bundled check-pa-yaml rules (no colon-space in single-line values, no comments)",
+          "passed": false,
+          "evidence": "script_checks.json shows check_pa_yaml clean:false, exit 2, for scrRequests.pa.yaml. The finding is a colon-space on line 5: `OnVisible: =UpdateContext({locExpandedId: Blank()})`."
+        },
+        {
+          "text": "check-canvas-format.mjs with the provided column lengths reports no text-overflow error on the output",
+          "passed": true,
+          "evidence": "check_canvas_format_with_schema returns `text_overflow_errors: []`, so it reports no text-overflow error."
+        },
+        {
+          "text": "The full description remains reachable (tooltip, detail view or a flexible-height row), not just truncated",
+          "passed": true,
+          "evidence": "galRequests is `Variant: VariableHeight`, and lblReqDescription (Wrap + AutoHeight) shows the full `ThisItem.Description` when `locExpandedId = ThisItem.'Service Request'`. The 'Show more' button sets that variable, so the full description is reachable in a flexible-height row. The checker still raised clamped-without-full-text, but this assertion names no checker."
+        },
+        {
+          "text": "Clamped values show a visible truncation marker (e.g. an ellipsis) rather than a silent cut",
+          "passed": true,
+          "evidence": "lblReqDescription shows `Left(ThisItem.Description, 280) & \"\u2026\"` when the text is longer than 280 characters and the row is not expanded, so the cut is marked with an ellipsis."
+        },
+        {
+          "text": "No label inside the gallery row relies on Overflow.Scroll",
+          "passed": true,
+          "evidence": "No control in the gallery sets Overflow, and Overflow.Scroll does not appear anywhere in scrRequests.pa.yaml. The labels use Wrap + AutoHeight instead."
+        },
+        {
+          "text": "notes.md explains the approach chosen for long text and its trade-off",
+          "passed": false,
+          "evidence": "notes.md describes the approach: a flexible-height gallery, a 280-character preview with \"\u2026\" and a Show more/Show less toggle. It never states a trade-off, such as one row expanded at a time, uneven row heights or extra clicks compared with a tooltip. The 280-character limit appears only as an assumption."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 7,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.667,
+        "passed": 4,
+        "failed": 2,
+        "total": 6,
+        "time_seconds": 90.7,
+        "tokens": 149793,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The output .pa.yaml passes the bundled check-pa-yaml rules (no colon-space in single-line values, no comments)",
+          "passed": false,
+          "evidence": "script_checks.json shows check_pa_yaml failing with exit 2 on scrRequests.pa.yaml. Lines 126 and 136 put a colon-space inside a single-line value: `\"Category: \" & Text(galRequests.Selected.Category)` and `\"Requested by: \" & ...`."
+        },
+        {
+          "text": "check-canvas-format.mjs with the provided column lengths reports no text-overflow error on the output",
+          "passed": false,
+          "evidence": "check_canvas_format_with_schema reports two text-overflow errors. lblReqTitle has room for about 61 characters but can receive 100, and lblReqDescription has room for about 101 but can receive 160."
+        },
+        {
+          "text": "The full description remains reachable (tooltip, detail view or a flexible-height row), not just truncated",
+          "passed": true,
+          "evidence": "Every clamped gallery label sets a Tooltip to the full value (e.g. `Tooltip: =ThisItem.Description`). The new conDetails panel also shows `galRequests.Selected.Description` in full, scrolling inside the panel."
+        },
+        {
+          "text": "Clamped values show a visible truncation marker (e.g. an ellipsis) rather than a silent cut",
+          "passed": true,
+          "evidence": "The gallery formulas add a visible ellipsis when they cut text, e.g. `If(Len(t) > 100, Left(t, 99) & \"\u2026\", t)`. The requester and description labels use the same pattern."
+        },
+        {
+          "text": "No label inside the gallery row relies on Overflow.Scroll",
+          "passed": true,
+          "evidence": "None of the gallery child labels (lblReqTitle, lblReqCategory, lblReqRequester, lblReqDescription) sets Overflow. `Overflow.Scroll` appears only on lblDetDescription, which sits in conDetails outside the gallery."
+        },
+        {
+          "text": "notes.md explains the approach chosen for long text and its trade-off",
+          "passed": true,
+          "evidence": "notes.md explains the approach: ellipsis clamps plus tooltips in the gallery, and a details panel because 'Tooltips alone don't work on touch screens or for keyboard and screen-reader users.' It also gives the trade-off: the row grew from 72 to 132 and the character limits are 'conservative estimates'."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 8,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.857,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 93.9,
+        "tokens": 149363,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The gallery can be narrowed by Category (a dropdown or similar control feeding Items)",
+          "passed": true,
+          "evidence": "In scrEquipment.pa.yaml, cmbCategory (Items: =Choices('Category (Equipment)')) feeds galEquipment.Items through `IsEmpty(cmbCategory.SelectedItems) || Category = cmbCategory.Selected.Value`."
+        },
+        {
+          "text": "The gallery can be narrowed by Status",
+          "passed": true,
+          "evidence": "cmbStatus (Items: =Choices('Status (Equipment)')) feeds the gallery Filter through `IsEmpty(cmbStatus.SelectedItems) || Status = cmbStatus.Selected.Value`."
+        },
+        {
+          "text": "There is a search on Name feeding the gallery's Items",
+          "passed": true,
+          "evidence": "galEquipment.Items includes `StartsWith(Name, Trim(txtSearch.Text))`, so the Name search box feeds the gallery directly."
+        },
+        {
+          "text": "The filters offer an 'all' state (blank or an explicit All) so the unfiltered list is reachable",
+          "passed": true,
+          "evidence": "Each combo box has `DefaultSelectedItems: =Blank()` with an 'All categories' / 'All statuses' placeholder. The IsEmpty(...) || guard makes a blank selection match every row, and there is a Clear filters button."
+        },
+        {
+          "text": "The Items query stays delegable for ~1,800 rows (Filter on the source, no whole-table collection), or the limit is explicitly handled",
+          "passed": true,
+          "evidence": "Items is `Sort(Filter(Equipment, StartsWith..., choice/lookup equality...), Name, ...)` on the source, with no Collect or ClearCollect in the file. notes.md explains that every part delegates for 1,800 rows and that CountRows was left out."
+        },
+        {
+          "text": "The output passes the bundled check-pa-yaml rules",
+          "passed": false,
+          "evidence": "script_checks.json shows check_pa_yaml clean: false, exit 2. It reports comments in the .pa.yaml at lines 6, 30\u201333, 119, 161 and 250, and a colon-space in the single-line Navigate formula at line 232."
+        },
+        {
+          "text": "notes.md states which filters/sort were chosen as defaults and invites changes (or asks which ones are wanted)",
+          "passed": true,
+          "evidence": "notes.md 'Filter defaults' says every filter starts as 'All' and that Status was not pre-filtered because its values weren't provided. It gives the exact change for adding a default (`cmbStatus.DefaultSelectedItems` = `[{Value: 'Status (Equipment)'.Active}]`) and states the sort is by Name."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 8,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.714,
+        "passed": 5,
+        "failed": 2,
+        "total": 7,
+        "time_seconds": 87.6,
+        "tokens": 146248,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The gallery can be narrowed by Category (a dropdown or similar control feeding Items)",
+          "passed": true,
+          "evidence": "scrEquipment.pa.yaml has cmbCategory with `Items: =Choices(Equipment.Category)`, and line 180 of the gallery Items filters on it: `IsBlank(cmbCategory.Selected) || Category = cmbCategory.Selected.Value`."
+        },
+        {
+          "text": "The gallery can be narrowed by Status",
+          "passed": true,
+          "evidence": "cmbStatus uses `Items: =Choices(Equipment.Status)`, and line 181 of the gallery Items filters on it: `IsBlank(cmbStatus.Selected) || Status = cmbStatus.Selected.Value`."
+        },
+        {
+          "text": "There is a search on Name feeding the gallery's Items",
+          "passed": true,
+          "evidence": "Line 179 of the gallery Items has `IsBlank(txtSearch.Text) || StartsWith(Name, txtSearch.Text)`. It matches the start of the name, not any part of it, but it is still a Name search feeding Items."
+        },
+        {
+          "text": "The filters offer an 'all' state (blank or an explicit All) so the unfiltered list is reachable",
+          "passed": true,
+          "evidence": "Each filter is guarded with `IsBlank(...) ||` and the dropdowns start with `DefaultSelectedItems: =Blank()`, with placeholders such as \"All categories\". There is also a btnClearFilters button. notes.md says 'Empty = all'."
+        },
+        {
+          "text": "The Items query stays delegable for ~1,800 rows (Filter on the source, no whole-table collection), or the limit is explicitly handled",
+          "passed": true,
+          "evidence": "Items is `Sort(Filter(Equipment, ...), Name, SortOrder.Ascending)` on the source, using only predicates Dataverse can run itself. notes.md has a 'Delegation' section about the 500-row limit and says nothing loads the whole table into a collection."
+        },
+        {
+          "text": "The output passes the bundled check-pa-yaml rules",
+          "passed": false,
+          "evidence": "script_checks.json shows check_pa_yaml with `clean: false, exit: 2`. It flags comments inside the .pa.yaml at lines 6, 28, 107, 157-161, 249 and more."
+        },
+        {
+          "text": "notes.md states which filters/sort were chosen as defaults and invites changes (or asks which ones are wanted)",
+          "passed": false,
+          "evidence": "notes.md gives the default sort ('The gallery default sort is Name ascending') and offers a contains-search swap. But it presents the Category, Status and Location filters as built, not as defaults chosen for the user. It does not invite changes to the filter or sort set or ask which filters are wanted."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 9,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.714,
+        "passed": 5,
+        "failed": 2,
+        "total": 7,
+        "time_seconds": 52.0,
+        "tokens": 99679,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "plan.md asks for the brand/theme inputs (at least three of: palette, colours to avoid, fonts, logo or imagery, iconography or symbols, light/dark) before any screen is built",
+          "passed": true,
+          "evidence": "plan.md section A, \"Theme and branding (blocking, needed before any screen is built)\", asks for brand colours (A1), neutrals (A2), font (A3), logo (A4), light/dark mode (A5) and status colours (A7)."
+        },
+        {
+          "text": "The build order puts theme definition before the first screen",
+          "passed": true,
+          "evidence": "Phase 2 \"App shell and theme *(before any screen content)*\" defines the theme and ends with a checkpoint: \"The screens are not built until this is approved.\" Phase 3 Screens comes after it."
+        },
+        {
+          "text": "Colours and fonts are defined once (theme tokens, named formulas or variables) and referenced by screens, not literal per control",
+          "passed": true,
+          "evidence": "Phase 2 step 2: \"Define the theme as named formulas in `App.Formulas`, for example `Theme.Primary`... `Theme.Font`\". Phase 3 adds: \"Every screen uses only theme tokens and shared components. There are no hard-coded colours or fonts.\""
+        },
+        {
+          "text": "plan.md asks what the landing page should show per role or audience",
+          "passed": false,
+          "evidence": "D1 asks only \"Who uses the app\" (default: all employees book, Facilities manages rooms elsewhere). The Home screen content is fixed in Phase 3 (greeting, call to action, 'My upcoming bookings'). The plan never asks what the landing page should show for each role or audience."
+        },
+        {
+          "text": "plan.md asks which filters, search or grouping the room list needs (or states a default)",
+          "passed": true,
+          "evidence": "Phase 3 step 2 sets a default for the room list: \"Filters for date/time, minimum capacity, building and equipment.\""
+        },
+        {
+          "text": "The build order creates the Dataverse schema before the screens that bind it",
+          "passed": true,
+          "evidence": "Phase 1 \"Dataverse schema\" creates the Room and Booking tables before Phase 2 adds them as data sources, and before the Phase 3 screens bind to them."
+        },
+        {
+          "text": "plan.md includes verifying in the published app, not only in Studio",
+          "passed": false,
+          "evidence": "Verification covers Studio-side compile, App Checker and accessibility checks per screen, plus Phase 4 test scripts and Phase 5 \"Facilities team UAT in dev\". Nothing says to verify the app in its published or played form, as opposed to Studio."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 9,
+      "configuration": "without_skill",
+      "run_number": 2,
+      "result": {
+        "pass_rate": 0.714,
+        "passed": 5,
+        "failed": 2,
+        "total": 7,
+        "time_seconds": 61.9,
+        "tokens": 101698,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "plan.md asks for the brand/theme inputs (at least three of: palette, colours to avoid, fonts, logo or imagery, iconography or symbols, light/dark) before any screen is built",
+          "passed": true,
+          "evidence": "plan.md section B lists theme inputs as blocking Phase 3, 'before any screen is built': B1 brand colours (hex palette), B2 font family, B3 logo file and app icon, and B5 'Light only, or light + dark / high-contrast'."
+        },
+        {
+          "text": "The build order puts theme definition before the first screen",
+          "passed": true,
+          "evidence": "In the build order, 'Phase 3: App shell and theme (before any screen)' defines the theme centrally, and 'Phase 4: Screens' comes after it."
+        },
+        {
+          "text": "Colours and fonts are defined once (theme tokens, named formulas or variables) and referenced by screens, not literal per control",
+          "passed": true,
+          "evidence": "Phase 3 step 2 says 'Define theme centrally in `App.Formulas` (named formulas) so screens only reference tokens: `Theme.Primary`, `Theme.Background`... `Theme.Font`'."
+        },
+        {
+          "text": "plan.md asks what the landing page should show per role or audience",
+          "passed": false,
+          "evidence": "E2 only asks 'What should Home show?' and gives one default for everyone. It does not ask what each role or audience should see. The admin shortcut in Phase 4 ('facilities-admin shortcut if user has that role') is a design default, not a question to the user."
+        },
+        {
+          "text": "plan.md asks which filters, search or grouping the room list needs (or states a default)",
+          "passed": true,
+          "evidence": "E3 'Room List filters' gives a default: 'Search by name, filter by building, min capacity, equipment, \"available at [date/time]\"'."
+        },
+        {
+          "text": "The build order creates the Dataverse schema before the screens that bind it",
+          "passed": true,
+          "evidence": "Phase 1, 'Dataverse foundation', creates the Room and Booking tables. The screens that bind them are built later, in Phase 4."
+        },
+        {
+          "text": "plan.md includes verifying in the published app, not only in Studio",
+          "passed": false,
+          "evidence": "Checks are in Studio only ('no App Checker errors or accessibility errors') or are UAT and sharing in Phase 6. Nothing says to verify behaviour in the published app as opposed to Studio."
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.9061,
+        "stddev": 0.1497,
+        "min": 0.444,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 141.5,
+        "stddev": 48.7109,
+        "min": 64.3,
+        "max": 249.2
+      },
+      "tokens": {
+        "mean": 506845.85,
+        "stddev": 156227.1066,
+        "min": 247659,
+        "max": 734043
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.6804,
+        "stddev": 0.2496,
+        "min": 0.222,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 115.77,
+        "stddev": 51.4547,
+        "min": 52.0,
+        "max": 243.0
+      },
+      "tokens": {
+        "mean": 172798.45,
+        "stddev": 79886.4417,
+        "min": 99679,
+        "max": 372426
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.23",
+      "time_seconds": "+25.7",
+      "tokens": "+334047"
+    }
+  },
+  "notes": [
+    "Checks passed over 20 runs per configuration: 133/148 (89.9%) with the skill, 98/148 (66.2%) without; +23.7 points. 0.1.0 (iteration 2, one run each, 4 evals): 32/32 vs 14/32.",
+    "The skill loaded in 20 of 20 with-skill runs and in none of the baselines (Skill tool call or a read under skills/power-platform).",
+    "Evals 1-4 (the 0.1.0 set, three assertions tightened): 58/68 with vs 33/68 without. Evals 5-10 (new): 75/80 with vs 65/80 without. The new evals discriminate less: the baseline model already finds an explicit two-flow cycle (eval 5, 6/6 both) and adds list filters when the prompt names the choice columns (eval 8, 11/14 both).",
+    "47 of 74 assertions pass in every run of both configurations (non-discriminating). They stay as regression guards; the discriminating ones are the 22 that favour the skill.",
+    "Always failed in both configurations: e3.6 (Dataverse confirmation by default: the with-skill scripts make it opt-in and exit 3 'partial' without it), e4.6 (gallery still filters the whole-table collection colSpend), e4.8 (Sum does not delegate), e4.9 (lookup related-column filter not delegable). e4.6 regressed from 0.1.0, whose with-skill run moved the gallery to a delegable query.",
+    "One assertion favours the baseline: e8.7 (notes invite changes to the defaulted filters); both with-skill runs state the defaults but do not invite changes.",
+    "Variance: with the skill, 6 of 10 evals scored identically in both runs; eval 4 differed by 2/9, evals 7, 8 and 9 by 1. Baseline: evals 3 and 8 differed by 1. Flaky assertions: e3.8, e4.3, e4.4, e7.1, e7.2, e7.6, e8.6, e8.7, e9.4.",
+    "Grader fairness fix: check-canvas-format guessed a 100-character length for galRequests.Selected.Category (it resolves ThisItem.X against --schema but not Gallery.Selected.X), a false positive on eval 7. The eval schema now carries Category: 24 (the longest label, stated in the prompt) as a column fallback; eval 7 was regraded. The checker gap is a skill finding.",
+    "Cost per task: mean 506,846 vs 172,798 total tokens including cache reads (2.9x); output tokens 14,303 vs 11,768; 141.5 s vs 115.8 s; USD 0.811 vs 0.472."
+  ]
+}

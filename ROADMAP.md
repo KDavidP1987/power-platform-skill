@@ -6,15 +6,24 @@ actually shipped.
 
 ## 0.6.0 (next)
 
-- **A fresh evaluation against 0.5.x**, replacing the 0.1.0 results on the evaluation page: the same
-  method (the same model and prompt with and without the skill, graded against checks written
-  before the runs), with tests that cover what 0.2 to 0.5 added: flow loops, recipient safety,
-  long text, list filters, communications and documents.
+- **A fresh evaluation against 0.5.x** (done 2026-10-02, on 0.5.1): ten tasks, two runs per
+  configuration, 133/148 checks with the skill against 98/148 without. The tasks, inputs and harness
+  are in [`evals/`](evals/). It found four checks that fail with the skill, listed under 0.7.x.
 - **The documentation kit's first real run** on a real app (role guides, a manager guide, an
   administrator guide and the developer and platform guide), and the fixes that run turns up.
 
 ## 0.7.x and 0.8.x: confirm what is still assumed
 
+- **Fix what the 0.5.1 evaluation found:** the verification script must confirm the write in
+  Dataverse on every run, not behind an option; a `.pa.yaml` edit must move a gallery off a
+  whole-table collection and say that `Sum` over the source and filters on a lookup's related column
+  do not delegate (both passed on 0.1.0); notes should invite changes to defaulted list filters; and
+  `check-canvas-format.mjs` must resolve `Gallery.Selected.Column` against `--schema`, as it does
+  `ThisItem.Column`.
+- **Harder loop and recipient tests.** The unaided model already catches an explicit two-flow cycle
+  and caps recipients when told to, so those tests guard against regression without measuring the
+  skill. Replace them with a cycle through three flows among several, and a recipient leak in an
+  existing flow that nobody points out.
 - **Calibrate the long-text estimate** (`check-canvas-format.mjs`, 0.56 em per character) against
   rendered output, with Power Fx `measurefont` or screenshots of the published player, and publish
   the measured range per font.
@@ -41,9 +50,12 @@ actually shipped.
 
 1.0 ships when all of these hold, measured rather than asserted:
 
-- **Evaluation:** the skill passes at least 90% of graded checks across at least six realistic
-  tasks, at least 30 points above the same model without it, with each configuration run at least
-  three times; triggering stays correct on the held-out set with no false triggers.
+- **Evaluation:** the skill passes at least 90% of graded checks across at least ten realistic
+  tasks, at least 20 points above the same model without it, and no task scores lower with the skill
+  than without; each configuration runs at least three times; triggering stays correct on the
+  held-out set with no false triggers. (0.5.1: 90% and 24 points over two runs, with two tasks tied.
+  The gap was 30 points or more on 0.1.0's four tasks, but the unaided model already passes 81% of the
+  newer tasks' checks, so a fixed 30 would reward picking tasks it fails rather than a better skill.)
 - **Every bundled script** has a `--selftest` with known-bad and fixed fixtures, run in CI, and a
   floor that refuses to report a pass when it examined nothing.
 - **No copy-paste pattern** in the references depends on an unconfirmed snippet.

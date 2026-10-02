@@ -1,0 +1,176 @@
+{
+  "skill_name": "power-platform",
+  "evals": [
+    {
+      "id": 1,
+      "name": "diagnose-multi-change-dead-submit",
+      "prompt": "Since yesterday's release, clicking Submit on the Request screen of my published Power Apps canvas app does nothing at all - no error, no notification, the screen just sits there. It works fine in Studio preview and the app compiled with zero errors. Yesterday's release contained three things: a new lookup column 'Reviewer' on my Dataverse table cr4f2_request, a new choice value 'Escalated' added to the existing cr4f2_status choice, and a change to the Submit button's Patch so it sets both. I shipped it by importing the solution built from git. Some users also say they still see the old layout of the screen. Work out what is going on, tell me how to confirm which cause it is before changing anything, then give me the fix and how to stop it happening again. Write it to diagnosis.md.",
+      "expected_output": "Lists several candidate causes (stale cached column list, stale cached option-set members, artifact not running the new YAML, stale player cache), gives discriminating checks before fixing, explains live vs cached metadata, silent abandonment, the Studio refresh + Save + Publish + re-ship fix, the schema-then-screen rule, an automated cache-vs-live check, and verification in a fresh published player confirmed in Dataverse.",
+      "files": [],
+      "assertions": [
+        "Names at least two distinct candidate causes among: stale cached column list, stale cached choice/option-set members, the imported app not running the new YAML (LoadFromYaml false / old build), a stale cached player build",
+        "Gives at least two read-only checks to run before changing anything, and for EACH check says which named cause it confirms or rules out (a check that only applies to an unnamed or different cause does not count)",
+        "Explains that Studio Preview and the compile resolve against live metadata while the published app uses the cached copy in the app",
+        "Explains the silent no-op (a failing step abandons the rest of the formula without a message) and recommends surfacing errors (IfError/Notify/Errors())",
+        "Fix includes refreshing the data source in Studio (remove and re-add, or equivalent) followed by Save AND Publish from Studio, then re-shipping from git",
+        "States that a schema change and the canvas change depending on it should not ship in a single step",
+        "Prevention includes an automated pre-ship check comparing live columns and choice members with the app's cached metadata",
+        "Verification: perform the task in the published app on a fresh (uncached) player and confirm the written row in Dataverse"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "flow-self-write-definition",
+      "prompt": "Write the solution-ready cloud flow definition JSON (the file that lives in solution/src/Workflows) for this: when a row in Dataverse table cr4f2_request is modified and its status column cr4f2_status equals 100000001 (Submitted), email the approver (address is in the cr4f2_approveremail column) and also post them a Teams chat message, then set cr4f2_locked = true on that same row so the requester can't edit it any more. Use connection references and the Dataverse connector. Save it as flow.json, plus notes.md explaining your design choices and anything I need to do when deploying it.",
+      "expected_output": "Flow JSON with update trigger message 3 on cr4f2_request, runtimeSource embedded, guard on cr4f2_locked not true (sentinel), re-reads the row, email and Teams as parallel siblings not chained after Failed, no apostrophes in single-quoted literals, all references on runAfter path; notes cover loop risk, deactivated import, connection consent, activation as compile.",
+      "files": [],
+      "assertions": [
+        "flow.json parses as JSON and has properties.definition with triggers and actions",
+        "Trigger is the Dataverse webhook on cr4f2_request with subscriptionRequest/message = 3 (Update)",
+        "Every connection reference uses runtimeSource embedded (not invoker)",
+        "The write of cr4f2_locked is guarded by a condition that reads cr4f2_locked (sentinel), so the self-write cannot loop",
+        "lint-flows.mjs reports no errors on flow.json",
+        "The row is re-read (GetItem/ListRecords) rather than relying only on the trigger payload",
+        "Email and Teams are not chained so that one runs after the other has Failed",
+        "notes.md covers the self-trigger loop risk and why the guard prevents it",
+        "notes.md covers deployment: connection references/consent and importing deactivated or turning on to validate"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "playwright-verify-published-app",
+      "prompt": "I just imported a solution that adds an 'Approve' button and a required 'Comment' text box to the Approvals screen of my Power Apps canvas app. The published player URL is https://apps.powerapps.com/play/e/<envId>/a/<appId>. Write me a Playwright (Node) script that verifies the feature actually works in the published app: approve one pending request with a comment and confirm it worked. Save it as verify-approve.mjs, plus a short README.md on how to run it and what it does and doesn't prove.",
+      "expected_output": "Script that uses a persistent profile outside the repo, locates the app iframe, handles the stale 'old version' banner / disables cache / checks a build stamp, fills the comment then blurs (Tab) before asserting the button enables, clicks a control not caption, verifies the effect in Dataverse rather than only on screen, restores data, and README states admin session does not prove restrictions.",
+      "files": [],
+      "assertions": [
+        "verify-approve.mjs passes node --check (syntactically valid)",
+        "Uses a persistent browser profile / saved auth state kept outside the repo",
+        "Locates the app inside its iframe (frames / frameLocator) rather than only the top page",
+        "After filling the Comment box, blurs it (Tab) or otherwise commits the value before asserting/clicking",
+        "Handles the stale cached player (old-version banner, cache disabled, or build-stamp check)",
+        "Confirms the effect in Dataverse by DEFAULT: the script queries the row through the Web API on every run (not behind an optional flag or a commented-out block) and fails when the row was not updated",
+        "README states that an admin/owner session does not prove restrictions (non-admin needed)",
+        "README or script addresses that the approval writes production data and how to restore/record it"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "pa-yaml-search-and-vendor-picker",
+      "prompt": "Here is one of my canvas app screens (attached scrVendorSpend.pa.yaml). Add (1) a search text box at the top that filters the gallery by vendor name, and (2) a combo box to pick a Vendor from my Dataverse Vendors table (about 3,500 rows, display column 'Vendor Name') that also filters the gallery. Give me the updated .pa.yaml saved as scrVendorSpend.pa.yaml, and a short notes.md on anything I should know.",
+      "expected_output": "Modern TextInput with Value/Placeholder read as .Value; ComboBox with ComboBoxDataField child; picker not bound to a 3,500-row collection (searchable page / 2,000 limit) - server-filtered or source-bound; gallery bound to a delegable source query rather than whole-table collection; notes on Sum not delegating, lookup traversal not delegable; no colon-space in single-line values, no YAML comments.",
+      "files": [
+        "inputs/scrVendorSpend.pa.yaml"
+      ],
+      "assertions": [
+        "Output .pa.yaml passes the bundled check-pa-yaml selftest rules (no colon-space in single-line values, no comments)",
+        "The pre-existing 'Total open: ' colon-space defect in lblTotal is fixed",
+        "Search box is a TextInput using Value/Placeholder (not Default/HintText) and is read as .Value",
+        "ComboBox includes a ComboBoxDataField child naming the display field",
+        "Vendor picker does not load all ~3,500 vendors into a collection or Items without addressing the row/search-page limit (it is server-side searched/filtered, or the limit is explicitly handled)",
+        "Gallery is filtered via a delegable query against the source rather than filtering a whole-table collection",
+        "notes.md mentions delegation and the 500/2,000-row limit",
+        "notes.md says Sum (an aggregate) over the source does not delegate, as a separate point from lookups",
+        "notes.md says filtering on a lookup's related column (e.g. Vendor.'Vendor Name') is not delegable, and the fix filters on the lookup itself or the vendor id"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "flow-cycle-pair-review",
+      "prompt": "Before I import these two cloud flows into production, review them. They are in inputs/flows-cycle: OrderLineChanged-RecalcOrder.json (when an order line is modified, recompute the order's total) and OrderChanged-CopyDiscount.json (when an order is modified, copy its discount onto every line). Each one has its own condition so it only runs when it should. Tell me if anything is wrong and give me corrected versions. Write review.md and save the corrected flows in a folder named fixed/.",
+      "expected_output": "Finds the cycle between the two flows (A writes the order, B fires on any order change and writes the lines, A fires again; recalculatedon = utcNow always changes so it never settles), explains why each flow's own If cannot stop it, adds filteringattributes and trigger conditions, and the fixed pair lints clean as a set.",
+      "files": [
+        "inputs/flows-cycle/OrderLineChanged-RecalcOrder.json",
+        "inputs/flows-cycle/OrderChanged-CopyDiscount.json"
+      ],
+      "assertions": [
+        "review.md identifies a loop BETWEEN the two flows (each one's write starts the other), naming both flows",
+        "review.md explains why each flow's own condition does not stop it (the If runs inside an already-started run, and/or the trigger has no filtering attributes, and/or utcNow() makes every write a change)",
+        "Both fixed flows set subscriptionRequest/filteringattributes on their update trigger",
+        "The fix breaks the cycle with a trigger-level condition or column filtering (not only an inner If)",
+        "lint-flows.mjs run over BOTH fixed flows together reports no errors (no trigger-cycle, no update-trigger-unfiltered)",
+        "Both fixed files still parse as JSON with properties.definition, and keep the original purpose (total recalculated, discount copied)"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "allowlist-only-notifications",
+      "prompt": "Write the solution-ready cloud flow JSON (solution/src/Workflows style) for: when a Dataverse row in cr4f2_leaverequest has cr4f2_status changed to 100000001 (Submitted), email the requester (cr4f2_requesteremail) and CC their manager (cr4f2_manageremail) with the request details. IMPORTANT: the app is in testing until go-live, and until then nobody except the testers listed in a settings row (table cr4f2_setting, cr4f2_name = 'NotifyAllowlist', value in cr4f2_value, semicolon-separated) may receive anything. Make it impossible to email a real person by accident before go-live. Save flow.json and notes.md (design choices, how to switch to live, how you would prove before go-live that nobody else was emailed).",
+      "expected_output": "Explicit live mode read from settings where anything but the exact live value is test; every To and Cc goes through a capped value; empty allowlist sends nothing; banner; filtered trigger; proof from run history.",
+      "files": [],
+      "assertions": [
+        "flow.json parses and its trigger is an Update on cr4f2_leaverequest with filteringattributes including cr4f2_status",
+        "Live sending requires an explicit mode value (e.g. a NotifyMode setting equal to an exact word); anything else, including a missing or blank setting, is treated as test",
+        "In test mode BOTH the To and the Cc resolve only from the allowlist (no expression path addresses cr4f2_requesteremail or cr4f2_manageremail unless live)",
+        "An empty or missing allowlist in test mode sends nothing (it does not fall back to the real recipients)",
+        "Test-mode messages are marked (subject prefix or banner naming the intended recipient)",
+        "lint-flows.mjs reports no errors on flow.json",
+        "notes.md says how to prove nobody else was emailed from evidence (e.g. reading the run history's actual recipients), not only from reading the source"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "gallery-long-text-clipping",
+      "prompt": "Users say the request descriptions in my Service Requests list are cut off mid-sentence, and long titles and names get clipped too. The screen is attached (inputs/scrRequests.pa.yaml). Column sizes: Title is text up to 200 characters, Description is multi-line text up to 4,000 characters, Requester is a lookup and 'Full Name' is up to 100 characters, Category is a choice whose longest label is 'Facilities and Furniture'. Fix the screen so nothing is unreadably cut off and users can still read the full text. Save the fixed screen as scrRequests.pa.yaml and a short notes.md.",
+      "expected_output": "Every data-bound label either clamps to what fits with an ellipsis plus a tooltip (or detail view) carrying the full text, or uses a flexible-height gallery with AutoHeight; no scroll inside rows; valid pa.yaml.",
+      "files": [
+        "inputs/scrRequests.pa.yaml"
+      ],
+      "assertions": [
+        "The output .pa.yaml passes the bundled check-pa-yaml rules (no colon-space in single-line values, no comments)",
+        "check-canvas-format.mjs with the provided column lengths reports no text-overflow error on the output",
+        "The full description remains reachable (tooltip, detail view or a flexible-height row), not just truncated",
+        "Clamped values show a visible truncation marker (e.g. an ellipsis) rather than a silent cut",
+        "No label inside the gallery row relies on Overflow.Scroll",
+        "notes.md explains the approach chosen for long text and its trade-off"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "list-screen-filters-default",
+      "prompt": "Add a new screen scrEquipment to my canvas app that lists our Equipment records from Dataverse (table Equipment: Name text, Category choice with 12 values, Status choice with 5 values, Location lookup to Locations, about 1,800 rows) in a gallery with an Edit button per row that navigates to scrEquipmentEdit with the selected record. Save scrEquipment.pa.yaml and notes.md.",
+      "expected_output": "Gallery with filters on Category and Status (with an All option), a name search, a stated sort, delegable query, notes on delegation and what was defaulted.",
+      "files": [],
+      "assertions": [
+        "The gallery can be narrowed by Category (a dropdown or similar control feeding Items)",
+        "The gallery can be narrowed by Status",
+        "There is a search on Name feeding the gallery's Items",
+        "The filters offer an 'all' state (blank or an explicit All) so the unfiltered list is reachable",
+        "The Items query stays delegable for ~1,800 rows (Filter on the source, no whole-table collection), or the limit is explicitly handled",
+        "The output passes the bundled check-pa-yaml rules",
+        "notes.md states which filters/sort were chosen as defaults and invites changes (or asks which ones are wanted)"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "theme-intake-before-screens",
+      "prompt": "I'm about to build a new canvas app for our facilities team to book meeting rooms (Dataverse tables for rooms and bookings, three screens: home, room list, booking form). Before you write anything, give me plan.md: what you need from me and the order you'll build it in.",
+      "expected_output": "Asks for the organisation theme (palette, restricted colours, fonts, logo/imagery, icon/symbol rules, landing page per role, contrast, light/dark) before the first screen; plans tokens defined once and referenced by screens; schema before screens; asks list filter questions; verification in published app.",
+      "files": [],
+      "assertions": [
+        "plan.md asks for the brand/theme inputs (at least three of: palette, colours to avoid, fonts, logo or imagery, iconography or symbols, light/dark) before any screen is built",
+        "The build order puts theme definition before the first screen",
+        "Colours and fonts are defined once (theme tokens, named formulas or variables) and referenced by screens, not literal per control",
+        "plan.md asks what the landing page should show per role or audience",
+        "plan.md asks which filters, search or grouping the room list needs (or states a default)",
+        "The build order creates the Dataverse schema before the screens that bind it",
+        "plan.md includes verifying in the published app, not only in Studio"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "documentation-set-handover",
+      "prompt": "Our expense approval canvas app (Dataverse + three cloud flows; roles: employees submit, approvers approve, finance admins configure) works and the pilot starts next week. What documentation should I produce for the handover, and how? Write handover.md with the plan and an outline of each document.",
+      "expected_output": "A set: per-role user guides (employee, approver), an admin guide, and an extensive developer/platform guide; outlines; screenshots per role from the published app using test data; every statement read from source/live; versioned; shared chapters written once.",
+      "files": [],
+      "assertions": [
+        "Proposes separate documents per audience: at least the submitting user, the approver/manager, the administrator, and a developer/platform guide",
+        "The developer/platform guide outline covers environment/solution, Dataverse tables, security roles, connections or connection references, and each flow (trigger and what it writes/sends)",
+        "Screenshots are taken per role in the published app",
+        "Screenshots use test data, not real people's data (or the guides are kept out of public git for that reason)",
+        "States that statements must come from the app source or the live environment (button names as the controls say), not memory",
+        "Documents carry a version and issue date (or are tied to a release/build)",
+        "Includes a check that every screen and role is covered (an inventory or checklist)"
+      ]
+    }
+  ]
+}
