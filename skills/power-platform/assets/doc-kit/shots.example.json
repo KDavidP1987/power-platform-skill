@@ -1,17 +1,19 @@
 {
-  "_about": "The shot list: every capture, which screen and role it shows, and which (screen, role) pairs each guide needs. doc_kit.py inventory <this file> fails on a missing file and on any required pair without a shot. Capture in the PUBLISHED app as each role, with test data only. File names: <screen>-<role>[-<state>].png, lower case.",
-  "shotsDir": "out/shots-trimmed",
+  "_about": "The shot list, kept beside build-guides.py. shotsDir is resolved against THIS file's folder, never the current directory. build is the stamp shown in the app when the captures were taken; inventory --build <stamp> fails when it differs. Each guide under required lists roles x screens, plus pairs for a screen only some of its roles see. doc_kit.py inventory <this file> [--guide user] [--figures ../out/*.figures.json] fails on a missing file, a required (screen, role) with no shot, and a figure a build used that is not listed here. Capture in the PUBLISHED app as each role, with test data only. File names: <screen>-<role>[-<state>].png, lower case; email-<message>-<role>.png for a message (copied as taken by trim).",
+  "shotsDir": "../out/shots-trimmed",
   "build": "<build stamp the captures were taken on>",
   "shots": [
     { "file": "home-user.png", "screen": "Home", "role": "User" },
     { "file": "new-request-user.png", "screen": "New request", "role": "User" },
     { "file": "home-manager.png", "screen": "Home", "role": "Manager" },
     { "file": "approvals-manager.png", "screen": "Approvals", "role": "Manager" },
+    { "file": "email-approve-manager.png", "screen": "Email - Approval request", "role": "Manager" },
     { "file": "admin-settings-administrator.png", "screen": "Administration", "role": "Administrator" }
   ],
   "required": {
     "user": { "roles": ["User"], "screens": ["Home", "New request"] },
-    "manager": { "roles": ["Manager"], "screens": ["Home", "Approvals"] },
+    "manager": { "roles": ["Manager"], "screens": ["Home", "Approvals"],
+                 "pairs": [["Email - Approval request", "Manager"]] },
     "admin": { "roles": ["Administrator"], "screens": ["Administration"] }
   }
 }

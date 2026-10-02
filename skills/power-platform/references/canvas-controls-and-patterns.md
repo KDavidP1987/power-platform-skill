@@ -556,6 +556,11 @@ is the data categorised (grouped under headers)? Six rows need none of it; sixty
 filter is a scroll hunt, and the request to add one arrives after go-live. The intake question is
 in `project-setup.md` section 3.
 
+When you apply the default, end your reply with the choices you made and an explicit invitation to
+change them ("I added filters on Category and Status, a name search and a due-date sort - tell me
+if this list should filter, group or sort differently"). A default the maker never hears about is a
+decision taken for them.
+
 **The default when nobody says otherwise:**
 
 - a filter for every **choice or lookup column a person would scan by** (category, status, team,

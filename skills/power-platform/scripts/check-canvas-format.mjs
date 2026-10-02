@@ -331,6 +331,10 @@ function rawLen(n, ctx, bounds, scope) {
         const rec = ctx.locals.get(root.v);
         if (rec.fields && rec.fields.has(n.name)) return rec.fields.get(n.name);
       }
+      // galName.Selected.Column: the selected row of a gallery is a row of that gallery's table.
+      if (n.o.t === 'mem' && n.o.name === 'Selected' && n.o.o.t === 'id' && ctx.galleries?.has(n.o.o.v)) {
+        return column(n.name, ctx, ctx.galleries.get(n.o.o.v));
+      }
       const rootIsData = root.t === 'call' || (root.t === 'id' && (root.v === 'ThisItem' || root.v === 'ThisRecord' || isVariable(root.v) || root.q || ctx.aliases?.has(root.v)));
       if (!rootIsData) {
         // control.Property: what a person typed or picked, bounded by that control, not by data.
@@ -532,6 +536,7 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
     stats.collections = found.size;
   }
   const byName = new Map(all.map((c) => [c.name, c]));
+  baseCtx.galleries = new Map(all.filter((c) => /^Gallery/i.test(c.control || '')).map((c) => [c.name, firstTable(safeParse(c.props.Items?.v), baseCtx)]));
   const geom = new Map();
   const galleryOf = (c) => { for (let p = c.parent; p; p = p.parent) if (/^Gallery/i.test(p.control)) return p; return null; };
   function prop(c, k, seen = new Set()) {
@@ -780,6 +785,13 @@ function selftest() {
   const tschema = { tables: { Requests: { Category: 11 }, Tasks: { Category: 40 } }, columns: { Category: 40 } };
   if (run(screen(label('lblCat', { Text: '=ThisItem.Category', Width: '=120', Height: '=22', Size: '=10' })), tschema).findings.some((f) => f.level === 'error'))
     fails.push('per-table schema: an 11-character column should fit 120 px');
+  // gallery.Selected.Column outside the gallery resolves against that gallery's table.
+  const sel = (col) => screen(label('lblCat', { Text: '=ThisItem.Category', Width: '=120', Height: '=22', Size: '=10' })) +
+    ['', '      - lblSel:', '          Control: Label', '          Properties:', `            Text: =galItems.Selected.${col}`,
+     '            Width: =120', '            Height: =22', '            Size: =10'].join('\n');
+  const rs = run(sel('Category'), tschema);
+  if (rs.findings.some((f) => f.level === 'error') || rs.stats.bound !== 2) fails.push(`Selected.Category of a Requests gallery should fit (bound ${rs.stats.bound})`);
+  if (!run(sel('Notes')).findings.some((f) => f.code === 'text-overflow' && /lblSel/.test(f.msg + (f.control || '')))) fails.push('Selected.Notes (2,000) should overflow 120 px');
   // With(): a bound name carries its clamped length.
   const r7 = run(screen(label('lblW', { Text: '=With({t: Left(ThisItem.Notes, 8)}, "Note " & t)', Width: '=120', Height: '=22', Size: '=10', Tooltip: '=ThisItem.Notes' })));
   if (r7.findings.some((f) => f.level === 'error') || r7.stats.bound !== 1) fails.push('With(): a bound name carries its clamped length');
@@ -803,7 +815,7 @@ function selftest() {
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, With, collection and 4 list cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection and 4 list cases decided as expected`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }

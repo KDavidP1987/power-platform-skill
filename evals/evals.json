@@ -57,7 +57,7 @@
       "id": 4,
       "name": "pa-yaml-search-and-vendor-picker",
       "prompt": "Here is one of my canvas app screens (attached scrVendorSpend.pa.yaml). Add (1) a search text box at the top that filters the gallery by vendor name, and (2) a combo box to pick a Vendor from my Dataverse Vendors table (about 3,500 rows, display column 'Vendor Name') that also filters the gallery. Give me the updated .pa.yaml saved as scrVendorSpend.pa.yaml, and a short notes.md on anything I should know.",
-      "expected_output": "Modern TextInput with Value/Placeholder read as .Value; ComboBox with ComboBoxDataField child; picker not bound to a 3,500-row collection (searchable page / 2,000 limit) - server-filtered or source-bound; gallery bound to a delegable source query rather than whole-table collection; notes on Sum not delegating, lookup traversal not delegable; no colon-space in single-line values, no YAML comments.",
+      "expected_output": "Modern TextInput with Value/Placeholder read as .Value; ComboBox with ComboBoxDataField child; picker not bound to a 3,500-row collection (searchable page / 2,000 limit) - server-filtered or source-bound; gallery bound to a delegable source query rather than whole-table collection; notes treat the Sum total as its own delegation point (documented as delegable for Dataverse, but Studio may still warn, with the fallback) and lookup traversal as not delegable; no colon-space in single-line values, no YAML comments.",
       "files": [
         "inputs/scrVendorSpend.pa.yaml"
       ],
@@ -69,7 +69,7 @@
         "Vendor picker does not load all ~3,500 vendors into a collection or Items without addressing the row/search-page limit (it is server-side searched/filtered, or the limit is explicitly handled)",
         "Gallery is filtered via a delegable query against the source rather than filtering a whole-table collection",
         "notes.md mentions delegation and the 500/2,000-row limit",
-        "notes.md says Sum (an aggregate) over the source does not delegate, as a separate point from lookups",
+        "notes.md treats the Sum total as its own delegation point, separate from lookups: it states whether Sum over the source delegates for Dataverse (Microsoft documents it as delegable), that Studio may still warn, and the fallback; it does not present Sum over a row-limited collection as the table total",
         "notes.md says filtering on a lookup's related column (e.g. Vendor.'Vendor Name') is not delegable, and the fix filters on the lookup itself or the vendor id"
       ]
     },

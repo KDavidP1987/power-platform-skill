@@ -11,6 +11,26 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-02
+
+The first measured release: a fresh evaluation on 0.5.1, the fixes for what it found in canvas
+edits, and the documentation kit after its first run on a real app.
+
+### Added
+
+- `evals/`: the evaluation tasks, inputs, the run, grade and analysis harness, and the 0.5.1 results.
+- Core rule 10, **query the source; do not filter a copy of it**: a gallery or picker that reads a
+  whole-table collection moves to a delegable `Filter`/`Search` on the source, a lookup is filtered
+  by the record or its id, and the notes say which clauses delegate (`SKILL.md`; the old rule 10 is
+  now 11).
+- Documentation kit (`assets/doc-kit/doc_kit.py`): `inventory` checks every figure a build used
+  against `shots.json` and the build stamp (`--figures`, `--build`) and fails on draft placeholders;
+  `finish` updates fields and contents and exports the PDF through Word, or LibreOffice without it;
+  `render` writes every page as an image and flags blank pages; `column_table` and
+  `lint_edges_table` build reference tables from the build manifest, live metadata and
+  `lint-flows.mjs --json`; width presets for figures, including `email` for message captures;
+  `cut_band`; unknown theme keys warn, so a misspelt token cannot silently do nothing.
+
 ### Changed
 
 - The evaluation was re-run on 0.5.1 and replaces the 0.1.0 results on `docs/evaluation.html` and in
@@ -19,10 +39,28 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
   documentation set), two runs per configuration, 133/148 checks with the skill against 98/148
   without. Three lenient 0.1.0 checks were tightened. The 1.0 evaluation criterion is now 90% and 20
   points over the baseline across ten tasks, with no task lower with the skill (`ROADMAP.md`).
-
-### Added
-
-- `evals/`: the evaluation tasks, inputs, the run, grade and analysis harness, and the 0.5.1 results.
+- `references/power-fx-and-pa-yaml.md` section 6: each aggregate in a screen is its own point in the
+  notes (whether it delegates for the source per Microsoft's list, that Studio may still warn, and
+  the fallback named: a rollup column, a flow-written total or a server aggregate; a `Sum` over a
+  row-limited collection or `Gallery.AllItems` is not a table total), and delegation notes
+  are written as a list the maker can check, including lookups filtered by record or id and
+  server-side picker search.
+- `references/canvas-controls-and-patterns.md` section 16: after applying the default list filters,
+  the reply ends with the choices made and an explicit invitation to change them.
+- `check-canvas-format.mjs` resolves `<gallery>.Selected.<Column>` against that gallery's table in
+  `--schema`, as it already did `ThisItem.<Column>`, so a detail pane beside a list is measured
+  rather than skipped. New self-test case.
+- Documentation kit: the build script resolves every path against itself, not the current
+  directory; pagination is the kit's job (no blank pages, captions and lead-ins kept with their
+  figure or table, header rows repeat); the cover names the build the screenshots were taken on;
+  the user guide gains "About this guide", "Before you begin" and a quick reference
+  (`references/documentation-set.md`).
+- Evaluation check 4.8 (the `Sum` total) was reworded. It asked the notes to say that `Sum` over a
+  Dataverse source does not delegate, but Microsoft documents `Sum` as delegable for Dataverse; it
+  now asks for the total as its own delegation point with the documented behaviour, the Studio
+  warning and the fallback (`evals/README.md`).
+- Task 4 re-run on 0.6.0: 17/18 checks with the skill against 4/18 without; the gallery and `Sum`
+  checks that failed on 0.5.1 pass in both runs.
 
 ## [0.5.1] - 2026-10-02
 

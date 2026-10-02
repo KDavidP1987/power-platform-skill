@@ -369,7 +369,19 @@ duplicate**.
    cent against the Web API; another got a non-delegation warning on its `Sum` expression and could
    only total a scoped set. `CountIf(T, true)` delegates. The compile/Studio delegation warning for
    the exact expression you wrote is authoritative; when it appears, pre-aggregate server-side or sum
-   a collection whose size you control (section 7).
+   a collection whose size you control (section 7). **In your notes, treat each aggregate as its own
+   point, separate from lookups:** name the expression, say whether this source documents it as
+   delegable, what Studio's warning on it said (or that it must be read after the change), and the
+   fallback by name if it warns: a rollup column on the parent row, a total a flow writes, or a
+   FetchXML/Web API aggregate fetched once. "If it warns, the total is partial" is a consequence,
+   not a fallback. A `Sum` over a collection or `Gallery.AllItems` is never a total of the table:
+   say so when you find one, and label it on screen as a total of the rows shown, not "Total".
+   **Write the delegation notes as a list the maker can check.** For every changed `Items`, picker
+   and total: the clause, delegable or not (and why), the row limit it runs into if not, and the
+   fix. A lookup filtered by a related column (`Vendor.'Vendor Name' = x`) is not delegable; filter
+   by the record (`Vendor = cmb.Selected`) or by its id. A picker over a large table searches
+   server-side (`Search`/`StartsWith` in its `Items` on the typed text, or the combo box's own
+   search over the source) instead of loading every row.
 7. **`CountRows(Source)` may return a cached count** (Studio says so). `CountIf(Source, true)` gives
    a live, delegated count.
 8. **`Lower()` in a predicate is not delegable and is unnecessary** - Dataverse string comparison

@@ -14,7 +14,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.5.1"
+  version: "0.6.0"
 ---
 
 # Power Platform development
@@ -69,7 +69,13 @@ These hold on every task. The reasons are short here; the references carry the f
    to real people, then park the sender. While a build must not reach real people, prove it from
    source (`lint-flows.mjs --require-safe-recipients`) and from run history, and pin the one
    permitted address in the flow source, where no settings edit can widen it.
-10. **An audit that can pass vacuously will.** Give every check a floor ("found at least N write
+10. **Query the source; do not filter a copy of it.** A collection holds at most the data row
+    limit (500 by default, 2,000 at most) and answers silently from that prefix. When you touch a
+    gallery or picker that reads a whole-table collection, move the query into its `Items` as a
+    delegable `Filter`/`Search` on the source, filter a lookup by the record or its id (never by
+    the related table's column), and say in your notes which clauses delegate and which Studio
+    warns on. `references/power-fx-and-pa-yaml.md` section 6.
+11. **An audit that can pass vacuously will.** Give every check a floor ("found at least N write
     paths"), prove it goes red on a known-bad input, and make it say when its own inputs are stale.
 
 ## The working loop

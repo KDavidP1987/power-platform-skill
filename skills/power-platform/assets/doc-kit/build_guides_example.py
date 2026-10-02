@@ -1,32 +1,48 @@
 """The words half of an app's documentation set: four guides, built on doc_kit.py.
 
-Copy this file into the project (scripts/build-guides.py), replace every <angle-bracket> with what
-the app's SOURCE and LIVE environment say, and delete chapters that do not apply. The structure is
-the standard (references/documentation-set.md); the sentences here are prompts, not content.
+Copy this file into the project (scripts/build-guides.py, beside doc_kit.py and shots.json),
+replace every <angle-bracket> with what the app's SOURCE and LIVE environment say, and delete
+chapters that do not apply. The structure is the standard (references/documentation-set.md); the
+sentences here are prompts, not content.
 
     python build-guides.py            final build: every figure must exist
     python build-guides.py --draft    missing figures become a visible "capture needed" box
 
+then, from the same folder:
+
+    python doc_kit.py inventory shots.json --build "<stamp>" --figures "../out/*.figures.json"
+    python doc_kit.py finish ../out              fields, contents, PDF, page counts (Word)
+    python doc_kit.py render ../out ../out/pages  every page as an image: read them all
+
 Chapters used by more than one guide are written ONCE, as functions taking the document and the
 chapter number, so the guides cannot drift apart on how a screen behaves.
 
-Output goes to out/ (git-ignored): screenshots carry people's names, even test ones look real.
-Render to PDF through Word (model-driven-and-docs.md, section 4) and read every page.
+Every path is relative to this file, never to the current directory. The captures folder is
+shots.json's shotsDir, resolved against shots.json, so the build and the inventory read the same
+files. Output goes to out/ (git-ignored): screenshots carry people's names, even test ones look real.
 """
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from doc_kit import Guide, load_theme  # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from doc_kit import Guide, load_shots, load_theme, shots_dir  # noqa: E402
 
+ROOT = os.path.normpath(os.path.join(HERE, ".."))
 APP = "<App name>"
 ORG = "<Organisation or team>"           # "" for none
 VERSION = "Version <1.0>"
 ISSUED = "<issue date>"
-BUILD = "<build stamp shown in the app>"
-THEME = "canvas/theme.json"              # the app's theme, so the guides match the product
-SHOTS = os.path.join("out", "shots-trimmed")
-OUT = "out"
+SHOTS_JSON = os.path.join(HERE, "shots.json")
+if not os.path.exists(SHOTS_JSON):                     # run in place, from the kit
+    SHOTS_JSON = os.path.join(HERE, "shots.example.json")
+BUILD = load_shots(SHOTS_JSON).get("build", "<build stamp shown in the app>")   # one stamp, one place
+THEME = os.path.join(ROOT, "canvas", "theme.json")      # the app's theme, so the guides match the product
+SHOTS = shots_dir(SHOTS_JSON)
+OUT = os.path.join(ROOT, "out")
+MANIFEST = os.path.join(ROOT, "<scripts/dataverse/tables.json>")     # the build manifest, for column tables
+LIVE_COLUMNS = os.path.join(OUT, "<live-columns.json>")              # attributes read on the stated date
+LINT = os.path.join(OUT, "<lint-flows.json>")                        # node lint-flows.mjs <flows> --json > this
 DRAFT = "--draft" in sys.argv
 
 
@@ -38,16 +54,20 @@ def out_name(kind):
 
 def doc(kind, audience, blurb):
     return Guide("%s" % APP, "%s guide" % kind, blurb,
-                 [("Audience", audience), ("Version", VERSION), ("Issued", ISSUED), ("Build", BUILD)],
-                 SHOTS, "%s - %s guide" % (APP, kind), org=ORG, theme=load_theme(THEME))
+                 [("Audience", audience), ("Version", VERSION), ("Issued", ISSUED),
+                  ("Build", BUILD + " (the build every screenshot was taken on)")],
+                 SHOTS, "%s - %s guide" % (APP, kind), org=ORG, theme=load_theme(THEME),
+                 build=BUILD, draft=DRAFT)
 
 
-def fig(d, name, caption):
-    """A figure in a final build; a visible gap in a draft."""
-    if DRAFT and not os.path.exists(os.path.join(SHOTS, name)):
-        d.callout("Capture needed", "%s - %s" % (name, caption), "warn")
-    else:
-        d.figure(name, caption)
+def fig(d, name, caption, width=None):
+    """A figure; in a draft a missing capture becomes a visible box. width: "full" (default),
+    "wide", "half", "narrow", or "email" for a reading-pane capture of a message."""
+    d.figure(name, caption, width)
+
+
+def efig(d, name, caption):
+    fig(d, name, caption, "email")
 
 
 # ================================================ shared chapters (written once) ==========
@@ -83,17 +103,32 @@ def ch_help(d, n):
 # ======================================================================= the guides ======
 def user_guide():
     d = doc("User", "<Everyone who uses the app day to day>", "<One sentence: what the app is for, for this reader.>")
-    ch_opening(d, 1)
-    d.h1("2. <The main task, as a verb: Raise a request>")
+    d.h1("1. About this guide")
+    d.para("<Who it is for, which role's screens it shows, the build on the cover, and that a role sees only "
+           "its own buttons. Name the role the captures were taken as if it is not the reader's.>")
+    d.h1("2. Before you begin")
+    d.bullets(["<What the reader needs: a licence, a security role, the app shared with them, a roster row>",
+               "<The supported browsers and screen size>"])
+    d.h2("2.1 If the app does not recognise you")
+    d.para("<What the reader sees when they are not set up (the app's own message, quoted), and who to ask.>")
+    ch_opening(d, 3)
+    d.h1("4. <The main task, as a verb: Raise a request>")
+    d.para("<One line on when to do this.>")
     d.steps(["<Press 'New request' (the button's own text)>", "<Fill ...>", "<Press 'Submit'>"])
     fig(d, "new-request-<role>.png", "<Caption>")
     d.callout("What happens next", "<Who is told, what status the record takes, what the reader sees.>")
-    d.h1("3. <Second task>")
-    d.h1("4. Statuses and what they mean")
-    d.table(["Status", "Meaning", "What you do"], [["<label>", "<meaning>", "<action>"]])
-    ch_messages(d, 5)
-    ch_glossary(d, 6)
-    ch_help(d, 7)
+    d.h1("5. <Second task>")
+    d.h1("6. Statuses and what they mean")
+    d.table(["Status", "Meaning", "What you do"], [["<label>", "<meaning>", "<action>"]], caption="Statuses")
+    ch_messages(d, 7)
+    d.h1("8. Quick reference")
+    d.table(["To", "Go to", "Press"], [["<task, as a verb>", "<screen>", "<button's own text>"]],
+            caption="Every task on one page")
+    d.h1("9. Common questions")
+    d.para("<The question as a reader asks it?>", bold_lead="Q. ")
+    d.para("<The answer, with the button or screen named exactly.>", bold_lead="A. ")
+    ch_glossary(d, 10)
+    ch_help(d, 11)
     return d.save(out_name("Users"))
 
 
@@ -151,6 +186,22 @@ def developer_guide():
     for i, (title, prompt) in enumerate(chapters, 1):
         d.h1("%d. %s" % (i, title))
         d.para(prompt)
+        if title == "Dataverse tables" and os.path.exists(MANIFEST):
+            # One table per Dataverse table: manifest columns checked against live metadata.
+            import json
+            with open(MANIFEST, encoding="utf-8-sig") as f:
+                manifest = json.load(f)
+            live = None
+            if os.path.exists(LIVE_COLUMNS):
+                with open(LIVE_COLUMNS, encoding="utf-8-sig") as f:
+                    live = json.load(f)
+            for t in manifest.get("tables", []):
+                d.h2(t.get("displayName") or t["logicalName"])
+                d.column_table(t.get("columns", []), live=(live or {}).get(t["logicalName"]) if live else None,
+                               caption="%s columns" % (t.get("displayName") or t["logicalName"]))
+        if title == "Cloud flows" and os.path.exists(LINT):
+            d.para("Which flow's writes can start which flow, from lint-flows.mjs on this build:")
+            d.lint_edges_table(LINT, caption="Flow write and trigger edges")
     return d.save(out_name("Developers"))
 
 

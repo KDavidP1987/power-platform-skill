@@ -1,25 +1,29 @@
 # Roadmap to 1.0
 
 The skill is in public beta. Each release below is defined by what it must prove, not by a date,
-except 0.6.0, which is the next release. The [changelog](CHANGELOG.md) records what each release
+except where a release is marked done. The [changelog](CHANGELOG.md) records what each release
 actually shipped.
 
-## 0.6.0 (next)
+## 0.6.0 (done 2026-10-02)
 
 - **A fresh evaluation against 0.5.x** (done 2026-10-02, on 0.5.1): ten tasks, two runs per
   configuration, 133/148 checks with the skill against 98/148 without. The tasks, inputs and harness
-  are in [`evals/`](evals/). It found four checks that fail with the skill, listed under 0.7.x.
+  are in [`evals/`](evals/). It found four checks that fail with the skill; three are fixed below, the fourth is under 0.7.x.
 - **The documentation kit's first real run** on a real app (role guides, a manager guide, an
-  administrator guide and the developer and platform guide), and the fixes that run turns up.
+  administrator guide and the developer and platform guide), and the fixes that run turns up
+  (done: path resolution, pagination, figure and build inventory, Word or LibreOffice finishing,
+  page rendering).
+- **Three of the four evaluation findings fixed** (done): a gallery or picker on a whole-table
+  collection moves to a source query (core rule 10); the notes treat each aggregate and each lookup
+  filter as its own delegation point; defaulted list filters end with an invitation to change them;
+  `check-canvas-format.mjs` resolves `Gallery.Selected.Column` against `--schema`.
 
 ## 0.7.x and 0.8.x: confirm what is still assumed
 
-- **Fix what the 0.5.1 evaluation found:** the verification script must confirm the write in
-  Dataverse on every run, not behind an option; a `.pa.yaml` edit must move a gallery off a
-  whole-table collection and say that `Sum` over the source and filters on a lookup's related column
-  do not delegate (both passed on 0.1.0); notes should invite changes to defaulted list filters; and
-  `check-canvas-format.mjs` must resolve `Gallery.Selected.Column` against `--schema`, as it does
-  `ThisItem.Column`.
+- **The last 0.5.1 evaluation finding:** the verification script must confirm the write in
+  Dataverse on every run, not behind an option.
+- **Re-run the full evaluation on 0.6.x** with three runs per configuration, as the 1.0 criteria
+  require.
 - **Harder loop and recipient tests.** The unaided model already catches an explicit two-flow cycle
   and caps recipients when told to, so those tests guard against regression without measuring the
   skill. Replace them with a cycle through three flows among several, and a recipient leak in an

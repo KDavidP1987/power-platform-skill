@@ -36,3 +36,15 @@ is longer than 260 characters. The skill-creator `aggregate_benchmark` script re
 From 0.1.0 to 0.5.1 three checks were tightened (one split into three) and six tasks were added. 47 of
 the 74 checks pass in every run of both configurations, so they guard against regression rather than
 measure the skill. `results/benchmark-0.5.1.md` lists the checks that still fail with the skill.
+
+### Check 4.8 reworded in 0.6.0
+
+Check 4.8 asked the notes to say that `Sum` over the Dataverse source does not delegate. Microsoft's
+delegation list documents `Sum` (with `Average`, `Min`, `Max` and `CountRows`) as delegable for
+Dataverse, so a correct answer could fail it. It now asks for the total as its own delegation point:
+what the documentation says for the source, that Studio may still show a warning, the fallback, and
+no `Sum` over a row-limited collection presented as the table total. The 0.5.1 figures above were
+graded on the old wording.
+
+Task 4 alone, re-run on 0.6.0 with the new wording (two runs each): 17/18 checks with the skill, 4/18
+without. The gallery and `Sum` checks that failed on 0.5.1 now pass in both runs.

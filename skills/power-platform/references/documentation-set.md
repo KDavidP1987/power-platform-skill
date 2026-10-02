@@ -12,8 +12,9 @@
 
 The method behind generating guides from the running product (why, and how the screenshots are
 trimmed) is in `model-driven-and-docs.md` sections 3 and 4. This file is the standard set and its
-structure. The kit is `assets/doc-kit/`: `doc_kit.py` (formatting, trim, inventory),
-`build_guides_example.py` (the four skeletons, words only), `shots.example.json` (the shot list).
+structure. The kit is `assets/doc-kit/`: `doc_kit.py` (formatting, trim, inventory, finish,
+render), `build_guides_example.py` (the four skeletons, words only), `shots.example.json` (the shot
+list). `python doc_kit.py --selftest` proves the kit on the machine it runs on.
 
 ---
 
@@ -44,8 +45,12 @@ once and called from both (section 4).
 
 `build_guides_example.py` holds each skeleton as runnable code. In outline:
 
-**User guide**: opening the app; one chapter per task, named as a verb ("Raise a request"); statuses
-and what they mean; messages the app sends and how to get one resent; glossary; getting help.
+**User guide**: about this guide (who it is for, which role the captures show, the build); before you
+begin (licence, role, sharing, and what the reader sees if the app does not recognise them, with the
+app's own message quoted); opening the app; one chapter per task, named as a verb ("Raise a
+request"); statuses and what they mean; messages the app sends and how to get one resent; a quick
+reference (every task, the screen, the button, on one page); common questions; glossary; getting
+help.
 
 **Manager guide**: opening the app; the team's work at a glance; approving, rejecting and
 reassigning; following up (overdue, blocked, history); messages; what each role can see; glossary;
@@ -116,28 +121,76 @@ history and resend; routine tasks; known limitations; glossary.
    names often turn out to be real, and real ones leak in from shared reference tables.
 4. **A fixed window size** (1500x1000 worked) so figures are consistent.
 5. **File names**: `<screen>-<role>[-<state>].png`, lower case, listed in `shots.json` with the
-   screen and role each one shows.
-6. **Trim** with `python doc_kit.py trim out/shots out/shots-trimmed` (removes the player bar,
-   letterbox and blank tail; never edits in place). Remove a role-only banner from the middle of a
-   capture with `cut_band`.
-7. **Inventory**: `python doc_kit.py inventory shots.json` fails on a missing file and on any
-   (screen, role) a guide requires without a shot. An empty list is a failure, not a pass.
+   screen and role each one shows; `email-<message>-<role>.png` for a message. Keep `shots.json`
+   beside the build script: its `shotsDir` is resolved against the folder holding `shots.json`,
+   never the current directory, and the build reads the same folder through `doc_kit.shots_dir`.
+   Record the app's build stamp in its `build` key.
+6. **Messages** the app sends are part of the guides. Capture them in the mail client's web
+   view, from the test recipient's mailbox:
+   - search for the message (subject, or the test record's name) so the list holds only it;
+   - capture the **reading-pane element**, not the window: no folder list, no other people's mail;
+   - use the light theme; a dark-mode capture inverts the message's own colours and is not what
+     most readers see;
+   - an email with options (Approve / Reject) gets two shots: the actionable card with its buttons,
+     and the formatted copy below it;
+   - place them at the `email` width (4.0 in), so a message reads as a message, not a full screen.
+7. **Trim** with `python doc_kit.py trim out/shots out/shots-trimmed` (never edits in place). App
+   captures lose the player bar, letterbox and blank tail; the foot margin never reaches past the
+   app's own bottom edge. Files matching `--email` (default `email-*`) are copied as taken; `--mode
+   email` copies everything; `--exclude <pattern>` skips scratch captures. Remove a role-only
+   banner from the middle of a capture with `cut_band`.
+8. **Inventory**: `python doc_kit.py inventory shots.json` fails on a missing file and on any
+   (screen, role) a guide requires without a shot. An empty list is a failure, not a pass. Each
+   guide under `required` lists `roles` x `screens`, plus `pairs` (`[screen, role]`) for a screen
+   only some of its roles see, such as a message to one role; `--guide user` checks one guide.
 
 ## 6. Building, rendering and checking
 
-- Copy `build_guides_example.py` into `scripts/build-guides.py`; keep `doc_kit.py` beside it.
+- Copy `build_guides_example.py` into `scripts/build-guides.py`; keep `doc_kit.py` and `shots.json`
+  beside it. Every path in it is relative to the script, so it builds from any directory.
 - `python scripts/build-guides.py --draft` while captures are pending (a missing figure becomes a
   visible "capture needed" box); the final build stops on any missing figure.
-- Output to `out/` (git-ignored) as `.docx`; update fields and render the PDF through Word
-  (`model-driven-and-docs.md` section 4), then render the PDF pages to images and **read every page**
-  for stranded headings, figures alone on a page and tables split badly.
+- **Theme**: `doc_kit.load_theme("canvas/theme.json")` reads the app's own theme. Documented keys:
+  `colours.<token>.rgba` for `clrPrimary`, `clrPrimaryDark` (derived from the primary when absent),
+  `clrAccent`, `clrText`, `clrTextMuted`, `clrBorder`, `clrCanvas`, `clrWarning`;
+  `typography.font` (a font name, or `Font.'Name'`; `typography.fntBody` is read as the older
+  name; a description such as "platform default" keeps the kit's font). The other tokens in
+  `assets/templates/theme.json` and the keys `status`, `intake`, `layout`, `longText`,
+  `contrastChecked`, `typography.scale`, `weights` and `note` are accepted and unused. Any other key
+  is reported as a warning, so a misspelt token cannot silently do nothing.
+- **Figures**: `figure(file, caption, width)` with a width preset: `full` (6.4 in, the default),
+  `wide` (5.5), `half` (3.2), `narrow` (2.4), `email` (4.0); or inches.
+- **Tables from the source**: `column_table(columns, live, caption)` lists a table's columns from
+  the build manifest beside live metadata (choice values from live; a column in only one of the two
+  is marked). `lint_edges_table(lint, caption)` lists the flow write-to-trigger edges from
+  `lint-flows.mjs --json` (or `--verbose` text), with any loop shown as a warning.
+- **Pagination is the kit's job**, so the build script never adds blank paragraphs or breaks:
+  `page_break()` becomes page-break-before on the next paragraph (no blank page behind a full
+  one); callouts and table rows never split; a lead-in paragraph stays with the table or figure it
+  introduces; a caption stays with its table or figure; a header row repeats and never sits alone at
+  the foot of a page.
+- Each save writes `<guide>.figures.json` beside the `.docx` (the build and every figure used).
+  Check the whole set against the captures:
+  `python doc_kit.py inventory shots.json --build "<stamp>" --figures "out/*.figures.json"` fails on
+  a figure the build used that `shots.json` does not list, on a draft placeholder, and on captures
+  from another build.
+- Output to `out/` (git-ignored) as `.docx`. `python doc_kit.py finish out` opens each guide in Word
+  (Windows), updates every field and the contents, saves, exports the PDF and prints the page
+  count; without Word it exports the PDF with LibreOffice (which does not refresh a Word contents
+  page), and with neither it says so and exits 2. `python doc_kit.py render out out/pages` writes
+  every PDF page as a PNG (pypdfium2 or pdftoppm) and flags pages blank between the running head
+  and the footer. Then **read every page** for stranded headings, figures alone on a page and tables
+  split badly.
 - Commit the scripts and `shots.json`; never the output.
 
 ## 7. Definition of done
 
 - The developer chose which guides; each chosen guide builds without `--draft`.
-- `doc_kit.py inventory` passes; every figure was captured on the build named on the cover.
+- `doc_kit.py inventory shots.json --build "<stamp>" --figures "out/*.figures.json"` passes: every
+  required shot exists, every figure used is listed, and all were captured on the build named on the
+  cover.
 - Button names checked against source; no logical names outside the developer guide.
-- Every page of every PDF read; screens still needing recapture listed in the state file.
+- `doc_kit.py finish` and `render` run, no blank page flagged, and every page of every PDF read;
+  screens still needing recapture listed in the state file.
 - The developer guide's flow chapter carries the current `lint-flows.mjs --verbose` edge list, and
   its table chapter the current choice values read from metadata.
