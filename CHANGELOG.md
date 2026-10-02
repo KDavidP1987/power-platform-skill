@@ -11,6 +11,43 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-02
+
+Flow loops become a hard gate. A second app built with the skill showed that the per-flow
+self-write check could not see three loop shapes, and an older app in the same environment
+turned out to carry one of them.
+
+### Added
+
+- `lint-flows.mjs`: a trigger graph across all the flows given. Every Create, Update, Upsert or
+  Delete is an edge to each flow whose trigger it can fire (message code, table,
+  `filteringattributes`). An edge is dropped only when the target's trigger condition is false for
+  every value the write can land, trying each arm of an `if()`. New errors:
+  - `trigger-cycle`: any strongly connected set of flows, or a Create-triggered flow creating its
+    own rows;
+  - `alternating-rearm`: a write that can land two values which each start a flow (a retry sweep
+    flipping between two re-arming states loops forever once the target stops moving the row on);
+  - `update-trigger-unfiltered`: an Update trigger with no `filteringattributes`.
+- `lint-flows.mjs --require-safe-recipients`: every recipient parameter of a messaging connector
+  must be a `Safe_to_` Compose shaped `if(outputs('Is_live'), <real>, <test>)`, whose test branch
+  can only produce the allowlist or nothing; HTTP actions fail.
+- `lint-flows.mjs --verbose` prints the surviving trigger-graph edges.
+- Self-test: 6 loop-graph shapes (each looping shape and its fixed twin), 4 recipient shapes and
+  the unfiltered-trigger rule.
+- `references/power-automate.md`: the loop rules as a table; lost Dataverse trigger events
+  (a Create never delivered, a second change about 5 s after a first dropped, no event for an
+  unchanged value) and the two-step terminal sweep that recovers them; pinning the one permitted
+  address in flow source rather than in a settings row; proving recipients from run history too.
+
+### Changed
+
+- The cross-flow cycle check replaced: it compared table pairs only, ignored flows on the same
+  table, and could not see trigger conditions.
+- `SKILL.md` rule 8 is now a gate: no import unless the linter, run over every flow, exits 0, with
+  no waivers. Rule 9 adds the source-pinned recipient for builds that must not reach real people.
+- Flows that passed 0.2.x can now fail: every Dataverse Update trigger needs
+  `filteringattributes`.
+
 ## [0.2.2] - 2026-10-01
 
 First real build of a new app with the skill: a Dataverse + canvas onboarding app, from tables to a

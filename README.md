@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.2.2](https://img.shields.io/badge/plugin-0.2.2-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.3.0](https://img.shields.io/badge/plugin-0.3.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 32/32 vs 14/32](https://img.shields.io/badge/evaluation-32%2F32%20vs%2014%2F32-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.2.2 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.3.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On four realistic Power Platform tasks, the same model passed **32 of 32** graded checks with this
@@ -292,7 +292,14 @@ artifact could not be read.
 | `multiple-triggers` | More than one trigger in one definition |
 | `date-only-as-instant` | A date-only column used as a point in time (`--date-only`) |
 | `unknown-entity-set` | An entity set name that does not exist (`--entity-sets`) |
-| cross-flow cycles | Flows that trigger each other through shared tables |
+| `update-trigger-unfiltered` | A Dataverse Update trigger with no `filteringattributes`, which starts on any write to the row |
+| `trigger-cycle` | Any cycle of "this write starts that flow" across all the flows, including two flows on one table and a Create-triggered flow creating its own rows. An edge counts unless the target's trigger condition is false for every value the write can land |
+| `alternating-rearm` | One write that can land two values which each start a flow, such as a retry sweep flipping between two re-arming states |
+| `unsafe-recipient`, `unsafe-http` | With `--require-safe-recipients`: a recipient that is not a `Safe_to_` Compose whose test branch can only be the allowlist, or any HTTP action |
+
+The loop rules are a hard gate: run the linter over all the solution's flows at once (a cycle
+through two flows is invisible one file at a time), and import only on exit 0. `--verbose` prints
+the trigger graph's surviving edges.
 
 Exit codes: `0` clean, `1` findings, `2` no flow definitions found, which is not a pass.
 Activation is still the only real compile: turn each flow on once before trusting it.

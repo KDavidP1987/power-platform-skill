@@ -14,7 +14,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.2.2"
+  version: "0.3.0"
 ---
 
 # Power Platform development
@@ -56,10 +56,19 @@ These hold on every task. The reasons are short here; the references carry the f
    a canvas app binds them - Dataverse cannot change an attribute's type.
 7. **Security roles stay out of the solution.** An import carrying roles resets live access
    control. Every table the app binds must be granted by some role, proved by impersonation.
-8. **A flow that writes back to its trigger table must guard on a value its own write changes.**
-   The update trigger delivers the whole row, so any other guard loops forever, billed per run.
+8. **No flow ships that could loop. This is a hard gate, not a guideline.** Before any import,
+   `scripts/lint-flows.mjs` over ALL the solution's flows must exit 0, and no finding may be
+   waived. It fails on: an Update trigger without `filteringattributes`; a self-write not stopped
+   by a value it changes; any cycle of "this write starts that flow" across flows, including a
+   Create-triggered flow creating its own rows; and a write that can land two different values
+   which each start a flow. A recovery or sweep job must end in a terminal state a person
+   re-arms. The update trigger delivers the whole row, so any other guard loops forever, billed
+   per run - one project measured 1,203 runs in 45 minutes. See `references/power-automate.md`
+   sections 3 and 4.
 9. **Before any bulk write, ask what watches the table** - and count the messages that would go
-   to real people, then park the sender.
+   to real people, then park the sender. While a build must not reach real people, prove it from
+   source (`lint-flows.mjs --require-safe-recipients`) and from run history, and pin the one
+   permitted address in the flow source, where no settings edit can widen it.
 10. **An audit that can pass vacuously will.** Give every check a floor ("found at least N write
     paths"), prove it goes red on a known-bad input, and make it say when its own inputs are stale.
 

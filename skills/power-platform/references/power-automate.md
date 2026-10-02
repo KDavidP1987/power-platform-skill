@@ -19,8 +19,13 @@
 15. A checklist for every flow
 
 Lint definitions with `scripts/lint-flows.mjs <solution/src/Workflows>` - it checks most of what
-follows statically. Add `--entity-sets sets.json` to verify every entity set name and
-`--date-only cols.json` to flag date-only columns used as instants.
+follows statically. Add `--entity-sets sets.json` to verify every entity set name,
+`--date-only cols.json` to flag date-only columns used as instants, `--require-safe-recipients`
+while no message may reach a real person (section 10), and `--verbose` to print the trigger graph.
+
+**Point it at ALL the flows in the solution at once.** The loop rules (sections 3 and 4) read the
+graph across flows; linting one file at a time cannot see a cycle through two. Exit 0 is the gate
+for every import. A loop finding is never waived: change the flow until the linter proves it.
 
 ---
 
@@ -232,11 +237,40 @@ then **false**. Two consequences worth knowing:
 
 ## 4. Loops between flows, and bookkeeping writes
 
+**The loop rules, all enforced by `lint-flows.mjs` as errors:**
+
+| Rule (code) | What fails | Fix |
+|---|---|---|
+| `update-trigger-unfiltered` | A Dataverse trigger that fires on Update with no `filteringattributes`. It starts on ANY write to the row, so every write anywhere to that table is a potential loop edge. | Name the columns whose change means "do the work", and keep a trigger condition too. |
+| `self-trigger-loop`, `writes-filtered-column` | A flow writes its own trigger table and no condition reading a written column is false afterwards (section 3). | Guard on a value the write changes, in the trigger condition. |
+| `trigger-cycle` | A cycle in the graph "write W in flow A can start flow B": two or more flows feeding each other (on the same table or different ones), or a Create-triggered flow that creates rows in its own table. | A trigger condition on the cycle that the written values fail, or a narrower `filteringattributes`. |
+| `alternating-rearm` | One write that can land two different values (`if(...)` arms) which each start some flow - e.g. a sweep that flips Not Dispatched and Retry. Whenever the target fails to move the row on (it is off, its run errors, the event is lost) the row flips on every pass, forever. | The repeat attempt writes a TERMINAL value no trigger accepts (Failed), so a person re-arms it. |
+
+How it decides: every Create, Update, Upsert or Delete in every flow is an edge to every flow whose
+trigger it can fire (message code, table, and for an update an overlap with `filteringattributes`).
+The edge is removed only if that flow's **trigger condition** is false for every value the write can
+land - each arm of an `if()` is tried. An If inside the target does not remove it: the run has
+already started. Self-updates are left to the path-aware check of section 3. Anything the evaluator
+cannot read counts as "can fire", so it over-reports rather than under-reports; the answer to an
+over-report is a plainer trigger condition, not a waiver.
+
+`--verbose` prints the surviving edges. Read them: each should be an intended hand-off (a task
+created, so the dispatcher starts) that ends in a state nothing re-arms.
+
+- **Lost trigger events need a sweep, and the sweep must end.** Dataverse triggers are not
+  guaranteed delivery. Measured on one build: a row's Create event never reached the flow; a second
+  change about 5 s after a first was dropped; and a write of an unchanged value raises no event at
+  all (so "nudging" a row with the same value does nothing). A scheduled sweep that re-arms rows
+  left in the start state for N minutes recovers them - but make it two steps and terminal: stale
+  start state -> Retry (a value the dispatcher accepts); stale Retry -> Failed (a value nothing
+  accepts), surfaced in the app with a Retry button for a person. The first version flipped
+  Retry back to the start state: correct while the dispatcher worked, an infinite slow loop the day
+  it was switched off. `alternating-rearm` exists because of it.
 - **Loops between flows are invisible to a per-flow guard.** Flow A fires on X and writes Y; flow B
-  fires on Y and writes X; each passes "does not write its own trigger table". Build one graph of
-  every flow's trigger table and written tables, and fail on any cycle. List every `Foreach` with
-  what it walks (a query result fixed before the loop, never something the body grows), and treat
-  every `Until` as a finding unless somebody can say why it terminates.
+  fires on Y and writes X; each passes "does not write its own trigger table". The linter builds the
+  graph and fails on any cycle. List every `Foreach` with what it walks (a query result fixed before
+  the loop, never something the body grows), and treat every `Until` as a finding unless somebody
+  can say why it terminates.
 - **A bookkeeping column on a watched table is a change, as far as every flow is concerned.** An
   "editing by / editing since" marker written when someone opens a record fires every update flow
   on every open - change-log rows, and "your record was changed" emails when an admin merely
@@ -515,6 +549,23 @@ mailbox permissions still apply.
   switch-reading expression **by reference** to the row it reads - a match on the reader action's
   name passed a reader repointed at an unrelated setting.
 
+**Prove "only the allowlist" from the source, and pin it while it must hold.**
+
+- `lint-flows.mjs --require-safe-recipients` fails any recipient parameter of a messaging connector
+  (To, Cc, Bcc, reply-to, Teams recipient, group and channel ids, approval assignees) that is not
+  exactly `@outputs('Safe_to_<x>')`, any `Safe_to_` Compose that is not
+  `if(outputs('Is_live'), <real>, <test>)` with a test branch that can only produce
+  `outputs('Allowlist')` or `''`, a sending flow with no `Is_live`, and any HTTP action.
+- **An allowlist held in a settings row is only as narrow as the last edit to it.** For a prototype
+  that must reach exactly one person, put that address in the flow source as a constant: `Is_live`
+  gets `and(..., equals('<pinned>', ''))`, so it is false whatever the settings say, and `Allowlist`
+  becomes `if(contains(<setting>, '<pinned>'), '<pinned>', '')`, so a widened setting sends to
+  nobody new and a cleared one sends nothing. Lifting the pin is then a reviewed commit and a
+  redeploy, never a data edit.
+- **Then prove it from run history.** Read every run of every sending flow and list the recipients
+  each send action actually received (section 14). "The source says so" and "the runs say so" are
+  separate claims; make both.
+
 **Scheduled mailers are a different risk class.** A trigger flow mails the people involved in
 something a person just did. A scheduled flow mails whatever its query returns, unattended, often
 the whole roster. Keep an audit that reads **live** state by default (a source-only run cannot say
@@ -668,8 +719,12 @@ Prefer: odata.include-annotations="*",odata.maxpagesize=5000
       registration counted in `callbackregistration`.
 - [ ] Update handlers re-read the row; delete handlers tolerate missing fields; no design depends on
       prior values from the trigger.
-- [ ] Any write to the trigger table is guarded by a value that write changes; no cross-flow cycle;
-      logs record transitions, not current state.
+- [ ] `lint-flows.mjs` over ALL the solution's flows exits 0: every Update trigger names
+      `filteringattributes`; every self-write is guarded by a value it changes; no `trigger-cycle`;
+      no `alternating-rearm`; recovery sweeps end in a terminal state. Logs record transitions,
+      not current state.
+- [ ] While nobody real may be reached: `--require-safe-recipients` exits 0, the one permitted
+      address is pinned in source, and the recipients in run history were read back.
 - [ ] Every action reference is on its `runAfter` path; no apostrophes in single-quoted literals;
       no property name starting with a single `@`; every `entityName` is a real entity set.
 - [ ] No date-only column used as an instant; optional dates `coalesce`d; tested with a fixture

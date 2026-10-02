@@ -657,16 +657,183 @@ function checkEntitySets(flow, sets, add) {
   });
 }
 
-export function lint(flows, { entitySets = null, dateOnly = null } = {}) {
+// ---------- loop rules across ALL flows: the trigger graph ----------
+// A loop is any cycle of "this write starts that flow". A per-flow guard sees only self-writes; a
+// cycle through two flows on the same table, a Create-triggered flow that creates its own rows, or
+// a scheduled job that flips a row between two values that each start a flow, are all invisible to
+// it. So every Dataverse write in every flow is an edge to every flow its write can START, unless
+// that flow's TRIGGER CONDITION is provably false for every value the write can put in the row.
+// Only a trigger condition counts: an If inside the target still lets the run start.
+const FIRES = { create: new Set([1, 4, 5, 7]), update: new Set([3, 4, 6, 7]), delete: new Set([2, 5, 6, 7]) };
+
+// The literal values an expression can produce: if(c, a, b) -> values of a and b; coalesce
+// likewise; anything else is evaluated (UNKNOWN when it depends on run time).
+function leaves(node, ctx, depth = 0) {
+  if (!node || depth > 6) return [UNKNOWN];
+  node = substitute(node, ctx);
+  if (node.t === 'lit') return [node.v];
+  if (node.t === 'call') {
+    const n = node.name.toLowerCase();
+    if (n === 'if' && node.args.length === 3) return [...leaves(node.args[1], ctx, depth + 1), ...leaves(node.args[2], ctx, depth + 1)];
+    if (n === 'coalesce') return node.args.flatMap((a) => leaves(a, ctx, depth + 1));
+  }
+  return [evaluate(node, ctx, { written: new Map() })];
+}
+const keyOf = (v) => (v === UNKNOWN ? '<run-time value>' : v === NONBLANK ? '<non-blank>' : JSON.stringify(v));
+
+function writesOf(flow, ctx) {
+  const out = [];
+  walk(flow.def.actions, (n, a) => {
+    const op = a.inputs && a.inputs.host && a.inputs.host.operationId;
+    const p = (a.inputs && a.inputs.parameters) || {};
+    const kind = op === 'CreateRecord' ? 'create' : (op === 'UpdateRecord' || op === 'UpdateOnlyRecord') ? 'update'
+               : op === 'DeleteRecord' ? 'delete' : op === 'UpsertRecord' ? 'upsert' : null;
+    if (!kind || typeof p.entityName !== 'string') return;
+    const cols = new Map();
+    for (const [k, v] of Object.entries(p)) if (k.startsWith('item/')) cols.set(k.slice(5).toLowerCase().replace(/@odata\.bind$/, ''), leaves(parseValue(v), ctx));
+    out.push({ action: n, kind, table: p.entityName, cols });
+  });
+  return out;
+}
+
+// Can this write start flow B, and is that start blocked by B's trigger condition for EVERY
+// combination of the values the write can land? Returns {fires, blocked, rearming}.
+function edge(write, B) {
+  const t = B.t;
+  if (!t.isDataverse || !t.table || !sameTable(t.table, write.table)) return { fires: false };
+  const code = Number(t.message);
+  const kinds = write.kind === 'upsert' ? ['create', 'update'] : [write.kind];
+  if (!kinds.some((k) => FIRES[k].has(code))) return { fires: false };
+  if (write.kind === 'update' && t.filtering) {
+    const f = String(t.filtering).toLowerCase().split(',').map((s) => s.trim());
+    if (![...write.cols.keys()].some((c) => f.includes(c))) return { fires: false };
+  }
+  const conds = (t.conditions || []).map((c) => flattenAnd(substitute(parseValue(c && typeof c === 'object' ? c.expression : c), B.ctx)));
+  const read = new Set(conds.flat().flatMap((ast) => [...readsColumns(ast, B.ctx)]));
+  let combos = [new Map()];
+  for (const [c, vals] of write.cols) {
+    if (!read.has(c)) continue;
+    const next = [];
+    for (const m of combos) for (const v of new Set(vals)) { const m2 = new Map(m); m2.set(c, v); next.push(m2); }
+    combos = next.slice(0, 256);
+  }
+  const rearming = combos.filter((env) => !conds.some((parts) => parts.some((ast) => evaluate(ast, B.ctx, { written: env }) === false)));
+  return { fires: true, blocked: rearming.length === 0, rearming };
+}
+
+function checkTriggerGraph(flows) {
+  const nodes = flows.map((f) => { const t = triggerInfo(f.def); const ctx = flowContext(f, t); return { name: f.name, t, ctx, writes: writesOf(f, ctx) }; });
+  const findings = [];
+  const adj = new Map(nodes.map((n) => [n.name, []]));
+  for (const A of nodes) for (const w of A.writes) for (const B of nodes) {
+    const e = edge(w, B);
+    if (!e.fires) continue;
+    // Alternating re-arm: one write that can land TWO different values which each start B. Run
+    // again (by a schedule, by B, by anything) it flips the row between them and B starts on every
+    // flip, forever, whenever B does not move the row on (B off, a failing run, a lost event).
+    const byCol = new Map();
+    for (const env of e.rearming) for (const [c, v] of env) {
+      if (v === UNKNOWN) continue;
+      if (!byCol.has(c)) byCol.set(c, new Set());
+      byCol.get(c).add(keyOf(v));
+    }
+    for (const [c, vals] of byCol) if (vals.size > 1) {
+      findings.push({ level: 'error', code: 'alternating-rearm', flow: A.name, msg: `'${w.action}' can write ${c} = ${[...vals].join(' or ')}, and ` +
+        `EACH of those values starts '${B.name}'. Writing between two re-arming values is a slow infinite loop whenever '${B.name}' ` +
+        `does not move the row out of that state (flow off, a failing run, a lost trigger event). Make the repeat attempt write a ` +
+        `TERMINAL value no trigger accepts (e.g. Failed), so a person re-arms it.` });
+    }
+    if (e.blocked) continue;
+    if (A === B && w.kind === 'update') continue; // self-update: checkSelfWrite decides it, with path guards
+    adj.get(A.name).push({ to: B.name, via: w.action, kind: w.kind });
+  }
+  // Cycles (Tarjan SCC): a strongly connected set of 2+ flows, or a flow with an edge to itself.
+  let idx = 0; const st = [], on = new Set(), index = new Map(), low = new Map(), sccs = [];
+  const strong = (v) => {
+    index.set(v, idx); low.set(v, idx); idx++; st.push(v); on.add(v);
+    for (const e of adj.get(v)) {
+      if (!index.has(e.to)) { strong(e.to); low.set(v, Math.min(low.get(v), low.get(e.to))); }
+      else if (on.has(e.to)) low.set(v, Math.min(low.get(v), index.get(e.to)));
+    }
+    if (low.get(v) === index.get(v)) { const c = []; let x; do { x = st.pop(); on.delete(x); c.push(x); } while (x !== v); sccs.push(c); }
+  };
+  for (const n of adj.keys()) if (!index.has(n)) strong(n);
+  for (const c of sccs) {
+    const set = new Set(c);
+    const inner = c.flatMap((a) => adj.get(a).filter((e) => set.has(e.to)).map((e) => `'${a}' --${e.kind} '${e.via}'--> '${e.to}'`));
+    if (c.length > 1 || inner.length) findings.push({ level: 'error', code: 'trigger-cycle', flow: c.join(' + '),
+      msg: `these writes can start each other in a cycle: ${inner.join('; ')}. No trigger condition on the cycle is provably false ` +
+        `for the values written, so one event can run forever. Break it with a trigger condition the written value fails ` +
+        `(a status the write moves past, a processed flag), or narrow filteringattributes so the write does not fire the trigger.` });
+  }
+  return { findings, edges: [...adj].flatMap(([a, es]) => es.map((e) => ({ from: a, ...e }))) };
+}
+
+// Every Update trigger must name its columns. Without filteringattributes the flow starts on ANY
+// change to the row - other flows' writes and its own - so every write to that table anywhere is a
+// potential loop edge, and every one costs a run.
+function checkUpdateFilter(t, add) {
+  if (!t.isDataverse || !FIRES.update.has(Number(t.message))) return;
+  if (!t.filtering || !String(t.filtering).trim()) add('error', 'update-trigger-unfiltered', `trigger '${t.tname}' fires on Update of ` +
+    `${t.table} with no filteringattributes, so ANY write to the row starts it - other flows' writes and its own. List the columns ` +
+    `whose change means "do the work" (subscriptionRequest/filteringattributes), and keep a trigger condition as well.`);
+}
+
+// --require-safe-recipients: every address a message can go to is the output of a Compose named
+// Safe_to_<x>, built as if(outputs('Is_live'), <real>, outputs('Allowlist')) (or '' for a
+// channel), and no HTTP action exists (it can reach anything). "In test, only the allowlist is
+// ever addressed" becomes a property of the source, not of reviewer attention.
+const MESSAGING = /^shared_(office365|office365users|outlook|teams|sendmail|smtp|sendgrid|twilio|approvals|outlookgroups)/i;
+const RECIPIENT_KEY = /(^|\/)(to|cc|bcc|replyto|recipient|recipients|assignedto|groupid|channelid|emailaddress|mailto|phonenumber)$/i;
+const isOutputs = (n, name) => n && n.t === 'call' && n.name.toLowerCase() === 'outputs' && n.args.length === 1 && n.args[0].t === 'lit' && n.args[0].v === name;
+// Every value the test branch can produce is the allowlist or ''; nested if() is followed into both arms.
+function testOnly(n) {
+  if (n && n.t === 'lit') return n.v === '' || n.v === null;
+  if (isOutputs(n, 'Allowlist')) return true;
+  if (n && n.t === 'call' && n.name.toLowerCase() === 'if' && n.args.length === 3) return testOnly(n.args[1]) && testOnly(n.args[2]);
+  return false;
+}
+function safeShape(n) {
+  return !!n && n.t === 'call' && n.name.toLowerCase() === 'if' && n.args.length === 3 && isOutputs(n.args[0], 'Is_live') && testOnly(n.args[2]);
+}
+function checkSafeRecipients(flow, add) {
+  const composes = new Map();
+  walk(flow.def.actions, (n, a) => { if (a.type === 'Compose') composes.set(n, typeof a.inputs === 'string' ? a.inputs : JSON.stringify(a.inputs)); });
+  let sends = false;
+  walk(flow.def.actions, (n, a) => {
+    if (/^Http/i.test(a.type || '')) add('error', 'unsafe-http', `'${n}' is an HTTP action; under --require-safe-recipients nothing may call ` +
+      `out except a messaging connector whose recipients are Safe_to_ composes.`);
+    const h = (a.inputs && a.inputs.host) || {};
+    const conn = String(h.connectionName || h.apiId || '').split('/').pop();
+    if (!MESSAGING.test(conn) && !(h.operationId && SEND_OPS.test(h.operationId))) return;
+    sends = true;
+    const p = (a.inputs && a.inputs.parameters) || {};
+    for (const [k, v] of Object.entries(p)) {
+      if (!RECIPIENT_KEY.test(k) || v === '' || v === null) continue;
+      const m = typeof v === 'string' && /^@outputs\('(Safe_to_[A-Za-z0-9_]+)'\)$/.exec(v.trim());
+      if (!m) { add('error', 'unsafe-recipient', `'${n}' parameter ${k} = ${JSON.stringify(v).slice(0, 120)} - a recipient must be exactly ` +
+        `@outputs('Safe_to_<x>'), so test mode can only ever address the allowlist.`); continue; }
+      const src = composes.get(m[1]);
+      if (!src) add('error', 'unsafe-recipient', `'${n}' uses ${m[1]}, which is not a Compose in this flow.`);
+      else if (!safeShape(parseValue(src)))
+        add('error', 'unsafe-recipient', `${m[1]} is not if(outputs('Is_live'), <real>, <test>) with a test branch that can only be ` +
+          `outputs('Allowlist') or '': ${src.replace(/\s+/g, ' ').slice(0, 160)}`);
+    }
+  });
+  if (sends && !composes.has('Is_live')) add('error', 'unsafe-recipient', `the flow sends messages but has no Compose named Is_live.`);
+}
+
+export function lint(flows, { entitySets = null, dateOnly = null, safeRecipients = false } = {}) {
   const results = [];
-  const graph = [];
   for (const flow of flows) {
     const items = [];
     const add = (level, code, msg) => items.push({ level, code, msg });
     const t = triggerInfo(flow.def);
     checkRuntimeSource(flow, t, add);
     checkMessageCode(t, add);
+    checkUpdateFilter(t, add);
     checkSelfWrite(flow, t, add);
+    if (safeRecipients) checkSafeRecipients(flow, add);
     checkApostrophes(flow, add);
     scopeErrors(flow.def.actions || {}, new Set(), add);
     checkSends(flow, add);
@@ -675,24 +842,12 @@ export function lint(flows, { entitySets = null, dateOnly = null } = {}) {
     checkTriggerCount(flow, add);
     checkDateOnly(flow, dateOnly, add);
     checkShapeNotes(flow, add);
-    const written = new Set();
-    walk(flow.def.actions, (n, a) => {
-      const op = a.inputs && a.inputs.host && a.inputs.host.operationId;
-      const p = (a.inputs && a.inputs.parameters) || {};
-      if (/^(UpdateRecord|CreateRecord|DeleteRecord)$/.test(op || '') && p.entityName) written.add(String(p.entityName).toLowerCase());
-    });
-    graph.push({ flow: flow.name, trigger: t.isDataverse ? String(t.table).toLowerCase() : null, written: [...written] });
     results.push({ file: flow.file, flow: flow.name, items });
   }
-  // Cross-flow cycles: A fires on X and writes Y; B fires on Y and writes X.
-  const cycles = [];
-  for (const a of graph) for (const b of graph) {
-    if (a === b || !a.trigger || !b.trigger || a.trigger === b.trigger) continue; // same table: per-flow guard covers it
-    if (a.written.some((w) => sameTable(b.trigger, w)) && b.written.some((w) => sameTable(a.trigger, w)) && a.flow < b.flow) {
-      cycles.push(`'${a.flow}' (on ${a.trigger}) writes what '${b.flow}' triggers on, and vice versa - a loop no per-flow guard can see.`);
-    }
-  }
-  return { results, cycles };
+  // Loops across flows (and Create and re-arm loops within one): the trigger graph.
+  const graph = checkTriggerGraph(flows);
+  const cycles = graph.findings.map((f) => `${f.code} [${f.flow}]: ${f.msg}`);
+  return { results, cycles, edges: graph.edges };
 }
 
 // ---------- self-test ----------
@@ -704,7 +859,8 @@ function fixture(bad) {
     def: {
       triggers: {
         When_a_request_is_updated: { type: 'OpenApiConnectionWebhook', inputs: { host: host('SubscribeWebhookTrigger'),
-          parameters: { 'subscriptionRequest/message': bad ? 2 : 3, 'subscriptionRequest/entityname': 'app_request', 'subscriptionRequest/scope': 4 } } },
+          parameters: { 'subscriptionRequest/message': bad ? 2 : 3, 'subscriptionRequest/entityname': 'app_request', 'subscriptionRequest/scope': 4,
+            ...(bad ? {} : { 'subscriptionRequest/filteringattributes': 'app_status' }) } } },
         ...(bad ? { Every_morning: { type: 'Recurrence', recurrence: { frequency: 'Day', interval: 1 } } } : {}),
       },
       actions: {
@@ -767,12 +923,74 @@ const GUARD_CASES = [
   ['assumes-nonblank-dynamic', { write: { 'item/app_rate': "@outputs('Find_rate')?['body/amount']" }, wrap: ifYes({ equals: ["@coalesce(triggerOutputs()?['body/app_rate'], '')", ''] }) }, 'self-write-guard-assumes-value'],
 ];
 
+// Loop shapes across flows. Each case is a set of flows and the graph finding it must (or must not) raise.
+function graphFlow(name, { message = 3, filtering, conditions = [], recurrence = false, actions }) {
+  const host = (op) => ({ connectionName: 'shared_commondataserviceforapps', operationId: op });
+  const trig = recurrence ? { Every_15_minutes: { type: 'Recurrence', recurrence: { frequency: 'Minute', interval: 15 } } }
+    : { When_a_request_changes: { type: 'OpenApiConnectionWebhook', conditions, inputs: { host: host('SubscribeWebhookTrigger'), parameters: {
+        'subscriptionRequest/message': message, 'subscriptionRequest/entityname': 'app_request', 'subscriptionRequest/scope': 4,
+        ...(filtering ? { 'subscriptionRequest/filteringattributes': filtering } : {}) } } } };
+  const acts = {};
+  for (const [n, a] of Object.entries(actions)) acts[n] = { type: 'OpenApiConnection', runAfter: {}, inputs: { host: host(a.op), parameters: { entityName: 'app_requests', ...a.p } } };
+  return { file: name + '.json', name, refs: {}, def: { triggers: trig, actions: acts } };
+}
+const ROW = "@triggerOutputs()?['body/app_requestid']";
+const STATE_IS = (...v) => [{ expression: `@or(${v.map((x) => `equals(triggerOutputs()?['body/app_state'], ${x})`).join(', ')})` }];
+const GRAPH_CASES = [
+  ['two-flows-feed-each-other', [
+    graphFlow('a', { filtering: 'app_a', actions: { Set_b: { op: 'UpdateRecord', p: { recordId: ROW, 'item/app_b': 1 } } } }),
+    graphFlow('b', { filtering: 'app_b', actions: { Set_a: { op: 'UpdateRecord', p: { recordId: ROW, 'item/app_a': 1 } } } })], 'trigger-cycle'],
+  ['two-flows-broken-by-condition', [
+    graphFlow('a', { filtering: 'app_a', conditions: [{ expression: "@equals(triggerOutputs()?['body/app_a'], 1)" }],
+      actions: { Set_b: { op: 'UpdateRecord', p: { recordId: ROW, 'item/app_b': 1 } } } }),
+    graphFlow('b', { filtering: 'app_b', actions: { Set_a: { op: 'UpdateRecord', p: { recordId: ROW, 'item/app_a': 2 } } } })], null],
+  ['create-flow-creates-its-own-rows', [
+    graphFlow('a', { message: 1, actions: { Add_one: { op: 'CreateRecord', p: { 'item/app_name': 'x' } } } })], 'trigger-cycle'],
+  ['create-flow-condition-excludes-its-rows', [
+    graphFlow('a', { message: 1, conditions: [{ expression: "@not(equals(triggerOutputs()?['body/app_generated'], true))" }],
+      actions: { Add_one: { op: 'CreateRecord', p: { 'item/app_generated': true } } } })], null],
+  ['sweep-alternates-two-rearming-values', [
+    graphFlow('sweep', { recurrence: true, actions: { Flip: { op: 'UpdateRecord', p: { recordId: "@items('Each')?['app_requestid']",
+      'item/app_state': "@if(equals(items('Each')?['app_state'], 2), 1, 2)" } } } }),
+    graphFlow('dispatch', { filtering: 'app_state', conditions: STATE_IS(1, 2), actions: {} })], 'alternating-rearm'],
+  ['sweep-ends-in-a-terminal-value', [
+    graphFlow('sweep', { recurrence: true, actions: { Flip: { op: 'UpdateRecord', p: { recordId: "@items('Each')?['app_requestid']",
+      'item/app_state': "@if(equals(items('Each')?['app_state'], 2), 9, 2)" } } } }),
+    graphFlow('dispatch', { filtering: 'app_state', conditions: STATE_IS(1, 2), actions: {} })], null],
+];
+function recipientFlow(to, compose) {
+  return { file: 'r.json', name: 'r', refs: {}, def: {
+    triggers: { Every_day: { type: 'Recurrence', recurrence: { frequency: 'Day', interval: 1 } } },
+    actions: {
+      Is_live: { type: 'Compose', runAfter: {}, inputs: '@false' },
+      Allowlist: { type: 'Compose', runAfter: { Is_live: ['Succeeded'] }, inputs: 'test@example.invalid' },
+      Safe_to_owner: { type: 'Compose', runAfter: { Allowlist: ['Succeeded'] }, inputs: compose },
+      Send: { type: 'OpenApiConnection', runAfter: { Safe_to_owner: ['Succeeded'] }, inputs: { host: { connectionName: 'shared_office365', operationId: 'SendEmailV2' },
+        parameters: { 'emailMessage/To': to, 'emailMessage/Subject': 'x' } } } } } };
+}
+const RECIPIENT_CASES = [
+  ['safe', recipientFlow("@outputs('Safe_to_owner')", "@if(outputs('Is_live'), 'owner@example.invalid', outputs('Allowlist'))"), 0],
+  ['safe-nested-test-branch', recipientFlow("@outputs('Safe_to_owner')", "@if(outputs('Is_live'), '', if(equals(1, 0), '', outputs('Allowlist')))"), 0],
+  ['direct-address', recipientFlow('owner@example.invalid', "@if(outputs('Is_live'), 'x', outputs('Allowlist'))"), 1],
+  ['test-branch-leaks', recipientFlow("@outputs('Safe_to_owner')", "@if(outputs('Is_live'), 'owner@example.invalid', if(equals(1, 0), 'owner@example.invalid', outputs('Allowlist')))"), 1],
+];
+
 function selftest() {
   const dateOnly = new Set(['app_approvedon']);
   const bad = lint([fixture(true)], { dateOnly }).results[0].items.filter((i) => i.level !== 'info').map((i) => i.code);
   const good = lint([fixture(false)], { dateOnly }).results[0].items.filter((i) => i.level !== 'info');
   const want = ['runtime-invoker', 'trigger-message-mismatch', 'self-trigger-loop', 'apostrophe-in-literal', 'not-on-runafter-path', 'send-after-failed',
                 'at-property-name', 'multiple-triggers', 'date-only-as-instant'];
+  const graphFails = [];
+  for (const [name, flows, expect] of GRAPH_CASES) {
+    const codes = lint(flows).cycles.map((c) => c.split(' ')[0]);
+    const ok = expect === null ? codes.length === 0 : codes.includes(expect);
+    if (!ok) graphFails.push(`${name}: expected ${expect || 'no loop'}, got ${codes.join(', ') || 'no loop'}`);
+  }
+  for (const [name, flow, expect] of RECIPIENT_CASES) {
+    const n = lint([flow], { safeRecipients: true }).results[0].items.filter((i) => /^unsafe-/.test(i.code)).length;
+    if ((n > 0) !== (expect > 0)) graphFails.push(`recipients ${name}: expected ${expect ? 'a finding' : 'none'}, got ${n}`);
+  }
   const missing = want.filter((w) => !bad.includes(w));
   const guardFails = [];
   for (const [name, opts, expect] of GUARD_CASES) {
@@ -800,11 +1018,15 @@ function selftest() {
     ['Locked @{utcNow()} by @{workflow()?.run?.name}', (n) => n.t === 'interp' && n.parts.length === 4],
     ["@not(equals(", (n) => n.t === 'unknown'],
   ].filter(([src, okFn]) => !okFn(parseValue(src))).map(([src]) => 'parse: ' + src);
-  const ok = missing.length === 0 && good.length === 0 && guardFails.length === 0 && parsed.length === 0;
+  // The bad fixture fires on Delete, so the unfiltered-Update rule is proven on a guard fixture.
+  const unf = lint([guardFixture('unfiltered', { wrap: ifYes({ not: { equals: ["@triggerOutputs()?['body/app_locked']", true] } }) })]).results[0].items.some((i) => i.code === 'update-trigger-unfiltered');
+  if (!unf) graphFails.push('update-trigger-unfiltered: not raised on an Update trigger without filteringattributes');
+  const ok = missing.length === 0 && good.length === 0 && guardFails.length === 0 && parsed.length === 0 && graphFails.length === 0;
   console.log(ok ? `selftest ok: bad fixture -> ${bad.length} findings (${[...new Set(bad)].join(', ')}), good fixture -> 0, ` +
-                   `${GUARD_CASES.length} guard shapes and 2 filteringattributes cases decided as expected, parser cases ok`
+                   `${GUARD_CASES.length} guard shapes and 2 filteringattributes cases decided as expected, ${GRAPH_CASES.length} loop-graph ` +
+                   `shapes, ${RECIPIENT_CASES.length} recipient shapes and the unfiltered-trigger rule as expected, parser cases ok`
                  : `selftest FAILED: missing [${missing.join(', ')}]; good fixture produced: ${good.map((g) => g.code + ': ' + g.msg).join(' | ')}; ` +
-                   `guard shapes: [${guardFails.join(' | ')}]; parser: [${parsed.join(' | ')}]`);
+                   `guard shapes: [${guardFails.join(' | ')}]; loop graph / recipients: [${graphFails.join(' | ')}]; parser: [${parsed.join(' | ')}]`);
   process.exit(ok ? 0 : 1);
 }
 
@@ -825,15 +1047,16 @@ else if (argv.length === 0 || argv.includes('--help')) {
   const paths = argv.filter((a, k) => !a.startsWith('--') && !valueIdx.has(k));
   const flows = loadFlows(paths);
   if (flows.length === 0) { console.error('No flow definitions found under: ' + paths.join(', ') + ' - this is NOT a pass.'); process.exit(2); }
-  const { results, cycles } = lint(flows, { entitySets: sets, dateOnly });
-  if (argv.includes('--json')) { console.log(JSON.stringify({ results, cycles }, null, 2)); }
+  const { results, cycles, edges } = lint(flows, { entitySets: sets, dateOnly, safeRecipients: argv.includes('--require-safe-recipients') });
+  if (argv.includes('--json')) { console.log(JSON.stringify({ results, cycles, edges }, null, 2)); }
   else {
     for (const r of results) {
       const shown = r.items.filter((x) => x.level !== 'info' || argv.includes('--verbose'));
       console.log(`${shown.some((x) => x.level === 'error') ? 'FAIL' : 'ok  '}  ${r.flow}`);
       for (const it of shown) console.log(`      ${it.level.toUpperCase().padEnd(5)} ${it.code}: ${it.msg}`);
     }
-    for (const c of cycles) console.log('FAIL  cross-flow cycle: ' + c);
+    for (const c of cycles) console.log('FAIL  ' + c);
+    if (argv.includes('--verbose')) for (const e of edges) console.log(`      edge: '${e.from}' --${e.kind} '${e.via}'--> '${e.to}'`);
     console.log(`\n${flows.length} flow(s) read. Activation is still the only compile - turn each flow on once before trusting it.`);
   }
   const errors = results.some((r) => r.items.some((x) => x.level === 'error')) || cycles.length > 0;
