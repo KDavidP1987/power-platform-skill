@@ -484,11 +484,25 @@ const MEASURE = {
       const top = document.elementFromPoint(x, y);
       return !!top && (el === top || el.contains(top) || top.contains(el));
     };
+    // The box as drawn: cut to every ancestor that clips its overflow. A gallery row scrolled past
+    // the gallery's edge keeps its full layout box, but none of it is on screen.
+    const clipped = (el) => {
+      const r = el.getBoundingClientRect();
+      let x1 = r.left, y1 = r.top, x2 = r.right, y2 = r.bottom;
+      for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        const ps = getComputedStyle(p);
+        if (ps.overflowX === 'visible' && ps.overflowY === 'visible') continue;
+        const q = p.getBoundingClientRect();
+        if (ps.overflowX !== 'visible') { x1 = Math.max(x1, q.left); x2 = Math.min(x2, q.right); }
+        if (ps.overflowY !== 'visible') { y1 = Math.max(y1, q.top); y2 = Math.min(y2, q.bottom); }
+      }
+      return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+    };
     const boxes = [];
     for (const el of document.querySelectorAll('div[' + attr + ']')) {
       const cs = getComputedStyle(el);
       if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') continue;
-      const r = el.getBoundingClientRect();
+      const r = clipped(el);
       if (r.width < 2 || r.height < 2) continue;
       if (el.querySelector('div[' + attr + ']')) continue;
       const txt = (el.textContent || '').trim();

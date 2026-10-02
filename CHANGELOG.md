@@ -31,6 +31,13 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
   `first-run.md` (the agent creates tables itself once the token command works, with System
   Customizer or System Administrator) and `dataverse-web-api.md` section 4.
 
+### Fixed
+
+- `canvas-browser.mjs` `overlapcheck`: each control's box is cut to every ancestor that clips its
+  overflow before pairs are compared. A gallery row scrolled past the gallery's edge keeps its full
+  layout box, so a label just below a gallery was reported as overlapped by a row nobody can see
+  (found on a real app: 2 px, after the source checker had passed it).
+
 ### Changed
 
 - `check-canvas-overlap.mjs` names every control it skipped, with file and line, in the report and

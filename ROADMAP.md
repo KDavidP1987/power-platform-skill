@@ -76,6 +76,9 @@ actually shipped.
   - clearing a single-select ComboBox, across control versions.
 - **Run `canvas-browser.mjs`'s remaining untried paths against a real tenant**: the save proof,
   `publish --reload-first`, `--channel`, and `doctor`'s Studio half.
+- **`walk` waits for the app to be ready before step 1**: on a real tenant a first `click` failed
+  once with "nothing clickable matched" and passed on the re-run. Wait for a named control (or the
+  build stamp) rather than a fixed settle.
 - **Run the long-text and list checks over more apps**, and turn any recurring false positive into a
   rule or an exclusion with a self-test case.
 
