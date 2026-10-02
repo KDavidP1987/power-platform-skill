@@ -1,0 +1,38 @@
+{
+  "_about": "The app's theme, recorded before the first screen (references/project-setup.md, section 3). App.pa.yaml defines one token per colour and font below, once; screens reference the tokens and never a literal (check-canvas-format.mjs enforces it). Change a value here and in App.pa.yaml together.",
+  "status": "interim | agreed - and what is still pending",
+  "intake": {
+    "palette": "the organisation's brand colours, and any colours it must not use",
+    "fonts": "brand font, or the platform default",
+    "logo": "file, where it lives, owner, licence",
+    "imagery": "photography or illustration style, sources, licence",
+    "iconography": "icon set; icons or marks that carry meaning, and any to avoid",
+    "symbolism": "emblems, programme marks, colours with meaning (safety, status)",
+    "landingPage": "what each role must see first on the home screen, in order",
+    "tone": "e.g. plain, instructional; words to use or avoid",
+    "contrast": "e.g. WCAG AA 4.5:1 for body text; minimum text size",
+    "mode": "light | dark | both; design surface e.g. 1366x768"
+  },
+  "colours": {
+    "clrPrimary":   { "rgba": [0, 0, 0, 1], "use": "primary actions, links, selected state" },
+    "clrAccent":    { "rgba": [0, 0, 0, 1], "use": "secondary emphasis" },
+    "clrText":      { "rgba": [0, 0, 0, 1], "use": "body text" },
+    "clrTextMuted": { "rgba": [0, 0, 0, 1], "use": "secondary text, captions" },
+    "clrBorder":    { "rgba": [0, 0, 0, 1], "use": "borders, dividers" },
+    "clrCanvas":    { "rgba": [0, 0, 0, 1], "use": "screen background" },
+    "clrSurface":   { "rgba": [0, 0, 0, 1], "use": "cards, galleries, dialogs" },
+    "clrSuccess":   { "rgba": [0, 0, 0, 1], "use": "done, approved" },
+    "clrWarning":   { "rgba": [0, 0, 0, 1], "use": "waiting, due soon" },
+    "clrError":     { "rgba": [0, 0, 0, 1], "use": "overdue, blocked, validation" },
+    "clrOnPrimary": { "rgba": [0, 0, 0, 1], "use": "text on clrPrimary" }
+  },
+  "typography": {
+    "fntBody": "Font.'Segoe UI' or the brand font",
+    "scale": { "caption": 9, "body": 10, "bodyStrong": 11, "sectionTitle": 13, "screenTitle": 16 }
+  },
+  "contrastChecked": [
+    { "text": "clrText", "on": "clrSurface", "ratio": null },
+    { "text": "clrTextMuted", "on": "clrCanvas", "ratio": null },
+    { "text": "clrOnPrimary", "on": "clrPrimary", "ratio": null }
+  ]
+}

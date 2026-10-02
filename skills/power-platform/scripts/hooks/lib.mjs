@@ -6,7 +6,8 @@ import { execSync } from 'node:child_process';
 export const IGNORE_MARKER = 'standards-ignore';
 
 export function readStdinJson() {
-  try { const raw = fs.readFileSync(0, 'utf8'); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  // A byte-order mark (PowerShell adds one when piping) would make JSON.parse throw and the hook pass vacuously.
+  try { const raw = fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, ''); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 export function readFileSafe(file) {
   try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }

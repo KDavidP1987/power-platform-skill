@@ -26,6 +26,7 @@ jobs:
       - run: node scripts/tests/check-versions.test.mjs
       # Every bundled checker must prove it can go red on a known-bad input.
       - run: node skills/power-platform/scripts/lint-flows.mjs --selftest
+      - run: node skills/power-platform/scripts/check-canvas-format.mjs --selftest
       - run: node skills/power-platform/scripts/hooks/check-pa-yaml.mjs --selftest
       - run: python skills/power-platform/scripts/inspect-artifact.py --help
       - run: python skills/power-platform/scripts/check-drift.py --selftest

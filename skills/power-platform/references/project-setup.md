@@ -130,6 +130,30 @@ Scripts `.ts`, Power Query `.m`, exported VBA) rather than the binary workbook.
 
 ## 3. First session for a new canvas app
 
+**Take the theme before the first screen.** Every organisation, and often every project, has its
+own look: a palette (and colours it must not use), fonts, a logo, imagery, icons and symbols with
+meaning, a landing page people expect, a tone. Asked for after ten screens, it is a rebuild; asked
+for now, it is one file. Ask, and record the answers in `canvas/theme.json`
+(`assets/templates/theme.json`) before writing a screen:
+
+| Ask | Record |
+|---|---|
+| Palette: primary, secondary, accent, the semantic colours (success, warning, error, info), and any colour the brand forbids | role-named tokens with their RGBA and purpose (`clrPrimary`, `clrTextMuted`, `clrError` - never `clrBlue`) |
+| Fonts, and the type scale (caption, body, titles, figures) | a font token and the sizes |
+| Logo, imagery, illustration style; who owns them and the licence | file names, where they live, the source |
+| Iconography and symbolism: icons or marks that carry meaning (safety, status, a programme's emblem), and any to avoid | the icon set and the meanings |
+| The landing / home page: what a person must see first, per role | the home screen's sections, in order |
+| Tone of labels and messages | one line ("plain, instructional"), plus words to use or avoid |
+| Accessibility: contrast target, minimum text size | e.g. WCAG AA 4.5:1, nothing below Size 9 |
+| Light, dark, or both; the supported screen size | the mode(s) and the design surface (e.g. 1366x768) |
+
+If nobody can answer yet, record an interim palette and mark the theme **interim** with what is
+pending: the app is built on tokens either way, so the brand arrives as a change to one file, not to
+every screen. Then define the tokens in `App.pa.yaml` and reference only them from screens
+(`references/canvas-layout.md`, section 9); `check-canvas-format.mjs` fails a screen that uses a
+literal colour or font. Respect the organisation's own palette and restrictions; the skill prescribes
+neither.
+
 pac and `.pa.yaml` can edit and ship an app but cannot create one. Do this once, in Studio, before
 the first screen:
 
@@ -159,6 +183,7 @@ the first screen:
 | `preflight.mjs` | SessionStart | Prints branch and dirty state, unpushed commits, `pac org who`, and the top of `docs/STATE.md`. Never blocks. |
 | `check-pa-yaml.mjs` | PostToolUse Write/Edit | On `.pa.yaml` only: colon-space in a single-line Power Fx value, YAML comments, `Tooltip` on a modern Button, file-count ceiling, block-scalar continuation indented shallower than its block. Exit 2 feeds the problem back so it is fixed in the same turn. |
 | `check-standards.mjs` | PostToolUse Write/Edit | Optional, configurable output standards (by default: no emoji, no purple/violet accent colours in UI and docs). Turn off or edit `standards.config.json` to taste. |
+| `check-canvas-format.mjs --hook` | PostToolUse Write/Edit | On a screen `.pa.yaml`: a data-bound label whose text can overflow its box with no remedy, a clamp whose full text is unreachable, scroll inside a gallery row, and literal colours or fonts once the app defines theme tokens (`references/canvas-layout.md`, sections 8 and 9). Blocks only on known lengths: set `textFitSchema` in `standards.config.json`. Copy it from the skill's `scripts/`, not `scripts/hooks/`. |
 | `audit-stop.mjs` | Stop | Repo-wide standards scan, leftover debug markers, file ceiling, and bookkeeping reminders (solution changed without the dependency register or state file; commits today without a changelog entry). Blocks once on findings, never loops. |
 
 Keep hooks **narrow**: only things known to break, never style. Exempt a line with a

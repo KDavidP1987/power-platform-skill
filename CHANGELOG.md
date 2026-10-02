@@ -11,6 +11,50 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-02
+
+Long text and theme, decided before they become rework. Data-bound labels that wrap past their
+fixed-height gallery rows, showing half a sentence, turned up in every app built so far; the theme
+was asked for after the screens existed.
+
+### Added
+
+- `scripts/check-canvas-format.mjs`: the long-text fit rule and the theme-token rule, from canvas
+  source, as a CLI and as a PostToolUse hook (`--hook`).
+  - For every text control whose `Text` reads data, the widest value the expression can produce
+    (literals and choice labels measured per character; text at its column's maximum length;
+    `&`, `If`, `Switch`, `Coalesce`, `Left`, `With`, `If(Len(x) > n, ...)`, `Text(x, "fmt")`,
+    `Concat`) against the room the box has (size in points, padding, wrap, line height, bold).
+    Geometry resolves App globals, `Parent`/template sizes and other controls.
+  - Lengths from a `--schema` file: per table (picked from the gallery's `Items`), flat, and
+    `overrides` for limits the app enforces, each with its reason. Collections are measured from
+    the `ClearCollect`/`Collect` formulas that build them. Without a schema, lengths are guessed from
+    the column name and each finding says so; the hook never blocks on a guess.
+  - Findings: `text-overflow`, `autoheight-in-fixed-row`, `clamped-without-full-text` (a tooltip
+    must read the same columns as the clamped text), `scroll-in-gallery-row`, `literal-colour`,
+    `literal-font`.
+  - A floor: it prints how many controls it examined, read data and measured; exit 2 when no
+    data-bound control was examined. `--char-em` calibrates the character width from `measurefont`.
+  - Self-test: 14 row cases, plus flexible-height, detail-pane, no-theme, floor, per-table,
+    `With()` and collection cases.
+- `references/canvas-layout.md` section 8, "Long text: the fit rule": the formula, its error
+  direction, the schema and how to generate it from Dataverse metadata, and the four remedies with
+  `.pa.yaml` snippets (clamp plus tooltip, flexible height, a detail view, a scrolling detail pane).
+- `references/canvas-layout.md` section 9, theme tokens: one definition in `App.pa.yaml`, role
+  names, contrast per pair, imagery referenced from one place, and the literal-colour rule.
+- Theme intake before the first screen: `SKILL.md` working loop step 2 and
+  `references/project-setup.md` section 3 ask for the palette and restricted colours, fonts, logo
+  and imagery, iconography and symbolism, the landing page, tone, contrast and light/dark, and
+  record them in `canvas/theme.json` (`assets/templates/theme.json`). An interim palette is fine;
+  the app is built on tokens either way.
+- `assets/settings.snippet.json` wires the new hook; `assets/standards.config.example.json` gains
+  `textFitSchema`.
+
+### Fixed
+
+- `hooks/lib.mjs`: a byte-order mark on the hook payload (PowerShell adds one when piping) made
+  `JSON.parse` throw, so every hook exited 0 without checking anything. It is now stripped.
+
 ## [0.3.0] - 2026-10-02
 
 Flow loops become a hard gate. A second app built with the skill showed that the per-flow

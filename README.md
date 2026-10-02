@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.3.0](https://img.shields.io/badge/plugin-0.3.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.4.0](https://img.shields.io/badge/plugin-0.4.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 32/32 vs 14/32](https://img.shields.io/badge/evaluation-32%2F32%20vs%2014%2F32-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.3.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.4.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On four realistic Power Platform tasks, the same model passed **32 of 32** graded checks with this
@@ -277,6 +277,35 @@ stamp, data-source counts, `DatabaseReferences` against `DataSources.json`, and 
 in the half of the app that runs. Exit codes: `0` as expected, `1` a check failed, `2` the
 artifact could not be read.
 
+### `check-canvas-format.mjs`: long text and theme tokens
+
+The formatting a compile never checks. **Long text:** for every text control whose `Text` reads
+data, it works out the widest value the expression can produce and the room the box has, and fails
+when the text can overflow with no remedy. Lengths come from a schema generated from Dataverse
+metadata (`MaxLength`, choice labels, number ranges), per table, with overrides for limits the app
+enforces; collections are measured from the formulas that build them. Remedies it accepts: clamp
+with an ellipsis plus a tooltip that reads the same columns, a flexible-height row with `AutoHeight`,
+an `OnSelect` detail view, or a scrolling detail pane outside a gallery. **Theme tokens:** once the
+app defines its colours and fonts in `App.pa.yaml`, a literal colour or font in a screen fails.
+
+```bash
+node check-canvas-format.mjs canvas/<app>/Src --schema canvas/text-fit-schema.json
+node check-canvas-format.mjs canvas/<app>/Src --char-em 0.58      # calibrated from measurefont
+echo '{"tool_input":{"file_path":"canvas/app/Src/Home.pa.yaml"}}' | node check-canvas-format.mjs --hook
+```
+
+| Check | Catches |
+|---|---|
+| `text-overflow` | Data-bound text that can exceed its box (rows x width, at its size and weight) |
+| `autoheight-in-fixed-row` | `AutoHeight` in a fixed-height gallery, where the row still clips |
+| `clamped-without-full-text` | Text cut with `Left()` and no tooltip reading the same columns, nor an `OnSelect` |
+| `scroll-in-gallery-row` | `Overflow.Scroll` inside a gallery row |
+| `literal-colour`, `literal-font` | A literal `RGBA()`, `ColorValue()`, `Color.<Name>`, hex or `Font.<Name>` in a screen (an error once theme tokens exist) |
+
+Every run prints how many controls it examined, read data and could measure. Exit codes: `0` clean,
+`1` findings, `2` nothing examined, which is not a pass. The room is an estimate that errs toward
+"does not fit"; `canvas-browser.mjs clipcheck` is the authority in the running app.
+
 ### `lint-flows.mjs`: static checks on cloud-flow definitions
 
 | Check | Catches |
@@ -334,6 +363,7 @@ Copy `skills/power-platform/scripts/hooks/` to `.claude/hooks/` and merge
 | `preflight.mjs` | SessionStart | Git state, `pac org who`, the top of `docs/STATE.md`, the ship loop in one line |
 | `check-pa-yaml.mjs` | PostToolUse | Colon-space in single-line Power Fx, YAML comments, `Tooltip` on a modern Button, shallow block-scalar lines, the file ceiling: faults that fail a whole-app compile |
 | `check-standards.mjs` | PostToolUse | Optional, configurable output standards (by default emoji and purple accents, Power Fx `RGBA` included) |
+| `check-canvas-format.mjs --hook` | PostToolUse | Long data-bound text with no remedy, and literal colours or fonts once theme tokens exist; blocks only on lengths it knows (`textFitSchema` in `standards.config.json`) |
 | `audit-stop.mjs` | Stop | Repo-wide standards, leftover debug markers, file ceiling, bookkeeping reminders; blocks once, never loops |
 
 Hooks flag only what is known to break, never style: a hook that fires on style gets switched off.
@@ -430,6 +460,7 @@ skills/power-platform/
   scripts/canvas-browser.mjs    Playwright driver, scenario runner and selector doctor
   scripts/inspect-artifact.py   what a solution zip or .msapp really contains
   scripts/lint-flows.mjs        static checks on cloud-flow definitions
+  scripts/check-canvas-format.mjs  long data-bound text and theme tokens in canvas source
   scripts/hooks/                preflight, check-pa-yaml, check-standards, audit-stop, lib
   assets/                       hook wiring, config examples, selectors, tested versions, templates
   tests/prompts.md              should-trigger and should-not-trigger prompts

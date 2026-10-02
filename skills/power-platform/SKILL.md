@@ -14,7 +14,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.3.0"
+  version: "0.4.0"
 ---
 
 # Power Platform development
@@ -81,8 +81,16 @@ user unproven.
    the project's state file (`docs/STATE.md` or equivalent) before touching anything.
 2. **Specify.** A written spec for anything non-trivial - an issue, or a backlog entry. Include
    who uses it, what proves it works, and what it touches (consult the dependency register).
+   **For a new app, take the theme first**: the organisation's palette and restrictions, fonts,
+   logo and imagery, icons and symbolism, the landing page, tone, contrast and light/dark. Record
+   it as `canvas/theme.json`, define it once as tokens in `App.pa.yaml`, and build every screen on
+   the tokens (`references/project-setup.md` section 3). Asked for after ten screens, the theme is
+   a rebuild.
 3. **Build in source.** Edit `.pa.yaml`, solution XML, or flow JSON in the repo. Hooks check each
-   write for the compile-killers in `references/power-fx-and-pa-yaml.md`.
+   write for the compile-killers in `references/power-fx-and-pa-yaml.md`. **Every label bound to
+   data must fit the longest value it can show, or clamp with an ellipsis and a tooltip** -
+   `scripts/check-canvas-format.mjs` checks it, with lengths from Dataverse metadata, and also
+   fails literal colours once the theme exists (`references/canvas-layout.md` sections 8 and 9).
 4. **Audit.** Run the project's audit suite. Treat a stale-input result as unverified, not as a
    pass.
 5. **Compile against a live Studio session** (canvas only). This is the only step that proves the
@@ -116,7 +124,7 @@ Read only the reference the task needs. Each one is self-contained.
 | "Works in Studio, fails in the published app"; a new column/choice/table the app cannot see; option-set members, column types, entity set names, data sources the player never initialises, the Data pane | `references/manifest-caches.md` |
 | Writing or debugging Power Fx or `.pa.yaml`: silent no-op buttons, `App.OnStart`, collections, types, lookups in queries, delegation and the row limit, chunked large-table reads, identity, compile output | `references/power-fx-and-pa-yaml.md` |
 | Building or debugging a screen: TextInput/NumberInput/CheckBox/ComboBox/DropDown/Gallery/Timer quirks, OnChange firing on render, Default/Reset, edit screens and concurrency, permission gates, overlays, read-model tables, honest UX | `references/canvas-controls-and-patterns.md` |
-| Layout: text width and clipping, gallery row slicing, scrollbars, z-order, unclickable controls, geometry audits | `references/canvas-layout.md` |
+| Layout: text width and clipping, long data-bound text (the fit rule and its four remedies), gallery row slicing, scrollbars, z-order, unclickable controls, geometry audits, theme tokens | `references/canvas-layout.md` |
 | Driving Studio or the published app with Playwright: scenarios, iframes, committing input, dropdowns, stale player cache (IndexedDB), save/publish proof, MCP startup timeouts, scenario design and negative tests, dead-click and clip sweeps, OData trace instead of Monitor | `references/browser-verification.md` |
 | **Dataverse** | |
 | Solutions and schema: pack/unpack, asserting on the artifact, imports that never remove, what cannot change after creation, solution membership and shared tables, retiring components, column types, schema hygiene, delete behaviour, effective dating | `references/dataverse.md` |
@@ -127,7 +135,7 @@ Read only the reference the task needs. Each one is self-contained.
 | Cloud flows: definition shape, triggers and message codes, `runtimeSource`, loops and sentinels, activation-only defects, dates and nulls, imports changing flow on/off state, run-as identity, notifications and safety caps, bulk writes, FetchXML, run history | `references/power-automate.md` |
 | **Process and environment** | |
 | Writing or trusting an audit; stale inputs; vacuous passes; reusable tool designs | `references/audits.md` |
-| Starting a repo: layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights | `references/project-setup.md` |
+| Starting a repo or a new app: theme intake (palette, fonts, logo, imagery, symbolism, landing page) before the first screen, layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights | `references/project-setup.md` |
 | CI/CD: service-principal pac auth, export/unpack on a branch, pack + Solution Checker, managed vs unmanaged and upgrade, deployment settings for connection references and environment variables, importing flows off then activating, powerplatform-actions / Build Tools, the skill's tools as pipeline gates | `references/alm-pipelines.md` |
 | Several apps sharing one environment or a shared reference solution | `references/shared-environments.md` |
 | pac, tokens, the TDS endpoint, MCP servers, Windows/OneDrive/PowerShell failures, and production actions Claude Code must hand to a person | `references/tooling-and-auth.md` |
@@ -145,6 +153,7 @@ than carrying an id. Run any of them with `--help`.
 | `scripts/check-drift.py` | Compares a canvas app's cached Dataverse metadata with the live environment, read-only: tables, entity set names (every cached copy), columns the formulas use, column types, choice members in both caches, lookup navigation names, and `<DatabaseReferences>` vs `DataSources.json`. Each drift names what breaks in the published app and the fix. `--dump` / `--offline` run it in CI without a tenant. Exit 2 is never a pass. Python 3 standard library only. |
 | `scripts/ship-canvas.py` | The solution-import ship: build on the LIVE manifest, reconcile the caches, stamp the build, strip roles, repair the player list, pack with pac, then assert on the finished zip (inspect-artifact + check-drift). `--dry-run` writes nothing and runs no pac; it never imports without `--import`. Reads `scripts/canvas-app.json`. Python 3 standard library only. |
 | `scripts/lint-flows.mjs` | Static checks on cloud-flow definition JSON: invoker runtime on non-app triggers, self-writes whose path conditions are not FALSE after the write (it parses the expressions and follows one level of Compose/variable indirection; warns when a guard holds only if a run-time value is non-blank), apostrophes in expression literals, references outside the `runAfter` path, trigger message codes, sends chained after `Failed`, single-`@` property names, multiple triggers, date-only columns used as instants (`--date-only`), cross-flow cycles. Node 18+. |
+| `scripts/check-canvas-format.mjs` | Formatting rules no compile enforces, from canvas source: every data-bound text control must fit the widest value its expression can produce (lengths from a Dataverse-metadata schema, choices by their labels, collections from the formulas that build them) or carry a remedy - clamp plus a tooltip that reads the same columns, a flexible-height row, a detail view, or a scrolling detail pane; and screens use theme tokens, not literal colours or fonts. `--hook` runs it as a PostToolUse hook. Prints what it examined; exit 2 when nothing was. Node 18+. |
 | `scripts/hooks/check-pa-yaml.mjs` | Claude Code PostToolUse hook: flags the `.pa.yaml` faults that fail a whole-app compile, at write time. |
 | `scripts/hooks/check-standards.mjs`, `audit-stop.mjs`, `preflight.mjs` | Optional output-standards hook, end-of-turn audit, and session pre-flight. Wiring in `assets/settings.snippet.json`. |
 

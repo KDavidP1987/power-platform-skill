@@ -19,7 +19,8 @@
         "matcher": "Write|Edit",
         "hooks": [
           { "type": "command", "command": "node .claude/hooks/check-pa-yaml.mjs", "timeout": 20, "statusMessage": "Checking .pa.yaml for compile-killers..." },
-          { "type": "command", "command": "node .claude/hooks/check-standards.mjs", "timeout": 20 }
+          { "type": "command", "command": "node .claude/hooks/check-standards.mjs", "timeout": 20 },
+          { "type": "command", "command": "node .claude/hooks/check-canvas-format.mjs --hook", "timeout": 30, "statusMessage": "Checking text fit and theme tokens..." }
         ]
       }
     ],

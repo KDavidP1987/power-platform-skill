@@ -12,6 +12,8 @@ check and a full audit suite. Measure in the running app; use static checks as a
 5. Moving and removing controls
 6. Readable, reachable controls
 7. What a static geometry audit must do to be worth running
+8. Long text: the fit rule
+9. Theme tokens: decided once, referenced everywhere
 
 ---
 
@@ -70,7 +72,7 @@ divides by.
 - **Make truncation recoverable rather than pretending it away.** When no width fits every value
   (one list had 2,103 names), set `Wrap: =false` so a long value clips on one line instead of
   wrapping into the row below a fixed-height row, and add a `Tooltip` with the full text (Labels
-  take `Tooltip`).
+  take `Tooltip`). Section 8 makes this a checked rule for every data-bound label.
 
 ## 3. Galleries
 
@@ -238,3 +240,167 @@ wrong handler. A control missing its tab condition in `Visible` draws over every
 Measured against a running player the same day, one static audit flagged 20 clipped labels (0 of
 13 checked were real) and missed the 1 real clip, because that label's `Text` was a formula. The
 browser is the authority; the static audit stops the obvious cases reaching a user.
+
+## 8. Long text: the fit rule
+
+**A label bound to data shows whatever the data holds.** The screen is laid out with sample values;
+the first real record with a 60-character name wraps onto lines a fixed-height gallery row does not
+have, and the row shows half a sentence. Nothing reports it: the compile passes, the app runs, and
+every audit that reads literals is satisfied. Two earlier apps carried this defect throughout (58
+and 95 gallery labels flagged on a first run); the third avoided it only because the rule existed.
+
+**The rule:** every text control whose `Text` reads data either fits the widest value its
+expression can produce, or carries one of the four remedies below. `scripts/check-canvas-format.mjs`
+enforces it from source, before a compile, and as a PostToolUse hook.
+
+```bash
+node scripts/check-canvas-format.mjs canvas/<app>/Src --schema canvas/text-fit-schema.json
+node scripts/check-canvas-format.mjs --selftest
+```
+
+Exit 0 clean, 1 findings, 2 nothing examined (no files, or no data-bound label) - which is not a
+pass. Every run prints how many text controls it examined, how many read data, and how many it
+could measure; read those numbers, not only the finding count.
+
+**The room** (classic Label defaults when a property is absent: Size 13, padding 5, Wrap on;
+the modern Text control: Size 14, no padding):
+
+```
+px        = Size * 4/3                                   (Size is in points)
+lines     = Wrap ? max(1, floor((Height - PaddingTop - PaddingBottom) / (px * LineHeight))) : 1
+room (px) = (Width - PaddingLeft - PaddingRight) * lines * (lines > 1 ? 0.9 : 1)
+need (px) = widest text in em * px * (1.06 if Semibold/Bold)
+```
+
+`Width`, `Height` and `Size` are resolved through numeric globals set in `App.OnStart` (or Named
+Formulas), `Parent.Width`, `Parent.TemplateWidth`/`TemplateHeight` in a gallery, `Min`/`Max`, and
+other controls' properties. An `If()` in a geometry property takes its smaller branch. What cannot be
+resolved is counted as "not measurable" and printed.
+
+**The widest text** an expression can produce, in em (multiples of the font size):
+
+- literals are measured character by character with approximate proportional-font widths;
+- a choice column is measured by its real labels (the schema lists them);
+- a text column is costed at its maximum length times **0.56 em** per character - wider than
+  typical mixed-case text (about 0.5 em), so the check errs toward "does not fit";
+- `&` adds, `If`/`Switch`/`Coalesce` take the widest branch, `Text(x, "fmt")` is the format's
+  length, numbers and dates are short, `Concat()` of rows is unbounded;
+- `Left(x, n)` cuts to n; inside `If(Len(x) > n, ..., x)` the last `x` is at most n; `With({v: x}, ...)`
+  carries `x`'s width into `v`;
+- a gallery over a collection is measured from the formula that builds the collection
+  (`ClearCollect(col, ForAll(src As r, {Name: ...}))`, `AddColumns`), anywhere in the app.
+
+Calibrate the 0.56 for your font with `canvas-browser.mjs measurefont` and `--char-em`. Measured
+character widths ran 0.55 to 0.6 em in two apps (section 2); a value below the truth lets real clips
+through. The check is still a floor: confirm a borderline case in the running app, where
+`canvas-browser.mjs clipcheck` reports what actually clipped.
+
+**Where the lengths come from.** `--schema` takes a JSON file:
+
+```json
+{
+  "overrides": { "Quantity": { "maxLength": 2, "reason": "the quantity input allows 1 to 99" } },
+  "tables": { "Requests": { "Title": 200, "Status": { "values": ["Open", "Waiting on Approval", "Closed"] } } },
+  "columns": { "Title": 200, "Notes": { "maxLength": 2000 } }
+}
+```
+
+`tables` is looked up first, for the table the gallery's `Items` reads (by display collection name,
+logical name or entity set name); `columns` is the fallback (a name shared by tables keeps the
+longest). `overrides` wins over both: a limit the **app** enforces that is tighter than the column
+(an input's `Max`, a generated name's pattern). Give each override its reason and keep it next to
+the input that enforces it. Generate `tables` and `columns` read-only from Dataverse metadata:
+`StringAttributeMetadata` and `MemoAttributeMetadata` give `MaxLength`; `Picklist`/`Status`/`State`
+attributes give the option labels (`$expand=OptionSet($select=Options)`); integer and decimal columns
+give `MinValue`/`MaxValue`, whose digit count (plus separators) is the length. Without a schema the
+length is guessed from the column name (notes and descriptions 2000, emails 200, names and titles
+100, status-like columns 30) and every such finding says so.
+
+**The four remedies.** A gallery row is fixed height unless the gallery is flexible-height, so in a
+row only (a) and (c) work; (b) needs a flexible-height gallery; (d) is for detail panes.
+
+(a) **Clamp with an ellipsis, and show the full text on hover.** Use the room the check printed:
+
+```yaml
+- lblRowTitle:
+    Control: Label
+    Properties:
+      Text: |
+        =With({v: ThisItem.Title},
+          If(Len(v) > 36, Left(v, 33) & "...", v))
+      Tooltip: =ThisItem.Title
+      Wrap: =false
+```
+
+Write the clamp as a block scalar: `{v: ...}` holds a colon-space, which breaks a single-line value.
+The Tooltip must read every column the clamped text reads - a tooltip showing the email does not
+reveal a cut-off name, and the check reports that as `clamped-without-full-text`.
+
+(b) **Let the row grow.** A flexible-height gallery with `AutoHeight` on the label; everything below
+it in the template is positioned from it (`Y: =lblBody.Y + lblBody.Height + 4`). `AutoHeight` in a
+fixed-height gallery changes nothing - the row still clips (`autoheight-in-fixed-row`).
+
+```yaml
+- galNotes:
+    Control: Gallery
+    Variant: VariableHeight    # the flexible-height variant; confirm the name a Studio-inserted one writes
+    Children:
+      - lblBody:
+          Control: Label
+          Properties:
+            Text: =ThisItem.Notes
+            AutoHeight: =true
+            VerticalAlign: =VerticalAlign.Top
+```
+
+(c) **Open the record.** Clamp as in (a) and give the label (or the row's button) an `OnSelect` that
+opens a detail view showing the full value. The check accepts `OnSelect` in place of a Tooltip.
+
+(d) **Scroll inside a detail pane.** Outside a gallery, a tall label with `Overflow: =Overflow.Scroll`
+and `VerticalAlign: =VerticalAlign.Top` shows long text in place. Never in a gallery row: the wheel
+then scrolls the label instead of the list (`scroll-in-gallery-row`).
+
+**As a hook.** `check-canvas-format.mjs --hook` reads the edited file from the hook payload, reads
+the rest of `Src` (collections built on other screens), and blocks (exit 2) only on findings that
+rest on known lengths: set `"textFitSchema": "canvas/text-fit-schema.json"` in
+`.claude/hooks/standards.config.json` so it knows them. Without a schema a guessed length never
+blocks a write; the CLI still reports it.
+
+## 9. Theme tokens: decided once, referenced everywhere
+
+**Record the theme before the first screen** (`references/project-setup.md`, section 3): the
+organisation's palette and restrictions, fonts, logo and imagery, iconography and symbolism, the
+landing page, tone, contrast target and light/dark. Re-theming twenty finished screens is a rebuild;
+re-theming an app built on tokens is twenty values in one file.
+
+- **One definition, in `App.pa.yaml`.** Either Named Formulas or `Set()` calls at the top of
+  `App.OnStart`, one per token (save one Named Formula in Studio and read back the key it writes
+  before scripting many):
+
+```yaml
+App:
+  Properties:
+    Formulas: |-
+      clrPrimary = RGBA(11, 83, 148, 1);
+      clrText = RGBA(31, 41, 51, 1);
+      clrSurface = RGBA(255, 255, 255, 1);
+      fntBody = Font.'Segoe UI';
+```
+
+  Named Formulas need no `OnStart` and cannot be reassigned; use them where the app allows. Keep the
+  same tokens, with their purpose, in a `canvas/theme.json` (`assets/templates/theme.json`) so a
+  person can review the palette without reading YAML, and change both together.
+- **Screens reference tokens, never literals.** `Fill: =clrSurface`, `Color: =clrTextMuted`. The
+  check reports a literal `RGBA()`, `ColorValue()`, `Color.<Name>` (Transparent excepted), hex string
+  or `Font.<Name>` in a colour or font property of a screen as `literal-colour` / `literal-font`:
+  an error once the app defines tokens, a warning (with a pointer here) before it does.
+- **Name tokens by role, not by hue**: `clrPrimary`, `clrTextMuted`, `clrError`, `clrSurface` -
+  so a brand change does not leave `clrBlue` holding green.
+- **Check contrast per pair, once, at the token level** (text on surface, text on primary,
+  muted text on canvas): WCAG AA is 4.5:1 for body text (section 6).
+- **Imagery and logos are media, referenced by name** from one place (a token or a single image
+  control on a shared header component), so swapping a logo is one change. Record its source and
+  licence in `theme.json`.
+- **Respect the organisation's own palette and restrictions.** The skill prescribes no brand and
+  bans no colour on anyone's behalf; the project's `standards.config.json` holds any colour rule the
+  organisation has.
