@@ -154,6 +154,18 @@ every screen. Then define the tokens in `App.pa.yaml` and reference only them fr
 literal colour or font. Respect the organisation's own palette and restrictions; the skill prescribes
 neither.
 
+**Ask the same way about lists, messages and documents** - three things that are cheap at the
+design stage and a rework after go-live:
+
+| Ask | Default when nobody says |
+|---|---|
+| For each gallery, list or menu: which columns do people scan it by; search; sort; is it categorised? | a filter per choice or lookup column people scan by (empty means All), a name search, a stated sort, section headers for categorised reference data, a row count (`canvas-controls-and-patterns.md` section 16) |
+| Does the app send messages? To whom, on what event, by which channel? | every send logged, "last sent" shown per item, a history for administrators and owners, a Resend button (`power-automate.md` section 16) |
+| Do records carry documents? Linked, stored, or generated from a template? | offer all three; generated documents from an HTML template with a placeholder list shared by flow and app, and a template guide with a live preview for administrators (`power-automate.md` section 17) |
+
+Record the answers in the spec; `check-canvas-format.mjs` warns on a table gallery that offers no
+filter, search or grouping.
+
 pac and `.pa.yaml` can edit and ship an app but cannot create one. Do this once, in Studio, before
 the first screen:
 

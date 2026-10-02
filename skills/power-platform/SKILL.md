@@ -14,7 +14,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 # Power Platform development
@@ -108,6 +108,10 @@ user unproven.
    wrote, and record what you touched.
 9. **Document in the same change.** Changelog, dependency register, decisions log, state file.
 10. **Refresh the audit inputs** so the next audit describes the app that now exists.
+11. **Offer the documentation set** once the app works end to end, and again at each major
+    release: a guide per user role, a manager guide, an administrator guide and a developer and
+    platform guide, generated from the app and the live environment with screenshots per role
+    (`references/documentation-set.md`, kit in `assets/doc-kit/`). Let the developer choose which.
 
 The table of what each step proves, and the two ship paths (solution import vs co-authoring push),
 are in `references/canvas-shipping.md`. Read it before the first ship in a session.
@@ -123,7 +127,7 @@ Read only the reference the task needs. Each one is self-contained.
 | Studio opens read-only, `connect` returns 422, a compile shows thousands of "isn't recognized", a restore says "locked by user", the authoring MCP misleads (`isError`, contract drift) | `references/authoring-sessions.md` |
 | "Works in Studio, fails in the published app"; a new column/choice/table the app cannot see; option-set members, column types, entity set names, data sources the player never initialises, the Data pane | `references/manifest-caches.md` |
 | Writing or debugging Power Fx or `.pa.yaml`: silent no-op buttons, `App.OnStart`, collections, types, lookups in queries, delegation and the row limit, chunked large-table reads, identity, compile output | `references/power-fx-and-pa-yaml.md` |
-| Building or debugging a screen: TextInput/NumberInput/CheckBox/ComboBox/DropDown/Gallery/Timer quirks, OnChange firing on render, Default/Reset, edit screens and concurrency, permission gates, overlays, read-model tables, honest UX | `references/canvas-controls-and-patterns.md` |
+| Building or debugging a screen: TextInput/NumberInput/CheckBox/ComboBox/DropDown/Gallery/Timer quirks, OnChange firing on render, Default/Reset, edit screens and concurrency, permission gates, overlays, read-model tables, honest UX, list filters/search/grouping, communication history and resend, template guides with live preview | `references/canvas-controls-and-patterns.md` |
 | Layout: text width and clipping, long data-bound text (the fit rule and its four remedies), gallery row slicing, scrollbars, z-order, unclickable controls, geometry audits, theme tokens | `references/canvas-layout.md` |
 | Driving Studio or the published app with Playwright: scenarios, iframes, committing input, dropdowns, stale player cache (IndexedDB), save/publish proof, MCP startup timeouts, scenario design and negative tests, dead-click and clip sweeps, OData trace instead of Monitor | `references/browser-verification.md` |
 | **Dataverse** | |
@@ -132,7 +136,7 @@ Read only the reference the task needs. Each one is self-contained.
 | Who can read or write: roles kept out of solutions, `ReplacePrivilegesRole`, depth and record sharing, Append/AppendTo, impersonation, column security, SharePoint virtual tables, onboarding users | `references/security-and-access.md` |
 | Writing live data: migrations, backfills, spreadsheet loads, crosswalks, agreement audits, purges, rollup rebuilds, cutover | `references/data-migration.md` |
 | **Power Automate** | |
-| Cloud flows: definition shape, triggers and message codes, `runtimeSource`, loops and sentinels, activation-only defects, dates and nulls, imports changing flow on/off state, run-as identity, notifications and safety caps, bulk writes, FetchXML, run history | `references/power-automate.md` |
+| Cloud flows: definition shape, triggers and message codes, `runtimeSource`, loops and sentinels, activation-only defects, dates and nulls, imports changing flow on/off state, run-as identity, notifications and safety caps, bulk writes, FetchXML, run history, the communication log and resend, documents and templates (link, stored file, generated), attachment encoding | `references/power-automate.md` |
 | **Process and environment** | |
 | Writing or trusting an audit; stale inputs; vacuous passes; reusable tool designs | `references/audits.md` |
 | Starting a repo or a new app: theme intake (palette, fonts, logo, imagery, symbolism, landing page) before the first screen, layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights | `references/project-setup.md` |
@@ -140,6 +144,7 @@ Read only the reference the task needs. Each one is self-contained.
 | Several apps sharing one environment or a shared reference solution | `references/shared-environments.md` |
 | pac, tokens, the TDS endpoint, MCP servers, Windows/OneDrive/PowerShell failures, and production actions Claude Code must hand to a person | `references/tooling-and-auth.md` |
 | Model-driven forms by script, user guides/SOPs from the running app, licensing, weekly reporting from git, replacing a spreadsheet tool | `references/model-driven-and-docs.md` |
+| The documentation set for a finished app: user, manager, administrator and developer guides, chapter skeletons, screenshots per role, the doc kit, the inventory check | `references/documentation-set.md` |
 
 ## Bundled tools
 

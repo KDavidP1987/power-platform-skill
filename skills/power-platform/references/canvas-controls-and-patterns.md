@@ -22,6 +22,9 @@ Playwright is in `browser-verification.md`.
 13. Permission gating in canvas
 14. Errors and diagnostics users can see
 15. UX and data honesty
+16. Lists: filter, search, group, sort
+17. Communications: last sent, history and resend
+18. Template guide and live preview for administrators
 
 ---
 
@@ -544,3 +547,145 @@ relying on `DisplayMode`.
   sort a primary name as text.
 - **Empty totals show 0, not nothing** (`power-fx-and-pa-yaml.md`, section 8), and a data-empty
   feature is not a broken one - publish what is empty before a test round (`browser-verification.md`).
+
+## 16. Lists: filter, search, group, sort
+
+**Ask about every list before building it, or apply the default and say so.** For each gallery,
+list or menu: which columns does a person scan it by, does it need a search, how should it sort, and
+is the data categorised (grouped under headers)? Six rows need none of it; sixty rows with no
+filter is a scroll hunt, and the request to add one arrives after go-live. The intake question is
+in `project-setup.md` section 3.
+
+**The default when nobody says otherwise:**
+
+- a filter for every **choice or lookup column a person would scan by** (category, status, team,
+  owner) - a dropdown that starts empty, where empty means "All";
+- a **search** box on the name (or the record's human key);
+- a **sort** that matches the job (due date for work, name for reference data), stated in the header;
+- **section headers** when the data is categorised and the list is reference data an administrator
+  browses (catalogue items by category, settings by area);
+- a count of rows shown ("24 of 31") so a filter cannot silently hide things.
+
+`check-canvas-format.mjs` warns (`list-without-filter`, advisory, never an error) on a gallery over
+a table whose Items reads no input control, no variable and no `Search`/`GroupBy`. It cannot judge
+whether the narrowing offered is the right one (a "show retired" toggle counts), so the intake
+question still decides.
+
+**Filter dropdown, empty means All** (classic controls; a choice column `Category` on table
+`Items`):
+
+```yaml
+- drpCategory:
+    Control: Classic/DropDown
+    Properties:
+      Items: =Choices('Items'.Category)
+      AllowEmptySelection: =true
+      Default: =Blank()
+- txtFind:
+    Control: Classic/TextInput
+    Properties:
+      HintText: ="Search by name"
+      DelayOutput: =true
+- galItems:
+    Control: Gallery
+    Variant: Vertical
+    Properties:
+      Items: |-
+        =SortByColumns(
+            Filter('Items',
+                IsBlank(drpCategory.Selected) || Category = drpCategory.Selected.Value,
+                IsBlank(txtFind.Text) || StartsWith(Name, txtFind.Text)),
+            "app_name", SortOrder.Ascending)
+```
+
+Delegation (Dataverse): equality on a choice or lookup, `StartsWith` on text and `SortByColumns`
+delegate; `IsBlank(control)` is evaluated once on the client and is safe. `in`, `Search` on large
+tables in some connectors, `Len` and `Lower` around a column do not - keep them out of the filter
+(`power-fx-and-pa-yaml.md`, delegation). A dropdown that must offer a literal "All" entry instead of
+an empty selection needs a table of text values, e.g.
+`Ungroup(Table({v: ["All"]}, {v: ForAll(Choices('Items'.Category), Text(Value))}), v)`, and the
+filter then compares `Text(Category)`, which does not delegate - prefer empty-means-All.
+
+**Grouped list with section headers, delegation-friendly**: an outer flexible-height gallery over
+the categories, an inner gallery per category. Each inner query is delegable; `GroupBy` is not and
+works only on what is already loaded.
+
+```yaml
+- galGroups:
+    Control: Gallery
+    Variant: VariableHeight
+    Properties:
+      Items: =Filter(Choices('Items'.Category), IsBlank(drpCategory.Selected) || Value = drpCategory.Selected.Value)
+    Children:
+      - lblGroup:
+          Control: Label
+          Properties:
+            Text: =Text(ThisItem.Value)
+            FontWeight: =FontWeight.Semibold
+      - galInGroup:
+          Control: Gallery
+          Properties:
+            Items: =Filter('Items', Category = ThisItem.Value, IsBlank(txtFind.Text) || StartsWith(Name, txtFind.Text))
+            Height: =Self.TemplateHeight * CountRows(Self.AllItems)
+```
+
+`Variant: VariableHeight` (flexible height) is the name to confirm in your tenant's source (see
+`canvas-layout.md`, "Long text"). For a small, fully loaded list a single gallery over
+`SortByColumns(...)` with a header label shown when the category differs from the previous row is
+lighter.
+
+**Remember the filter.** Keep the selection in a variable or the control's state when the user opens
+a record and comes back; a list that forgets its filter after every visit is filtered once and then
+abandoned.
+
+## 17. Communications: last sent, history and resend
+
+When the app's flows send messages (see `power-automate.md` section 16 for the flow side), the app
+shows three things, all read from the communication log table, never from the flows' run history:
+
+- **Last sent** beside each item that sends something: the newest log row for that item -
+  `First(SortByColumns(Filter(CommLog, Task = ThisItem.Task), "app_sentat", SortOrder.Descending)).'Sent At'`,
+  shown as `d mmm yyyy h:mm` with the status ("Redirected (test)", "Failed") when it is not Sent.
+- **History**: a gallery of log rows. Administrators see all rows with filters (kind, status, date,
+  recipient search); a record's owner sees the rows for that record on its own page. Columns:
+  kind, subject, channel, intended recipient, actual recipient, sent at, status, resend flag,
+  attachments.
+- **Resend**: a per-row button, shown only for kinds the resend flow handles and only when the row
+  is not already Resend Requested. It writes one status; the flow does the rest:
+
+```yaml
+- btnResend:
+    Control: Classic/Button
+    Properties:
+      Text: ="Resend"
+      Visible: =ThisItem.Kind in [Kind.'Guide Step', Kind.'Task Dispatch'] && ThisItem.Status <> Status.'Resend Requested'
+      OnSelect: |-
+        =Patch(CommLog, ThisItem, {Status: Status.'Resend Requested', 'Resend Requested By': Lower(User().Email)});
+        Notify("Resend requested. The message is sent again within a minute.", NotificationType.Success)
+```
+
+Show the outcome, not just the request: the original row turns Resent (or Skipped, with the reason)
+and a new row appears for the new send - refresh the history after a short delay or on return to the
+screen. Grant the roles that may resend Write on the log table; everyone else Read.
+
+## 18. Template guide and live preview for administrators
+
+Wherever administrators write text a flow fills in (message bodies, document templates), the app
+must teach the template format on the same screen:
+
+- **The token list, from data**: read the placeholder list from the one settings row the flow also
+  reads (`ParseJSON(LookUp(Settings, Key = "TemplatePlaceholders").Value)`), and show each token, its
+  meaning and the value used when it is blank. A hard-coded list in the app drifts from the flow.
+- **The rules**, in plain words: tokens are written `{Name}`, case-sensitive; an unknown token is left
+  exactly as typed (so a typo is visible in the preview); a blank value becomes the stated
+  replacement; which formatting is allowed (for HTML templates: paragraphs, bold, italic, lists,
+  links, tables - no scripts or external styles, which mail clients strip).
+- **A worked example**: a short template and what it renders to.
+- **A live preview**: pick a real record (a test one by default) and render the template in the app
+  with the **same substitution rules as the flow** - one `Substitute` per token from the same list.
+  Flag tokens left unreplaced. The preview is where a typo is found, not the recipient's inbox.
+- **An insert-token control** (a dropdown of tokens that appends `{Token}` at the end of the text)
+  so administrators do not type them.
+
+The administrator guide's template chapter and this panel say the same thing
+(`documentation-set.md`).

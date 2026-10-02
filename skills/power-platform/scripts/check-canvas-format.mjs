@@ -11,6 +11,13 @@
 //    App.pa.yaml), never literal colours or font names. A literal is a token bypass: it does not
 //    follow a theme change, and re-theming later means hunting literals screen by screen.
 //
+// 3. LISTS THAT CANNOT BE NARROWED (advisory, a warning, never an error). A gallery over a data
+//    source whose Items reads no input control and no variable gives the user no way to filter,
+//    search or group it: fine for six rows, a scroll hunt at sixty. Warned when the source is a
+//    table (not a literal or a small fixed collection), and always when the schema shows the table
+//    has a choice column a user would scan by. Nested galleries and literal tables are skipped.
+//    The intake question and the patterns: references/canvas-controls-and-patterns.md, "Lists".
+//
 // Usage:
 //   node check-canvas-format.mjs <Src folder or .pa.yaml files>... [--schema cols.json]
 //        [--screen-width 1366] [--screen-height 768] [--char-em 0.56] [--galleries-only] [--no-theme] [--json]
@@ -260,7 +267,7 @@ export function columnInfo(v) {
   if (typeof v === 'number') return { n: v, em: v * MODEL.unknownEm };
   if (!v || typeof v !== 'object') return null;
   if (Array.isArray(v.values) && v.values.length) {
-    return { n: Math.max(...v.values.map((s) => String(s).length)), em: Math.max(...v.values.map(emOf)) };
+    return { n: Math.max(...v.values.map((s) => String(s).length)), em: Math.max(...v.values.map(emOf)), choice: true };
   }
   const n = v.maxLength ?? v.MaxLength;
   return n ? { n, em: n * MODEL.unknownEm } : null;
@@ -490,7 +497,7 @@ const LITERAL_FONT = /\bFont\.('[^']+'|[A-Za-z]+)|^="[^"]+"$/;
 
 export function analyse(files, { schema = null, screenWidth = 1366, screenHeight = 768, galleriesOnly = false, theme = true } = {}) {
   const findings = [];
-  const stats = { files: 0, textControls: 0, bound: 0, measured: 0, unparsed: 0, collections: 0, literalColours: 0, literalFonts: 0 };
+  const stats = { files: 0, textControls: 0, bound: 0, measured: 0, unparsed: 0, collections: 0, literalColours: 0, literalFonts: 0, galleries: 0, listsWithoutFilter: 0 };
   const appFile = files.find((f) => /(^|[\\/])App\.pa\.yaml$/i.test(f.path));
   const appText = appFile ? appFile.text : '';
   const consts = readConstants(appText);
@@ -637,9 +644,36 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
         ` Fix: Text: =With({v: <text>}, If(Len(v) > ${suggest}, Left(v, ${suggest - 3}) & "...", v)) with Tooltip: =<text>, or a flexible-height gallery with AutoHeight.`,
       capacity, maxLength: L.n, gallery: !!gal, guessed: !!L.heuristic });
   }
+  // ---- lists: can the user narrow this gallery? ----
+  const inputs = new Set(all.filter((c) => INPUT_CONTROLS.test(c.control)).map((c) => c.name));
+  for (const g of all) {
+    if (!/^Gallery/i.test(g.control)) continue;
+    stats.galleries++;
+    if (galleryOf(g)) continue;                                   // nested: narrowed by its parent row
+    const src = (g.props.Items?.v || '').trim().replace(/^=/, '');
+    if (!src || /^(Table\s*\(|\[)/i.test(src)) continue;           // a literal list the app owns
+    const ids = new Set((src.replace(/"[^"]*"/g, '').match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
+    const narrowed = [...ids].some((x) => inputs.has(x) || isVariable(x) && !/^col/i.test(x)) || /\b(GroupBy|Search)\s*\(/i.test(src);
+    if (narrowed) continue;
+    const table = firstTable(safeParse('=' + src), baseCtx);
+    const base = (src.match(/^[A-Za-z_'][^(,]*/) || [''])[0].replace(/'/g, '').trim();
+    const isCollection = /^col/i.test(base) || (table && /^col/i.test(table));
+    const t = table && (tableMaps.get(table) || tableMaps.get(table.toLowerCase()));
+    const choice = t ? [...t.entries()].find(([k, v]) => v && v.choice && !SYSTEM_CHOICES.test(k)) : null;
+    if (isCollection && !choice) continue;                         // a collection the app built: usually small and pre-filtered
+    stats.listsWithoutFilter++;
+    findings.push({ level: 'warn', code: 'list-without-filter', file: g.file, line: g.props.Items?.line || g.line, control: g.name,
+      msg: `gallery '${g.name}' (Items: ${src.slice(0, 80)}) reads no filter, search or grouping control` +
+        (choice ? `, and its table has a choice column (${choice[0]}) a user would scan by` : '') +
+        `. Ask whether users need to filter, search or group it; the default is a dropdown with "All" per choice column, ` +
+        `a search box on the name, a sort, and section headers for categorised data (references/canvas-controls-and-patterns.md, "Lists").` });
+  }
   findings.sort((a, b) => (b.gallery === true) - (a.gallery === true) || a.file.localeCompare(b.file) || a.line - b.line);
   return { findings, stats };
 }
+// System choices (record state and status reason, ownership, component state) are not what a user scans a list by.
+const SYSTEM_CHOICES = /^(statecode|statuscode|status|status reason|componentstate|owneridtype|importsequencenumber)$/i;
+const INPUT_CONTROLS = /^(Dropdown|ComboBox|TextInput|Text ?input|Toggle|Checkbox|Radio|DatePicker|ListBox|Slider|Classic\/(Dropdown|ComboBox|TextInput|Toggle|CheckBox|Radio|DatePicker|ListBox|Slider)|ModernDropdown|ModernCombobox|ModernTextInput|ModernToggle|ModernCheckbox|ModernRadio|ModernDatePicker|TabList)(@|$)/i;
 function safeParse(src) { try { return src ? parseFx(src) : null; } catch { return null; } }
 
 // ---------- loading and CLI ----------
@@ -668,7 +702,8 @@ function report(res, json) {
   const unm = findings.filter((x) => x.code === 'unmeasured').length;
   console.log(`\n${stats.files} screen file(s); ${stats.textControls} text control(s), ${stats.bound} bound to data, ${stats.measured} measured` +
     `${unm ? `, ${unm} not measurable` : ''}${stats.unparsed ? `, ${stats.unparsed} formula(s) not parsed` : ''}; ${stats.collections} collection(s) measured; ` +
-    `${stats.literalColours} literal colour(s), ${stats.literalFonts} literal font(s).`);
+    `${stats.literalColours} literal colour(s), ${stats.literalFonts} literal font(s); ${stats.galleries} gallery(ies), ` +
+    `${stats.listsWithoutFilter} with no filter, search or grouping (advisory).`);
   console.log('Room is an estimate that errs toward "does not fit"; confirm a borderline case in the running app.');
 }
 
@@ -724,7 +759,7 @@ function selftest() {
   const run = (text, schema = SCHEMA, name = 's') => analyse([{ path: 'App.pa.yaml', text: APP }, { path: name + '.pa.yaml', text }], { schema });
   for (const [name, rows, want] of CASES) {
     const res = run(screen(rows), SCHEMA, name);
-    const got = [...new Set(res.findings.filter((f) => f.level !== 'info').map((f) => f.code))].sort();
+    const got = [...new Set(res.findings.filter((f) => f.level !== 'info' && f.code !== 'list-without-filter').map((f) => f.code))].sort();
     if (JSON.stringify(got) !== JSON.stringify([...want].sort())) fails.push(`${name}: expected [${want.join(', ')}], got [${got.join(', ')}]`);
     if (res.stats.bound !== 1) fails.push(`${name}: expected 1 bound text control examined, got ${res.stats.bound}`);
   }
@@ -754,10 +789,21 @@ function selftest() {
   const rc = run(coll);
   if (rc.findings.some((f) => f.level === 'error') || rc.stats.collections !== 1) fails.push(`collection column measured from its formula (collections ${rc.stats.collections})`);
   if (!run(coll.replace('ThisItem.Short', 'ThisItem.Long')).findings.some((f) => f.code === 'text-overflow')) fails.push('a long collection column should overflow');
+  // Lists: a table gallery with no input feeding it is advised; a dropdown or search feeding it, a
+  // literal table, or a nested gallery is not. The advice is a warning, so the CLI exit stays 0.
+  const listCode = (text) => run(text).findings.filter((f) => f.code === 'list-without-filter').map((f) => f.level);
+  const plain = screen(label('lblCode', { Text: '=ThisItem.Code', Width: '=120', Height: '=22', Size: '=10' }));
+  if (JSON.stringify(listCode(plain)) !== '["warn"]') fails.push(`list: an unfiltered table gallery should warn once, got ${JSON.stringify(listCode(plain))}`);
+  const withDrop = plain.replace("Items: =Requests", "Items: =Filter(Requests, drpStatus.Selected.Value = \"All\" || Status = drpStatus.Selected.Value)")
+    .replace('    Children:\n      - galItems:', '    Children:\n      - drpStatus:\n          Control: Dropdown\n          Properties:\n            Items: =["All", "Open"]\n      - galItems:');
+  if (listCode(withDrop).length) fails.push('list: a gallery filtered by a dropdown should not warn');
+  if (listCode(plain.replace('Items: =Requests', 'Items: =Table({Code: "A"}, {Code: "B"})')).length) fails.push('list: a literal table should not warn');
+  if (listCode(plain.replace('Items: =Requests', 'Items: =Search(Requests, locQuery, Title)')).length) fails.push('list: a searched gallery should not warn');
+
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, With and collection cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, With, collection and 4 list cases decided as expected`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }

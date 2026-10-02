@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.4.0](https://img.shields.io/badge/plugin-0.4.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.5.0](https://img.shields.io/badge/plugin-0.5.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 32/32 vs 14/32](https://img.shields.io/badge/evaluation-32%2F32%20vs%2014%2F32-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.4.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.5.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On four realistic Power Platform tasks, the same model passed **32 of 32** graded checks with this
@@ -301,6 +301,7 @@ echo '{"tool_input":{"file_path":"canvas/app/Src/Home.pa.yaml"}}' | node check-c
 | `clamped-without-full-text` | Text cut with `Left()` and no tooltip reading the same columns, nor an `OnSelect` |
 | `scroll-in-gallery-row` | `Overflow.Scroll` inside a gallery row |
 | `literal-colour`, `literal-font` | A literal `RGBA()`, `ColorValue()`, `Color.<Name>`, hex or `Font.<Name>` in a screen (an error once theme tokens exist) |
+| `list-without-filter` | Advisory warning: a table gallery whose Items reads no filter, search or grouping control. Never changes the exit code |
 
 Every run prints how many controls it examined, read data and could measure. Exit codes: `0` clean,
 `1` findings, `2` nothing examined, which is not a pass. The room is an estimate that errs toward
@@ -332,6 +333,22 @@ the trigger graph's surviving edges.
 
 Exit codes: `0` clean, `1` findings, `2` no flow definitions found, which is not a pass.
 Activation is still the only real compile: turn each flow on once before trusting it.
+
+### The documentation set (`assets/doc-kit/`)
+
+Once an app works, the skill offers four guides generated from the app and its environment: one per
+user role, one for managers, one for administrators, and an extensive developer and platform guide.
+The structure and writing rules are in `references/documentation-set.md`.
+
+```bash
+python skills/power-platform/assets/doc-kit/doc_kit.py --selftest
+python doc_kit.py trim out/shots out/shots-trimmed      # remove player chrome from captures
+python doc_kit.py inventory shots.json                  # every required screen x role has a figure
+python build-guides.py --draft                          # copied from build_guides_example.py
+```
+
+Guides take the app's own theme colours from `canvas/theme.json`. Output goes to `out/`, which is
+git-ignored, because screenshots carry names.
 
 ### Keeping up with Microsoft's changes
 

@@ -17,6 +17,8 @@
 13. Aggregates and joins: use FetchXML
 14. Run history is a table
 15. A checklist for every flow
+16. Every message is logged, can be resent, and shows when it was last sent
+17. Documents and templates
 
 Lint definitions with `scripts/lint-flows.mjs <solution/src/Workflows>` - it checks most of what
 follows statically. Add `--entity-sets sets.json` to verify every entity set name,
@@ -725,6 +727,10 @@ Prefer: odata.include-annotations="*",odata.maxpagesize=5000
       not current state.
 - [ ] While nobody real may be reached: `--require-safe-recipients` exits 0, the one permitted
       address is pinned in source, and the recipients in run history were read back.
+- [ ] Every send writes a communication log row (before a send that waits); a resend flow ends the
+      original row in a terminal status; the app shows last sent and history (section 16).
+- [ ] Attachments are binary (`base64ToBinary` or a download action's body), proved by opening
+      a received file (section 17).
 - [ ] Every action reference is on its `runAfter` path; no apostrophes in single-quoted literals;
       no property name starting with a single `@`; every `entityName` is a real entity set.
 - [ ] No date-only column used as an instant; optional dates `coalesce`d; tested with a fixture
@@ -740,3 +746,80 @@ Prefer: odata.include-annotations="*",odata.maxpagesize=5000
       after the import.
 - [ ] Before any bulk write or purge to a watched table: messages and log rows counted, true figure
       worked out, watchers parked by name and restored to their recorded state.
+
+## 16. Every message is logged, can be resent, and shows when it was last sent
+
+A message a flow sends is invisible to the app unless the flow writes it down. Then nobody can
+answer "did the new hire get the welcome email?", a lost message can only be re-sent by editing data
+until a trigger fires, and run history (kept 28 days, readable only by the flow's owners) becomes
+the audit trail. Give every app that sends a **communication log table** and three behaviours.
+
+**The log row** (one per send, per recipient list):
+
+| Column | Holds |
+|---|---|
+| Kind | a choice: what sort of message (guide step, task dispatch, approval request, notice) |
+| Record / case, task | lookups to what the message was about |
+| Subject, channel | the subject as sent; email, email with options, Teams chat |
+| Intended recipient, actual recipient | the real address list, and the `Safe_to_` value the send used (they differ in test) |
+| Sent at | date AND time (a date-only column cannot order two sends on one day) |
+| Status | Sent, Redirected (test), Failed, Skipped, plus Resend Requested and Resent |
+| Is resend, resend requested by | whether this row is a resend; who asked |
+| Attachment names | the files that went with it |
+
+**Write it at the right moment.**
+
+- After an ordinary send: Sent (or Redirected in test), and a Failed row on the send's failure
+  branch, so a failure is a row, not only a red run.
+- **Before** a send that waits (Outlook "Send email with options", an approval): the action does not
+  finish until someone answers, possibly days later, so a row written after it would not exist while
+  the question is outstanding.
+- A Skipped row when there was nobody to send to, with the reason in the subject or a note.
+- Log rows are **Creates**, and no flow should trigger on Create of the log table - then logging can
+  never start a loop (section 4).
+
+**Resend, loop-safe.** The app sets the row's status to Resend Requested (and who asked). A resend
+flow triggers on **Update** of the log table, `filteringattributes` = the status column, trigger
+condition status = Resend Requested. It re-sends the message itself (writing a new row with Is
+resend = Yes) or re-arms the dispatcher (setting the item's dispatch status to Retry), and **always
+ends the original row in a terminal status** (Resent, or Skipped/Failed with the reason). Every
+write it makes is either a Create (new log row) or moves the row out of its trigger condition, which
+is what `lint-flows.mjs` proves; the re-arm of the dispatcher is an intended edge in the trigger
+graph that ends at the dispatcher's own guard. Never let resend rewrite the same status it triggered
+on.
+
+**Last sent and history** are read by the app from the log (`canvas-controls-and-patterns.md`
+section 17). Grant Write on the log only to the roles that may resend.
+
+## 17. Documents and templates
+
+A record that needs a document has three options; offer them at design time, and allow more than one
+per record (a link plus a generated welcome letter is common).
+
+| Option | How | Strengths | Costs |
+|---|---|---|---|
+| **Link** to SharePoint or OneDrive | a URL column | the file stays in its library, versioned and permissioned; nothing to copy | the reader needs access to the library; external recipients usually do not have it; links rot |
+| **File stored with the record** | a Dataverse **file column** (up to the configured size, uploaded through a form card) or Notes (annotations, enabled per table) | travels with the record and the solution's data; attachable by a flow | capacity counts against file storage; Notes need `HasNotes` on the table and a separate upload path in canvas |
+| **Generated from a template** | a flow fills a template with the record's values | personalised documents with no manual editing; one template serves every record | someone must maintain the template and its placeholder list |
+
+**Template generation without premium connectors**: store an HTML template with `{Placeholder}`
+tokens in a long-text column, render it in the flow with one `replace()` per token from the shared
+list, and attach it as an `.html` file (Word and every browser open it; name it from a template file
+name that may itself contain tokens). **The premium upgrade** is Word Online (Business) "Populate a
+Microsoft Word template": a `.docx` with content controls in SharePoint or OneDrive, filled by name,
+optionally converted to PDF. It needs a Word Online connection that a person must create (an agent
+cannot), and a premium licence for the flow's owner - say so when offering it.
+
+**One placeholder list.** Keep the tokens in one settings row as JSON (`[{token, meaning,
+ifBlank}]`) that the flow's substitution and the app's template guide both read
+(`canvas-controls-and-patterns.md` section 18). The rules: `{Name}` is case-sensitive; an unknown
+token stays as typed; a blank value becomes the stated replacement. Two lists - one in the flow, one
+in the app - disagree within a release.
+
+**The attachment trap: base64 text is not a file.** A Note's `documentbody` (and most "file content"
+fields read through the Web API) is **base64 text**. Passed as an Outlook attachment's
+`ContentBytes`, it is encoded a second time, and the recipient gets a file that will not open ("the
+file is corrupt"). Pass binary: `base64ToBinary(item()?['documentbody'])`, or the body of the
+Dataverse "Download a file or an image" action for a file column, which is already binary. The run
+history looks perfect either way - the attachment is there, with the right name and a plausible
+size - so **verify by opening the received file**, not by reading the run.

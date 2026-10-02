@@ -112,6 +112,10 @@ unique across the organisation (`dataverse.md`).
 
 ## 3. User guides and SOPs generated from the running product
 
+The standard set (a guide per user role, a manager guide, an administrator guide and a developer
+and platform guide), its chapter skeletons and the kit are in `documentation-set.md` and
+`assets/doc-kit/`. This section is the method behind them.
+
 A user guide written from memory describes the app someone intended. One generated from the
 published app describes the app users have - and writing it that way doubles as an audit: in one
 project it found seven live defects, and in another a stale date that no check read.

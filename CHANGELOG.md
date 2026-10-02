@@ -11,6 +11,44 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-02
+
+From a second round of feedback on a real app: lists people could not filter, messages that could
+not be resent or traced, a generated attachment that arrived corrupt, and no standard for the
+documentation a finished app should ship with.
+
+### Added
+
+- `references/documentation-set.md` and `assets/doc-kit/`: the documentation set the skill offers
+  once an app works - a guide per user role, a manager guide, an administrator guide and a developer
+  and platform guide (environment, Dataverse, roles, licensing, connections, every flow with its
+  loop analysis, ALM, operations, architecture, start-up, a record's lifecycle, theme, traps, the
+  repository, known gaps). `doc_kit.py` builds the Word documents in the app's own theme colours
+  (cover with version, issue date and build; contents; restarting numbered steps; callouts; tables
+  that repeat headers; captioned figures), trims player chrome from screenshots, and checks the shot
+  inventory (every required screen and role has a figure; an empty list fails). `--selftest` builds
+  and inspects a sample. `build_guides_example.py` holds the four chapter skeletons, with shared
+  chapters written once; `--draft` marks missing captures instead of stopping.
+- `check-canvas-format.mjs`: advisory `list-without-filter` warning for a table gallery whose Items
+  reads no input control, variable, `Search` or `GroupBy` (system choices such as statecode
+  ignored). A warning only: the exit code is unchanged. Four selftest cases.
+- `canvas-controls-and-patterns.md` sections 16-18: lists (the default filter, search, sort and
+  section headers, with pa.yaml for an empty-means-All dropdown and a delegation-friendly grouped
+  gallery), communications (last sent, history, a Resend button), and the template guide with a live
+  preview that uses the flow's exact substitution rules.
+- `power-automate.md` sections 16-17: the communication log (columns, writing before a send that
+  waits, Create-only so it can never start a loop), loop-safe resend ending in a terminal status, and
+  documents (link, stored file, generated from an HTML template; the Word-template premium upgrade
+  and the connection it needs; one placeholder list shared by flow and app). The attachment trap: a
+  Note's base64 `documentbody` passed as `ContentBytes` arrives corrupt - pass `base64ToBinary(...)`
+  and verify by opening the received file.
+- `project-setup.md` section 3: intake questions for lists, messages and documents, with defaults.
+- `SKILL.md`: working-loop step 11 offers the documentation set.
+
+### Changed
+
+- CI installs python-docx and Pillow and runs the doc kit self-test.
+
 ## [0.4.0] - 2026-10-02
 
 Long text and theme, decided before they become rework. Data-bound labels that wrap past their

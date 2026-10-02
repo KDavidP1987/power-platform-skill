@@ -1,0 +1,17 @@
+{
+  "_about": "The shot list: every capture, which screen and role it shows, and which (screen, role) pairs each guide needs. doc_kit.py inventory <this file> fails on a missing file and on any required pair without a shot. Capture in the PUBLISHED app as each role, with test data only. File names: <screen>-<role>[-<state>].png, lower case.",
+  "shotsDir": "out/shots-trimmed",
+  "build": "<build stamp the captures were taken on>",
+  "shots": [
+    { "file": "home-user.png", "screen": "Home", "role": "User" },
+    { "file": "new-request-user.png", "screen": "New request", "role": "User" },
+    { "file": "home-manager.png", "screen": "Home", "role": "Manager" },
+    { "file": "approvals-manager.png", "screen": "Approvals", "role": "Manager" },
+    { "file": "admin-settings-administrator.png", "screen": "Administration", "role": "Administrator" }
+  ],
+  "required": {
+    "user": { "roles": ["User"], "screens": ["Home", "New request"] },
+    "manager": { "roles": ["Manager"], "screens": ["Home", "Approvals"] },
+    "admin": { "roles": ["Administrator"], "screens": ["Administration"] }
+  }
+}
