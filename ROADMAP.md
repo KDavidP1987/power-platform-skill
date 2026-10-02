@@ -53,6 +53,18 @@ actually shipped.
 - **Small reference gaps from the same build**: whether `Errors(source)` is filled after an
   `IsError(Patch(...))` test; a comment box whose Post button enables while typing (Keypress)
   against the blur default; `check-canvas-format` finding the project's schema by itself on the CLI.
+- **From the same build's Dataverse app** (confirm at its first compile, then write down):
+  - whether a modal's scrim and card cover MODERN inputs declared before them, or the inputs paint
+    through as they do over a gallery - if they paint through, the overlap checker's modal exemption
+    must not apply to modern inputs;
+  - quoting an apostrophe inside a quoted identifier (`'Won''t Do'`), and which form a custom
+    `Status` column binds as (`Status` or `'Status (prefix_status)'`) - section 4 and a working
+    app disagree;
+  - clearing a lookup in `Patch` (`Blank()` against an `If` with no else);
+  - a text-fit schema built offline from a table manifest, for an app whose tables do not exist yet;
+  - when a collection behind a people picker is acceptable under core rule 10;
+  - patterns for a fixed-height card whose title wraps to two lines, and a new-record form whose
+    inputs start hidden.
 - **Calibrate the long-text estimate** (`check-canvas-format.mjs`, 0.56 em per character) against
   rendered output, with Power Fx `measurefont` or screenshots of the published player, and publish
   the measured range per font.

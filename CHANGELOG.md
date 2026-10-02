@@ -11,6 +11,11 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+### Changed
+
+- `check-canvas-overlap.mjs` names every control it skipped, with file and line, in the report and
+  in `--json` (`skippedControls`); the count alone did not say what went unchecked.
+
 ## [0.7.1] - 2026-10-02
 
 From the full 0.7.0 evaluation and the first build of a new app with the skill.

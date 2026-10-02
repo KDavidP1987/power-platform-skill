@@ -214,7 +214,7 @@ export function show(n) {
 
 export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) {
   const findings = [];
-  const stats = { files: 0, controls: 0, compared: 0, resolved: 0, skipped: 0, skipReasons: {}, alwaysHidden: 0, pairs: 0, exempt: { exclusive: 0, modal: 0, linked: 0, clickpad: 0 }, exempted: [] };
+  const stats = { files: 0, controls: 0, compared: 0, resolved: 0, skipped: 0, skipReasons: {}, skippedControls: [], alwaysHidden: 0, pairs: 0, exempt: { exclusive: 0, modal: 0, linked: 0, clickpad: 0 }, exempted: [] };
   const appFile = files.find((f) => /(^|[\\/])App\.pa\.yaml$/i.test(f.path));
   const appText = appFile ? appFile.text : '';
   const consts = readConstants(appText);
@@ -382,7 +382,7 @@ export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) 
         if (alts.length) c.alts = alts; else skip(c, 'no geometry branch is consistent with its Visible');
       }
     }
-    if (c.skip) { stats.skipped++; stats.skipReasons[c.skip] = (stats.skipReasons[c.skip] || 0) + 1; continue; }
+    if (c.skip) { stats.skipped++; stats.skipReasons[c.skip] = (stats.skipReasons[c.skip] || 0) + 1; stats.skippedControls.push({ name: c.name, file: c.file, line: c.line, why: c.skip }); continue; }
     stats.resolved++;
     boxes.push(c);
   }
@@ -517,6 +517,7 @@ function report(res, json, explain = false) {
   console.log(`\n${stats.files} screen file(s); ${stats.compared} drawn control(s): ${stats.resolved} resolved, ${stats.skipped} skipped, ${stats.alwaysHidden} never visible.`
     + ` ${stats.pairs} overlapping pair(s) examined; exempt: ${e.exclusive} exclusive by Visible, ${e.modal} modal, ${e.linked} linked, ${e.clickpad} text-less click pad.`);
   for (const [why, n] of Object.entries(stats.skipReasons)) console.log(`  skipped ${n}: ${why}`);
+  for (const k of stats.skippedControls) console.log(`    ${k.name}  ${k.file ? path.basename(k.file) : ''}${k.line ? ':' + k.line : ''}  (${k.why})`);
   if (explain) { console.log('\nExempted pairs (audit these: an exemption that hides a real overlap is a bug in this check):'); stats.exempted.forEach((x) => console.log('  ' + x)); }
   console.log(`${findings.filter((f) => f.level === 'error').length} error(s), ${findings.filter((f) => f.level === 'warn').length} warning(s). A skipped control was NOT checked; the published app is the authority (canvas-browser.mjs overlapcheck / deadclick).`);
 }
@@ -606,7 +607,7 @@ function selftest() {
   }
   // The floor: unresolvable geometry is counted, not passed silently.
   const r = analyse([{ path: 's.pa.yaml', text: scr(L('lblA', { X: '=Rand() * 10' })) }]);
-  if (r.stats.resolved !== 0 || r.stats.skipped !== 1) fails.push('an unresolvable X must be counted as skipped');
+  if (r.stats.resolved !== 0 || r.stats.skipped !== 1 || r.stats.skippedControls.length !== 1) fails.push('an unresolvable X must be counted as skipped and named');
   const ok = fails.length === 0;
   console.log(ok ? `selftest ok: ${CASES.length} layouts decided as expected (overlaps, exclusive conditions, modal, card, click pad, empty state, gallery rows, edges), and the skip floor`
     : `selftest FAILED:\n  ${fails.join('\n  ')}`);
