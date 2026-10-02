@@ -435,12 +435,17 @@ function pathConstraints(flow, t, target) {
 
 // Decide whether a self-write is guarded: some condition on its path must read a column the
 // write changes AND evaluate to false once the written values are in the row.
-export function selfWriteVerdict(flow, t, actionName, ctx = flowContext(flow, t)) {
+function writtenValues(flow, actionName, ctx) {
   let act = null;
   walk(flow.def.actions, (n, a) => { if (n === actionName) act = a; });
   const p = (act && act.inputs && act.inputs.parameters) || {};
   const written = new Map();
   for (const [k, v] of Object.entries(p)) if (k.startsWith('item/')) written.set(k.slice(5).toLowerCase(), evaluate(substitute(parseValue(v), ctx), ctx, { written: new Map() }));
+  return written;
+}
+
+export function selfWriteVerdict(flow, t, actionName, ctx = flowContext(flow, t)) {
+  const written = writtenValues(flow, actionName, ctx);
   const conjuncts = pathConstraints(flow, t, actionName).flatMap((c) => flattenAnd(substitute(c.ast, ctx)).map((ast) => ({ ast, from: c.from })));
   const unparsed = conjuncts.filter((c) => c.ast && c.ast.t === 'unknown');
   const relevant = conjuncts.filter((c) => [...readsColumns(c.ast, ctx)].some((col) => written.has(col)));
@@ -452,6 +457,19 @@ export function selfWriteVerdict(flow, t, actionName, ctx = flowContext(flow, t)
   const hit2 = falseUnder({ written: assumed });
   if (hit2) return { verdict: 'assumes-nonblank', by: hit2.from, written, relevant, unparsed };
   return { verdict: relevant.length ? 'stays-true' : 'unread', written, relevant, unparsed };
+}
+
+// Which trigger condition, if any, is definitely FALSE once this action's written values are in
+// the row? Only a trigger condition stops the retrigger from starting a run; an If inside the
+// flow does not (the run starts, then skips). Returns the condition's label, or null.
+export function triggerConditionGuard(flow, t, actionName, ctx = flowContext(flow, t)) {
+  const written = writtenValues(flow, actionName, ctx);
+  const conds = (t.conditions || []).map((c, i) => ({ ast: parseValue(c && typeof c === 'object' ? c.expression : c), from: `trigger condition ${i + 1}` }));
+  for (const c of conds) {
+    const parts = flattenAnd(substitute(c.ast, ctx));
+    if (parts.some((ast) => [...readsColumns(ast, ctx)].some((col) => written.has(col)) && evaluate(ast, ctx, { written }) === false)) return c.from;
+  }
+  return null;
 }
 
 function checkSelfWrite(flow, t, add) {
@@ -484,7 +502,12 @@ function checkSelfWrite(flow, t, add) {
         `value non-blank (coalesce it with a marker), or skip the write when it is blank.`);
     }
     if (t.filtering && w.cols.some((c) => String(t.filtering).toLowerCase().split(',').map((s) => s.trim()).includes(c))) {
-      add('error', 'writes-filtered-column', `'${w.n}' writes a column listed in the trigger's filteringattributes - it retriggers itself.`);
+      const by = triggerConditionGuard(flow, t, w.n, ctx);
+      if (by) add('info', 'writes-filtered-column-guarded', `'${w.n}' writes a column listed in the trigger's filteringattributes, so the ` +
+        `trigger still fires on its own write (it counts toward trigger evaluations), but ${by} is false once the written values are ` +
+        `in the row, so no run starts.`);
+      else add('error', 'writes-filtered-column', `'${w.n}' writes a column listed in the trigger's filteringattributes - it retriggers itself. ` +
+        `Only a trigger condition that is false once the write lands stops the run; an If inside the flow does not.`);
     }
   }
   return writes;
@@ -757,6 +780,19 @@ function selftest() {
     const okCase = expect === null ? codes.length === 0 : codes.length === 1 && codes[0] === expect;
     if (!okCase) guardFails.push(`${name}: expected ${expect || 'guarded'}, got ${codes.join(', ') || 'guarded'}`);
   }
+  // filteringattributes on a written column: a trigger condition that the write falsifies downgrades
+  // the finding to info; the same guard only in an inner If leaves it an error (the run still starts).
+  const statusCond = "@and(equals(triggerOutputs()?['body/app_status'], 1), not(equals(coalesce(triggerOutputs()?['body/app_generated'], false), true)))";
+  const filtered = (name, conditions, wrap) => {
+    const f = guardFixture(name, { conditions, wrap, write: { 'item/app_status': 2, 'item/app_generated': true } });
+    f.def.triggers.When_a_request_is_updated.inputs.parameters['subscriptionRequest/filteringattributes'] = 'app_status';
+    return lint([f]).results[0].items.filter((i) => /^writes-filtered-column/.test(i.code)).map((i) => `${i.level}:${i.code}`);
+  };
+  const filterCases = [
+    ['filtered-guarded-by-trigger-condition', filtered('a', [{ expression: statusCond }], (w) => ({ type: 'Scope', actions: { Lock_it: w } })), 'info:writes-filtered-column-guarded'],
+    ['filtered-guarded-only-by-inner-if', filtered('b', [], ifYes(statusCond)), 'error:writes-filtered-column'],
+  ];
+  for (const [name, got, expect] of filterCases) if (got.length !== 1 || got[0] !== expect) guardFails.push(`${name}: expected ${expect}, got ${got.join(', ') || 'nothing'}`);
   // The parser itself: doubled quotes, safe navigation, dotted access, interpolation.
   const parsed = [
     ["@equals(triggerOutputs()?['body/app_note'], 'it''s')", (n) => n.t === 'call' && n.args[1].v === "it's"],
@@ -766,7 +802,7 @@ function selftest() {
   ].filter(([src, okFn]) => !okFn(parseValue(src))).map(([src]) => 'parse: ' + src);
   const ok = missing.length === 0 && good.length === 0 && guardFails.length === 0 && parsed.length === 0;
   console.log(ok ? `selftest ok: bad fixture -> ${bad.length} findings (${[...new Set(bad)].join(', ')}), good fixture -> 0, ` +
-                   `${GUARD_CASES.length} guard shapes decided as expected, parser cases ok`
+                   `${GUARD_CASES.length} guard shapes and 2 filteringattributes cases decided as expected, parser cases ok`
                  : `selftest FAILED: missing [${missing.join(', ')}]; good fixture produced: ${good.map((g) => g.code + ': ' + g.msg).join(' | ')}; ` +
                    `guard shapes: [${guardFails.join(' | ')}]; parser: [${parsed.join(' | ')}]`);
   process.exit(ok ? 0 : 1);

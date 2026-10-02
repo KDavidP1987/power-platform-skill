@@ -11,6 +11,16 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-01
+
+### Changed
+
+- `lint-flows.mjs`: writing a column listed in the trigger's `filteringattributes` is no longer
+  always an error. When a trigger condition is provably false once the written values are in
+  the row, the finding is downgraded to info (`writes-filtered-column-guarded`): the trigger
+  still fires, but no run starts. A guard only in an If inside the flow keeps the error, since
+  the run has already started. Two self-test cases cover both shapes.
+
 ## [0.2.0] - 2026-10-01
 
 ### Added

@@ -197,8 +197,11 @@ same user action. A duplicate write whose only effect is to arm a loop should be
 
 **Use both layers: filtering attributes to cut the run count, the sentinel to guarantee
 termination.** `filteringattributes` (Select columns) is Microsoft's recommended way to stop a flow
-running on irrelevant edits, and it saves billed runs - use it, and never write a column that
-appears in the filter. But do not make it the **only** loop protection: it is a registration-time
+running on irrelevant edits, and it saves billed runs - use it, and avoid writing a column that
+appears in the filter. The one safe exception is a write that a trigger condition rejects (e.g. the
+condition requires status = Submitted and the flow sets it to In Progress): the trigger still
+fires and counts toward trigger evaluations, but no run starts - an If inside the flow does not
+give that protection, because the run has already started. But do not make it the **only** loop protection: it is a registration-time
 setting you cannot see working from source, and in one project two update triggers carrying
 filters were found subscribed to nothing for eleven days (observed once; treat as "verify, do not
 assume"). So after deploying a filtered trigger, **prove it registered**: every subscribed
