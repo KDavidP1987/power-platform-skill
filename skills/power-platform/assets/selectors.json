@@ -1,0 +1,125 @@
+{
+  "_comment": [
+    "UI anchors scripts/canvas-browser.mjs depends on. Microsoft changes Studio, the player and the maker portal",
+    "without notice; when the driver stops finding something, this is the one place to fix it.",
+    "Check them against a live tenant with: node scripts/canvas-browser.mjs doctor  (exit 0 all resolve, 9 stale).",
+    "The same defaults are compiled into the driver; an entry here overrides the field it names.",
+    "kind: css | role (role + name pattern) | text (pattern) | regex (pattern) | template ({placeholders}) | attribute | anyOf (list of css/role/text).",
+    "check: required = doctor must find it in a normal session; conditional = appears only in a state doctor does not create.",
+    "lastVerified: the skill version or ISO date at which the entry was last seen working; doctor --record writes the date."
+  ],
+  "schema": 1,
+  "selectors": {
+    "portal.makerHome": {
+      "surface": "portal", "kind": "template", "value": "https://make.powerapps.com/",
+      "purpose": "Maker portal entry point used by login and check", "check": "required", "lastVerified": "0.1.0"
+    },
+    "portal.makerUrl": {
+      "surface": "portal", "kind": "regex", "pattern": "make\\.powerapps\\.com", "flags": "",
+      "purpose": "Identifies the Studio tab among open pages", "check": "required", "lastVerified": "0.1.0"
+    },
+    "portal.signedInUrl": {
+      "surface": "portal", "kind": "regex", "pattern": "make\\.powerapps\\.com/(environments|e/|home)", "flags": "",
+      "purpose": "URL the maker portal lands on once sign-in has completed", "check": "required", "lastVerified": "0.1.0"
+    },
+    "portal.signInUrl": {
+      "surface": "portal", "kind": "regex", "pattern": "login\\.microsoftonline\\.com|signin", "flags": "i",
+      "purpose": "A redirect to sign-in means the saved profile has expired", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "portal.signInInput": {
+      "surface": "portal", "kind": "css", "value": "input[name=\"loginfmt\"], #i0116",
+      "purpose": "The account-name box of the sign-in page", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "portal.playerUrl": {
+      "surface": "player", "kind": "template", "value": "https://apps.powerapps.com/play/e/{environmentId}/a/{appId}",
+      "purpose": "Published app URL (overridden by playerUrl in canvas-app.json)", "check": "required", "lastVerified": "0.1.0"
+    },
+    "portal.studioUrl": {
+      "surface": "studio", "kind": "template",
+      "value": "https://make.powerapps.com/e/{environmentId}/canvas/?action=edit&app-id=/providers/Microsoft.PowerApps/apps/{appId}",
+      "purpose": "Opens the app in Studio in edit mode", "check": "required", "lastVerified": "0.1.0"
+    },
+    "player.controlAttribute": {
+      "surface": "player", "kind": "attribute", "value": "data-control-name",
+      "purpose": "Attribute every rendered canvas control carries; finds the app frame and names controls in sweeps", "check": "required", "lastVerified": "0.1.0"
+    },
+    "player.consentAllow": {
+      "surface": "player", "kind": "role", "role": "button", "name": "^allow$", "flags": "i",
+      "purpose": "Connection consent prompt shown after clearing storage", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "player.staleBanner": {
+      "surface": "player", "kind": "text", "pattern": "old version of this app", "flags": "i",
+      "purpose": "Banner shown when the player runs a cached build", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "player.staleRefresh": {
+      "surface": "player", "kind": "role", "role": "button", "name": "^refresh$", "flags": "i",
+      "purpose": "The stale banner's own Refresh button", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "player.batchUrl": {
+      "surface": "player", "kind": "regex", "pattern": "/api/data/v9\\.\\d/\\$batch", "flags": "",
+      "purpose": "Dataverse $batch requests recorded by --trace", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "studio.titleEditing": {
+      "surface": "studio", "kind": "regex", "pattern": "\\(Editing\\)", "flags": "i",
+      "purpose": "Window title marker: this session holds the edit lock", "check": "required", "lastVerified": "0.1.0"
+    },
+    "studio.titleReadOnly": {
+      "surface": "studio", "kind": "regex", "pattern": "\\(Read-only\\)", "flags": "i",
+      "purpose": "Window title marker: an edit lock is held elsewhere", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "studio.authoringFrameUrl": {
+      "surface": "studio", "kind": "regex", "pattern": "authoring\\..*powerapps\\.com", "flags": "",
+      "purpose": "URL of the iframe that holds the Studio editor", "check": "required", "lastVerified": "0.1.0"
+    },
+    "studio.saveButton": {
+      "surface": "studio", "kind": "css", "value": "button[aria-label^=\"Save\" i]",
+      "purpose": "Command-bar Save button", "check": "required", "lastVerified": "0.1.0"
+    },
+    "studio.saveFlyout": {
+      "surface": "studio", "kind": "anyOf",
+      "anyOf": [
+        { "kind": "css", "value": "button[aria-haspopup][aria-label*=\"save\" i]:not([aria-label=\"Save\" i]):not([aria-label^=\"Save (\" i])" },
+        { "kind": "css", "value": "button[aria-label*=\"more save\" i]" },
+        { "kind": "css", "value": "button[aria-label*=\"save options\" i]" }
+      ],
+      "purpose": "Chevron that opens the Save flyout (never the Save button itself)", "check": "required", "lastVerified": "0.1.0"
+    },
+    "studio.savedStamp": {
+      "surface": "studio", "kind": "regex", "pattern": "\\bSaved:[ \\t]*([^\\n]{1,48})", "flags": "i",
+      "purpose": "The 'Saved: <time>' line in the Save flyout - the proof a save landed", "check": "required", "lastVerified": "0.1.0"
+    },
+    "studio.publishButton": {
+      "surface": "studio", "kind": "css", "value": "button[aria-label^=\"Publish\" i]",
+      "purpose": "Command-bar Publish button", "check": "required", "lastVerified": "0.1.0"
+    },
+    "studio.publishConfirm": {
+      "surface": "studio", "kind": "anyOf",
+      "anyOf": [
+        { "kind": "role", "role": "button", "name": "publish this version", "flags": "i" },
+        { "kind": "css", "value": "button:has-text(\"Publish this version\")" },
+        { "kind": "role", "role": "button", "name": "^publish$", "flags": "i" }
+      ],
+      "purpose": "Confirm button in the publish dialog (doctor never publishes, so never exercises it)", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "studio.closePreview": {
+      "surface": "studio", "kind": "css", "value": "button[aria-label^=\"Close preview\" i]",
+      "purpose": "Present only while Studio is in Preview", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "studio.leaveButton": {
+      "surface": "studio", "kind": "css", "value": "button:has-text(\"Leave\")",
+      "purpose": "Leave confirmation shown by Back when there is unsaved work", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "studio.backButton": {
+      "surface": "studio", "kind": "css", "value": "button[aria-label^=\"Back\" i]",
+      "purpose": "Leaves the editor and releases the edit lock", "check": "required", "lastVerified": "0.1.0"
+    },
+    "studio.gotIt": {
+      "surface": "studio", "kind": "anyOf",
+      "anyOf": [
+        { "kind": "role", "role": "button", "name": "^got it$", "flags": "i" },
+        { "kind": "css", "value": "button:has-text(\"Got it\")" }
+      ],
+      "purpose": "Dismisses first-run and teaching bubbles that swallow command-bar clicks", "check": "conditional", "lastVerified": "0.1.0"
+    }
+  }
+}

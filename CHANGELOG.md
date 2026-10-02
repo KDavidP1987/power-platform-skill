@@ -11,6 +11,44 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-01
+
+### Added
+
+- `scripts/ship-canvas.py`: the canvas ship pipeline. It builds on the live baseline, reconciles
+  the caches (and proves a second pass changes nothing), stamps the build, strips roles, repairs
+  the player list, packs with pac, and asserts on the finished artifact. Includes `--dry-run`,
+  opt-in `--import`/`--publish`, and a `--selftest` that simulates pac.
+- `scripts/check-drift.py`: read-only comparison of a canvas app's cached Dataverse metadata
+  (entity sets, columns the formulas use, column types, choice members in both caches, lookup
+  navigation names, `<DatabaseReferences>`) with the live environment or a saved `--dump`. Exits
+  0 clean, 1 drift, 2 could not verify. Includes `--selftest`.
+- `references/alm-pipelines.md`: CI/CD with pac in GitHub Actions and Azure DevOps. Covers
+  service-principal auth, Solution Checker, managed vs unmanaged and upgrades, deployment
+  settings, activating flows after import, and the skill's tools as pipeline gates. Statements
+  are tagged Documented, Observed or Untested here.
+- `canvas-browser.mjs doctor`: checks every UI anchor against a live Studio and player. Exits 0
+  when all resolve, 9 when any is stale, 2 when it cannot verify; it never passes offline.
+- `assets/selectors.json`: every selector, text anchor and URL template the driver uses, with
+  `lastVerified` per entry; compiled-in defaults are the fallback.
+- `assets/tested-versions.json` and `.github/workflows/upkeep.yml`: a monthly run of all
+  self-tests plus Playwright and Playwright MCP version checks, opening an `upkeep` issue with a
+  re-verification checklist.
+- `lint-flows.mjs`: new warning `self-write-guard-assumes-value`, raised when a self-write's
+  guard holds only if a value read at run time is never blank.
+
+### Changed
+
+- `lint-flows.mjs` `self-trigger-loop` now parses flow expressions instead of matching column
+  names. It passes a self-write only if a path condition reads a written column and is false
+  once the written values are in the row. The self-test adds 13 guard shapes.
+- `assets/canvas-app.example.json`: optional ship keys (`appLogicalName`, `externalTables`,
+  `buildStampVariable`, `buildStampPlaceholder`, `outDir`, `workDir`, `maxScreenFiles`,
+  `bumpVersion`).
+- `references/power-automate.md`: why a column-name match is not a guard, and the caveat on
+  is-blank guards.
+- CI runs the self-tests of the two new Python tools.
+
 ## [0.1.0] - 2026-10-01
 
 First public release.

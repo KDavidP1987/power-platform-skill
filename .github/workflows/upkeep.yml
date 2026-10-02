@@ -1,0 +1,119 @@
+name: upkeep
+
+# Microsoft changes Studio, the player and the maker portal; Playwright and its MCP server ship
+# often. Once a month (or on demand) this re-runs every self-test and compares the npm versions
+# with skills/power-platform/assets/tested-versions.json. If anything moved or failed it opens
+# (or updates) one issue with a checklist. It never touches a tenant: there are no secrets here,
+# and the live selector check (canvas-browser.mjs doctor) stays a manual step on the checklist.
+
+on:
+  schedule:
+    - cron: "17 6 1 * *"   # 06:17 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upkeep
+  cancel-in-progress: false
+
+jobs:
+  upkeep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Every bundled script that offers --selftest runs; a failure is recorded, not fatal, so the
+      # issue can list all of them at once.
+      - name: Run all self-tests
+        id: selftests
+        shell: bash
+        run: |
+          set +e
+          dir=skills/power-platform/scripts
+          : > selftests.md
+          failed=0
+          while IFS= read -r f; do
+            case "$f" in
+              *.mjs|*.js) out=$(node "$f" --selftest 2>&1); rc=$? ;;
+              *.py)       out=$(python "$f" --selftest 2>&1); rc=$? ;;
+              *) continue ;;
+            esac
+            if [ $rc -eq 0 ]; then echo "- [x] \`$f\` - $(echo "$out" | tail -n 1)" >> selftests.md
+            else failed=$((failed+1)); echo "- [ ] \`$f\` FAILED (exit $rc): $(echo "$out" | tail -n 3 | tr '\n' ' ')" >> selftests.md; fi
+          done < <(grep -rl --include='*.mjs' --include='*.js' --include='*.py' -e '--selftest' "$dir" | sort)
+          # Offline, doctor must refuse to pass: no Playwright here, so it has to exit non-zero.
+          node "$dir/canvas-browser.mjs" doctor > doctor.txt 2>&1; rc=$?
+          if [ $rc -eq 0 ] || [ $rc -eq 9 ]; then failed=$((failed+1)); echo "- [ ] \`canvas-browser.mjs doctor\` returned $rc offline - it must say CANNOT VERIFY" >> selftests.md
+          else echo "- [x] \`canvas-browser.mjs doctor\` offline refuses to pass (exit $rc)" >> selftests.md; fi
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          cat selftests.md
+
+      - name: Compare tool versions with the tested set
+        id: versions
+        shell: bash
+        run: |
+          set +e
+          node - <<'EOF' > versions.md
+          const fs = require('fs');
+          const { execSync } = require('child_process');
+          const tested = JSON.parse(fs.readFileSync('skills/power-platform/assets/tested-versions.json', 'utf8'));
+          let moved = 0;
+          for (const [pkg, want] of Object.entries(tested.npm)) {
+            let now = '(lookup failed)';
+            try { now = execSync(`npm view ${pkg} version`, { encoding: 'utf8' }).trim(); } catch {}
+            const same = now === want;
+            if (!same) moved++;
+            console.log(`- [${same ? 'x' : ' '}] \`${pkg}\`: tested ${want}, registry ${now}${same ? '' : ' - MOVED'}`);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `moved=${moved}\n`);
+          EOF
+          cat versions.md
+
+      - name: Open or update the upkeep issue
+        if: steps.selftests.outputs.failed != '0' || steps.versions.outputs.moved != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const title = 'Upkeep: re-verify the power-platform skill';
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `The scheduled upkeep run found something to look at. Run: ${run}`,
+              '',
+              '### Self-tests',
+              fs.readFileSync('selftests.md', 'utf8'),
+              '### Tool versions',
+              fs.readFileSync('versions.md', 'utf8'),
+              '### Checklist',
+              '- [ ] Fix any failing self-test above (a checker that cannot go red is not a checker).',
+              '- [ ] Install the new Playwright locally and run `node skills/power-platform/scripts/canvas-browser.mjs --selftest`.',
+              '- [ ] Run `canvas-browser.mjs doctor` against a real tenant (after `login`) and get exit 0; fix stale entries in `assets/selectors.json` and `SELECTOR_DEFAULTS`.',
+              '- [ ] Run one real scenario with `canvas-browser.mjs walk` on a published app (`--fresh`), and `save`/`publish` on a test app.',
+              '- [ ] If the Playwright MCP server moved, start it once (`npx @playwright/mcp@latest`) and drive the player with it.',
+              '- [ ] Update `assets/tested-versions.json` with the versions that passed.',
+              '- [ ] Note anything that changed in behaviour in the relevant reference and in CHANGELOG.md.',
+            ].join('\n');
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'upkeep', per_page: 50 });
+            const existing = open.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.update({ ...context.repo, issue_number: existing.number, body });
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body: `Re-checked by ${run}; the description is updated.` });
+              core.info(`updated issue #${existing.number}`);
+            } else {
+              try { await github.rest.issues.createLabel({ ...context.repo, name: 'upkeep', color: '0e7490', description: 'Scheduled re-verification of the skill' }); } catch (e) { /* exists */ }
+              const { data: created } = await github.rest.issues.create({ ...context.repo, title, body, labels: ['upkeep'] });
+              core.info(`opened issue #${created.number}`);
+            }
+
+      - name: Fail the run when a self-test failed
+        if: steps.selftests.outputs.failed != '0'
+        run: exit 1

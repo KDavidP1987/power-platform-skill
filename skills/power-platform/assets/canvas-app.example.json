@@ -5,5 +5,21 @@
   "appId": "00000000-0000-0000-0000-000000000000",
   "appName": "Your App Display Name",
   "solutionUniqueName": "YourSolution",
-  "canvasSrc": "canvas/your-app/Src"
+  "canvasSrc": "canvas/your-app/Src",
+
+  "_comment_ship": "Optional keys read by scripts/ship-canvas.py. Defaults shown; paths are relative to the repo root.",
+  "appLogicalName": "app_yourapp_1a2b3",
+  "externalTables": ["core_*"],
+  "buildStampVariable": "gblBuild",
+  "buildStampPlaceholder": "unshipped",
+  "outDir": "out",
+  "workDir": ".ship-work",
+  "maxScreenFiles": 50,
+  "bumpVersion": true,
+  "_notes": [
+    "appId is the app id (pac canvas download --name takes it), not Properties.Id from a downloaded package.",
+    "appLogicalName is the canvas app's name inside the solution (CanvasApps/<name>_DocumentUri.msapp); needed only when the solution holds more than one app.",
+    "externalTables: glob patterns for tables the app binds that another solution in the target environment owns by design (a shared reference layer). Any other bound table missing from the solution's entities stops the ship.",
+    "The build stamp is written into Set(<buildStampVariable>, \"<buildStampPlaceholder>\") in the PACKED copy of App.pa.yaml only; the ship refuses if the placeholder is missing."
+  ]
 }

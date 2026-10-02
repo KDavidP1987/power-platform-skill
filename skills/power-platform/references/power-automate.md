@@ -211,6 +211,22 @@ run appears in run history. Keep the sentinel guard in the flow regardless.
 its own trigger table, and fail when that intersection is **empty**. (Note the direction - a check
 asserting the opposite passes every looping flow.)
 
+A name match is necessary, not sufficient. A guard can read the written column and still be true
+after the write (`locked <> false` before setting `locked = true`), or read it inside an `or` with
+an escape clause. `lint-flows.mjs` therefore parses the conditions on the write's path (trigger
+conditions, every enclosing If branch and Switch case, one level of Compose or variable
+indirection), puts the written values into the row, and passes the write only if some condition is
+then **false**. Two consequences worth knowing:
+
+- **"Is blank" guards depend on the written value.** `snapshotrate is blank` stops the loop only if
+  the value written is never blank. A rate read from another table can be null (an optional column,
+  a column the flow's identity cannot read), and then the flow writes null, the guard stays true,
+  and it retriggers. The linter reports that shape as `self-write-guard-assumes-value`; fix it by
+  skipping the write when the value is blank, or by writing a non-blank marker.
+- **What it cannot evaluate counts as no guard.** An unfamiliar function makes a condition unknown,
+  and an unknown never passes a write. Rewrite the guard in plain `equals`/`not`/`coalesce`/`empty`
+  terms rather than suppressing the finding.
+
 ## 4. Loops between flows, and bookkeeping writes
 
 - **Loops between flows are invisible to a per-flow guard.** Flow A fires on X and writes Y; flow B

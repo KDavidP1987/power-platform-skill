@@ -14,7 +14,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
 # Power Platform development
@@ -82,6 +82,8 @@ user unproven.
    coauthoring session" warning means it validated against nothing.
 6. **Build the artifact on the LIVE manifest and assert on it.** Not the repo's stale `.msapr`.
    Strip security roles. Check the zip contains every component and every marker you changed.
+   `scripts/ship-canvas.py` does all of this; `scripts/check-drift.py` alone answers "is the
+   app's cached metadata stale" before you build.
 7. **Import / publish.** Then confirm what landed: download the app, read `LoadFromYaml`, search the
    half that runs for your markers, compare data-source counts with the previous live app.
 8. **Perform the task in the published app** with Playwright, after refreshing past any cached
@@ -117,6 +119,7 @@ Read only the reference the task needs. Each one is self-contained.
 | **Process and environment** | |
 | Writing or trusting an audit; stale inputs; vacuous passes; reusable tool designs | `references/audits.md` |
 | Starting a repo: layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights | `references/project-setup.md` |
+| CI/CD: service-principal pac auth, export/unpack on a branch, pack + Solution Checker, managed vs unmanaged and upgrade, deployment settings for connection references and environment variables, importing flows off then activating, powerplatform-actions / Build Tools, the skill's tools as pipeline gates | `references/alm-pipelines.md` |
 | Several apps sharing one environment or a shared reference solution | `references/shared-environments.md` |
 | pac, tokens, the TDS endpoint, MCP servers, Windows/OneDrive/PowerShell failures, and production actions Claude Code must hand to a person | `references/tooling-and-auth.md` |
 | Model-driven forms by script, user guides/SOPs from the running app, licensing, weekly reporting from git, replacing a spreadsheet tool | `references/model-driven-and-docs.md` |
@@ -128,9 +131,11 @@ than carrying an id. Run any of them with `--help`.
 
 | Tool | Use |
 |---|---|
-| `scripts/canvas-browser.mjs` | Playwright driver for the maker portal and the published player: `login`, `check`, `play`, `walk <scenario.json>`, `studio`, `save`, `publish`, `close-studio`, `shot`. `--fresh` clears the player's cached build, `--trace` records `$batch` traffic, and a scenario that writes must declare a `restore`. `lint` checks a scenario without a browser. Scenario verbs include `click`, `type`, `select`, `expect`, `absent`, `deadclick`, `clipcheck`. Needs `npm i playwright`. |
+| `scripts/canvas-browser.mjs` | Playwright driver for the maker portal and the published player: `login`, `check`, `play`, `walk <scenario.json>`, `studio`, `save`, `publish`, `close-studio`, `shot`, `doctor`. `--fresh` clears the player's cached build, `--trace` records `$batch` traffic, `--channel` picks Chrome, Edge or bundled Chromium, and a scenario that writes must declare a `restore`. `lint` checks a scenario without a browser. Every UI anchor it depends on is in `assets/selectors.json`; `doctor` checks them against a live, signed-in session (exit 0 all resolve, 9 stale, 2 cannot verify - never a pass offline). Needs `npm i playwright`. |
 | `scripts/inspect-artifact.py` | Opens a solution zip or `.msapp` and reports what is really inside: root components vs built metadata, security roles, canvas `LoadFromYaml`, build stamp, data-source count, `DatabaseReferences` vs `DataSources.json`, marker search in the half that runs. Python 3 standard library only. |
-| `scripts/lint-flows.mjs` | Static checks on cloud-flow definition JSON: invoker runtime on non-app triggers, self-write without a sentinel guard, apostrophes in expression literals, references outside the `runAfter` path, trigger message codes, sends chained after `Failed`, single-`@` property names, multiple triggers, date-only columns used as instants (`--date-only`), cross-flow cycles. Node 18+. |
+| `scripts/check-drift.py` | Compares a canvas app's cached Dataverse metadata with the live environment, read-only: tables, entity set names (every cached copy), columns the formulas use, column types, choice members in both caches, lookup navigation names, and `<DatabaseReferences>` vs `DataSources.json`. Each drift names what breaks in the published app and the fix. `--dump` / `--offline` run it in CI without a tenant. Exit 2 is never a pass. Python 3 standard library only. |
+| `scripts/ship-canvas.py` | The solution-import ship: build on the LIVE manifest, reconcile the caches, stamp the build, strip roles, repair the player list, pack with pac, then assert on the finished zip (inspect-artifact + check-drift). `--dry-run` writes nothing and runs no pac; it never imports without `--import`. Reads `scripts/canvas-app.json`. Python 3 standard library only. |
+| `scripts/lint-flows.mjs` | Static checks on cloud-flow definition JSON: invoker runtime on non-app triggers, self-writes whose path conditions are not FALSE after the write (it parses the expressions and follows one level of Compose/variable indirection; warns when a guard holds only if a run-time value is non-blank), apostrophes in expression literals, references outside the `runAfter` path, trigger message codes, sends chained after `Failed`, single-`@` property names, multiple triggers, date-only columns used as instants (`--date-only`), cross-flow cycles. Node 18+. |
 | `scripts/hooks/check-pa-yaml.mjs` | Claude Code PostToolUse hook: flags the `.pa.yaml` faults that fail a whole-app compile, at write time. |
 | `scripts/hooks/check-standards.mjs`, `audit-stop.mjs`, `preflight.mjs` | Optional output-standards hook, end-of-turn audit, and session pre-flight. Wiring in `assets/settings.snippet.json`. |
 
@@ -150,6 +155,11 @@ optional install (`claude mcp add playwright -- npx @playwright/mcp@latest`). Un
 check can run, the change is **unverified**: say so, keep going with the parts that need no
 browser (`lint`, `--selftest`, `inspect-artifact.py`, the hooks), and give the user the exact
 steps to perform in the published app and the Web API query that would confirm the effect.
+
+**When Studio or the player changes.** Run `canvas-browser.mjs doctor` after a Playwright upgrade
+or whenever the driver stops finding something, and fix stale entries in `assets/selectors.json`.
+A monthly upkeep workflow re-runs every self-test and flags new Playwright versions against
+`assets/tested-versions.json`.
 
 ## How to behave
 

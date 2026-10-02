@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.1.0](https://img.shields.io/badge/plugin-0.1.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.2.0](https://img.shields.io/badge/plugin-0.2.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 32/32 vs 14/32](https://img.shields.io/badge/evaluation-32%2F32%20vs%2014%2F32-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.1.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.2.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On four realistic Power Platform tasks, the same model passed **32 of 32** graded checks with this
@@ -65,8 +65,8 @@ states **what it proves and what it does not**.
 | Part | What it is |
 |---|---|
 | **The method** | `SKILL.md`: ten non-negotiables, a ten-step working loop, and a routing table into the references. Loaded whenever a task touches Power Apps, Power Automate, Dataverse or a solution. |
-| **17 references** | Self-contained guides loaded only when a task needs them: canvas shipping, manifest caches, Power Fx and `.pa.yaml`, controls, layout, browser verification, Dataverse, the Web API, security, data migration, flows, audits, project setup and more. |
-| **Three tools** | An artifact inspector, a cloud-flow linter, and a Playwright driver for Studio and the published player. Each proves it can fail with `--selftest`. |
+| **18 references** | Self-contained guides loaded only when a task needs them: canvas shipping, manifest caches, Power Fx and `.pa.yaml`, controls, layout, browser verification, Dataverse, the Web API, security, data migration, flows, CI/CD pipelines, audits, project setup and more. |
+| **Five tools** | A ship pipeline, a metadata drift checker, an artifact inspector, a cloud-flow linter, and a Playwright driver for Studio and the published player. Each proves it can fail with `--selftest`. |
 | **Four hooks** | Claude Code hooks that stop known compile-killers at the moment a file is written, plus a session pre-flight and an end-of-turn audit. |
 | **Templates** | Hook settings, config examples, an example browser scenario, and state, decisions and dependency templates. |
 
@@ -231,11 +231,44 @@ proves it goes red on a known-bad input, and CI runs them on every push.
 | `studio` / `keys` | Open Studio in edit mode and hold it / reattach and send keys |
 | `save` / `publish [--reload-first]` / `close-studio` | Save with proof, publish, and leave through Back to free the lock |
 | `shot <url> <name>` | Screenshot plus accessibility dump of any page |
+| `doctor [--record]` | Check every UI anchor in `assets/selectors.json` against a live session: `0` all resolve, `9` stale, `2` cannot verify |
 | `lint <scenario.json>` | Check a scenario's verbs without a browser |
 
 Scenario verbs: `click`, `type`, `select`, `fillCell`, `expect`, `absent`, `scroll`, `clipcheck`,
 `deadclick`, `overlapcheck`, `measurefont`, `capture`. `--trace` records which tables each `$batch`
 touched, and the failures hidden inside a 200 response.
+
+### `ship-canvas.py`: the ship pipeline
+
+Builds an importable solution from repo source on top of the **live** app, in nine steps that each
+print what they prove: pre-flight, live baseline (`pac` export and download, or `--live`), unpack,
+live metadata, cache reconciliation (choice members in both caches, lookup navigation names, entity
+set names; a second pass must change nothing), stamp and pack, build the solution (roles stripped,
+player data-source list repaired, version bumped), assertions on the finished zip, and import.
+
+```bash
+python ship-canvas.py --dry-run                  # every step, nothing written, no pac command run
+python ship-canvas.py                            # build and assert; a refused zip is renamed .refused
+python ship-canvas.py --import [--publish]       # only with these flags: pac org who, rollback export, import
+```
+
+Reads `scripts/canvas-app.json`. Exit codes: `0` built, `1` refused, `2` could not run.
+
+### `check-drift.py`: is the app's cached metadata stale?
+
+"Works in Studio, fails in the published app" in one command. Reads the metadata a canvas app froze
+into its manifest and compares it, **read-only**, with live Dataverse or with a saved dump: tables,
+entity set names in every cached copy, columns the formulas use, column types, choice members in
+both caches, lookup navigation names, and the player's data-source list. Each finding states what
+breaks in the published app and the fix.
+
+```bash
+python check-drift.py out/app.msapp --org https://<org>.crm.dynamics.com   # GET requests only
+python check-drift.py out/app.msapp --org ... --dump metadata.json         # save live metadata
+python check-drift.py out/app.msapp --offline metadata.json                # in CI, no tenant
+```
+
+Exit codes: `0` clean, `1` drift, `2` could not verify, which is never a pass.
 
 ### `inspect-artifact.py`: what a solution zip or `.msapp` really contains
 
@@ -250,7 +283,8 @@ artifact could not be read.
 |---|---|
 | `runtime-invoker` | A non-app trigger running connections as the invoker |
 | `trigger-message-mismatch` | The SDK message code does not match the event described |
-| `self-trigger-loop` | A flow writing its own trigger table without a sentinel guard |
+| `self-trigger-loop` | A flow writing its own trigger table where no path condition is false after the write. The expressions are parsed, not matched by name, following one level of Compose and variable indirection |
+| `self-write-guard-assumes-value` | A guard that holds only if a value read at run time is never blank |
 | `apostrophe-in-literal` | An apostrophe that ends an expression string early |
 | `not-on-runafter-path` | A reference to an action that may not have run |
 | `send-after-failed` | A notification chained to run after another one failed |
@@ -262,6 +296,26 @@ artifact could not be read.
 
 Exit codes: `0` clean, `1` findings, `2` no flow definitions found, which is not a pass.
 Activation is still the only real compile: turn each flow on once before trusting it.
+
+### Keeping up with Microsoft's changes
+
+Studio, the published player and the maker portal change without notice. Every selector and text
+anchor the driver uses lives in one table, `skills/power-platform/assets/selectors.json`, with a
+`lastVerified` field per entry. To check them against your tenant:
+
+```bash
+node skills/power-platform/scripts/canvas-browser.mjs login
+node skills/power-platform/scripts/canvas-browser.mjs doctor      # 0 all resolve, 9 stale, 2 cannot verify
+```
+
+`doctor` opens the published app and Studio in edit mode, then leaves through Back. It never saves
+or publishes. Offline, signed out, or against an app that does not load, it reports that it cannot
+verify instead of passing.
+
+A scheduled workflow (`.github/workflows/upkeep.yml`) runs every bundled self-test each month and
+compares the Playwright and Playwright MCP versions with `assets/tested-versions.json`. When
+anything moved or failed, it opens one `upkeep` issue with a re-verification checklist. It holds no
+tenant secrets; the live check stays a manual step.
 
 ## Hooks
 
@@ -300,6 +354,7 @@ Configure them with `.claude/hooks/standards.config.json` (example in `assets/`)
 | Process | [`audits`](skills/power-platform/references/audits.md) | Proving a check can fail, floors against vacuous passes, stale-input detection, the audits worth having |
 | | [`project-setup`](skills/power-platform/references/project-setup.md) | Repository layout, bootstrapping with `pac`, hooks, continuity documents |
 | | [`shared-environments`](skills/power-platform/references/shared-environments.md) | Several apps in one environment: ownership, shared tables, change protocol |
+| | [`alm-pipelines`](skills/power-platform/references/alm-pipelines.md) | CI/CD with `pac` in GitHub Actions and Azure DevOps: service principals, Solution Checker, managed vs unmanaged, deployment settings, activating flows, the skill's tools as gates. Each statement marked documented, observed or untested |
 | | [`tooling-and-auth`](skills/power-platform/references/tooling-and-auth.md) | `pac`, tokens, the TDS endpoint, MCP servers, Windows and PowerShell traps |
 
 ## Rules the skill will not bend
@@ -317,7 +372,7 @@ Configure them with `.claude/hooks/standards.config.json` (example in `assets/`)
 
 ## Evaluation
 
-The skill was evaluated the way skills should be: the same model, the same prompt, run once with
+Measured on version 0.1.0. The skill was evaluated the way skills should be: the same model, the same prompt, run once with
 the skill and once without, graded against checks written before the runs.
 
 | Test | With the skill | Without |
@@ -339,11 +394,13 @@ references. Each configuration ran once, and nothing ran against a live tenant. 
 
 ## Limits of this version
 
-- **The ship pipeline is described, not shipped as a script.** Live-manifest build, cache
-  reconciliation and stamping depend on each project's layout and are short to write from the
-  reference. `inspect-artifact.py` is the assertion half of it.
-- **`lint-flows.mjs` is a floor.** It detects guard columns by name tokens in conditions, so an
-  unusual guard shape can be missed or misread. Activation is still the only compile.
+- **`ship-canvas.py` has only been run against a simulated `pac`.** Its dry run was checked
+  against a real app's source, but a real export, pack and import have not been run through it
+  yet. Watch the first real build.
+- **`lint-flows.mjs` is still a floor.** It evaluates the expressions it understands and treats
+  anything else as unknown, which never counts as a guard. Activation is still the only compile.
+- **`doctor` has not yet been run against Studio in a real tenant.** The portal anchors resolved;
+  the Studio half needs a test app.
 - **Browser selectors track today's player and Studio.** Microsoft changes both. The driver fails
   loudly, with a screenshot and an accessibility snapshot, rather than passing when a selector
   stops matching.
@@ -355,16 +412,19 @@ references. Each configuration ran once, and nothing ran against a live tenant. 
 ```text
 .claude-plugin/                 plugin and marketplace manifests
 .github/workflows/validate.yml  CI: validator, manifests, versions, every self-test
+.github/workflows/upkeep.yml    monthly: self-tests and Playwright version drift, opens an issue
 docs/evaluation.html            the evaluation report (served by GitHub Pages)
 scripts/                        repo validator and its version-agreement tests
 skills/power-platform/
   SKILL.md                      the method, the non-negotiables, where to look
-  references/                   17 self-contained guides (see Reference library)
-  scripts/canvas-browser.mjs    Playwright driver and scenario runner
+  references/                   18 self-contained guides (see Reference library)
+  scripts/ship-canvas.py        the ship pipeline: live baseline, reconcile, stamp, pack, assert
+  scripts/check-drift.py        cached app metadata vs live Dataverse, read-only
+  scripts/canvas-browser.mjs    Playwright driver, scenario runner and selector doctor
   scripts/inspect-artifact.py   what a solution zip or .msapp really contains
   scripts/lint-flows.mjs        static checks on cloud-flow definitions
   scripts/hooks/                preflight, check-pa-yaml, check-standards, audit-stop, lib
-  assets/                       hook wiring, config examples, scenario example, doc templates
+  assets/                       hook wiring, config examples, selectors, tested versions, templates
   tests/prompts.md              should-trigger and should-not-trigger prompts
 CHANGELOG.md                    every change, newest first
 ```

@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "The versions of the moving parts this skill was last checked against. The monthly upkeep workflow",
+    "(.github/workflows/upkeep.yml) compares them with the npm registry and opens an issue when they move.",
+    "After re-verifying (selftests green AND canvas-browser.mjs doctor exit 0 against a real tenant),",
+    "update the versions here and set checkedWith to the skill version that was released."
+  ],
+  "checkedWith": "0.1.0",
+  "npm": {
+    "playwright": "1.63.0",
+    "@playwright/mcp": "0.0.83"
+  },
+  "node": "22"
+}
