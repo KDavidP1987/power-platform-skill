@@ -35,6 +35,20 @@ def lint(paths):
     return {"ran": True, "files": [os.path.basename(p) for p in paths], "errors": len(errs), "error_messages": [e[:400] for e in errs]}
 
 
+def lint_strict(paths):
+    """lint-flows --require-safe-recipients over a set: errors are unsafe recipients and loops."""
+    if not paths:
+        return {"ran": False, "why": "no flow files"}
+    rc, out, err = node([os.path.join(S, "lint-flows.mjs"), *paths, "--require-safe-recipients", "--json"])
+    try:
+        d = json.loads(out)
+    except Exception:
+        return {"ran": True, "parse_error": (out + err)[:800]}
+    errs = [f'{r.get("flow") or r.get("file")}: {i.get("code")}: {(i.get("msg") or "")[:300]}' for r in d["results"] for i in r["items"] if i["level"] == "error"]
+    errs += d.get("cycles", [])
+    return {"ran": True, "files": [os.path.basename(p) for p in paths], "errors": len(errs), "error_messages": errs[:12]}
+
+
 def pa_yaml(files):
     """check-pa-yaml.mjs in hook mode (stdin JSON); exit 2 with findings on stderr, 0 when clean."""
     if not files:
@@ -75,13 +89,20 @@ def parse_json(path):
 def script_checks(eid, out):
     yamls = [f for f in glob.glob(os.path.join(out, "**", "*.pa.yaml"), recursive=True)]
     c = {}
-    if eid == 2 or eid == 6:
+    if eid == 2:
         f = os.path.join(out, "flow.json")
         c["flow_json"] = parse_json(f) if os.path.exists(f) else {"parses": False, "error": "flow.json missing"}
         c["lint_flows"] = lint([f] if os.path.exists(f) else [])
-        if eid == 6 and os.path.exists(f):
-            # informational only: the assertion is plain lint; this shows how strict-recipient lint sees it
-            c["lint_flows_require_safe_recipients_info_only"] = node([os.path.join(S, "lint-flows.mjs"), f, "--require-safe-recipients"])[1][-1500:]
+    if eid == 6:
+        # The set that ships: the new flow, plus each existing flow as corrected (fixed/ or new/) or else as handed over.
+        f = os.path.join(out, "new", "DueSoon-RemindAssignee.json")
+        c["new_flow"] = parse_json(f) if os.path.exists(f) else {"parses": False, "error": "new/DueSoon-RemindAssignee.json missing"}
+        shipped = [f] if os.path.exists(f) else []
+        for name in ("RequestSubmitted-NotifyApprover.json", "RequestDecided-NotifyRequester.json"):
+            mine = [x for x in (os.path.join(out, "fixed", name), os.path.join(out, "new", name)) if os.path.exists(x)]
+            shipped.append(mine[0] if mine else os.path.join(HERE, "inputs", "flows-notify", name))
+        c["shipped_set"] = [os.path.relpath(x, out) if x.startswith(out) else "original " + os.path.basename(x) for x in shipped]
+        c["lint_flows_require_safe_recipients"] = lint_strict(shipped)
     if eid == 3:
         f = os.path.join(out, "verify-approve.mjs")
         if os.path.exists(f):

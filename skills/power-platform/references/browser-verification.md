@@ -94,7 +94,10 @@ asserting against a sign-in form.
   obviously automated browser differently.
 - **Try headless first.** On a domain-joined Windows machine, the driver signed in headlessly on its
   first run through Windows SSO, with no interactive MFA (environment-specific). Run
-  `check --headless` before asking a person to sign in.
+  `check --headless` before asking a person to sign in. The mechanism, observed again on an
+  Entra-joined device: the device holds a primary refresh token and the browser hands it to the
+  sign-in page - Edge by default, Chrome when the `CloudAPAuthEnabled` policy is set - so even a
+  brand-new profile is signed in (`first-run.md` section 6).
 - **One profile, one Chrome.** `launchPersistentContext` fails with "Opening in existing browser
   session ... profile is already in use" while another Chrome holds the profile. The usual holder is
   the driver's own `studio` process: releasing the edit lock does not end that process. The bundled
@@ -262,6 +265,19 @@ evidence. Design each one so the broken version gives a different answer.
   `"restore"` (the revert scenario, or the steps). The bundled driver's `lint` rejects a writing
   scenario with no restore, and `walk` refuses it without `--allow-writes`. Read-only scenarios -
   navigation, expect/absent, the geometry sweeps - run freely after every ship.
+- **Confirm the write in Dataverse on every run, not when someone remembers.** A writing scenario
+  carries `confirm` checks (`entitySet`, an OData `filter` that finds exactly the rows it touched,
+  `expect` values or `count`, or `absent` for a refusal). After the steps, `walk` reads the rows back
+  over the Web API with a token from the app config's `dataverseTokenCommand` and fails the verdict
+  unless every check holds and every matched row's `modifiedon` is after the walk started - so a row
+  left from an earlier run cannot pass. No token, no URL or no network is CANNOT CONFIRM, never a
+  pass. `lint` refuses a scenario that declares `"writes": true` without a check that finds the
+  written row. The restore scenario confirms the baseline the same way. Observed on the first real
+  run: the screen's "Saved" step failed while the confirmation proved the row was written - the
+  banner was outside the app frame (next bullet), not a failed save.
+- **`Notify()` banners are drawn by the player, outside the app's frame.** An `expect` that searched
+  only the app frame reported "not in the DOM at all" for a success message plainly on screen. The
+  bundled driver now searches the player's other frames when the app frame has no match.
 - **Fire every guard on purpose and confirm nothing was written.** For each refusal a form
   implements, trigger it in the published app, record the message, and confirm the target row's
   `modifiedon` and any totals are unchanged. Run it on real data in the problem shape, not only a

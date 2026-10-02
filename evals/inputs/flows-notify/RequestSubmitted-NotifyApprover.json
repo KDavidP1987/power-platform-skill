@@ -1,0 +1,164 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_commondataserviceforapps": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr4f2_commondataserviceforapps"
+        },
+        "api": {
+          "name": "shared_commondataserviceforapps"
+        }
+      },
+      "shared_office365": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr4f2_office365"
+        },
+        "api": {
+          "name": "shared_office365"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        }
+      },
+      "triggers": {
+        "When_a_request_is_submitted": {
+          "type": "OpenApiConnectionWebhook",
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "SubscribeWebhookTrigger"
+            },
+            "parameters": {
+              "subscriptionRequest/message": 3,
+              "subscriptionRequest/entityname": "cr4f2_request",
+              "subscriptionRequest/scope": 4,
+              "subscriptionRequest/filteringattributes": "cr4f2_status"
+            },
+            "authentication": "@parameters('$authentication')"
+          },
+          "conditions": [
+            {
+              "expression": "@equals(triggerOutputs()?['body/cr4f2_status'], 100000001)"
+            }
+          ]
+        }
+      },
+      "actions": {
+        "Get_NotifyMode": {
+          "type": "OpenApiConnection",
+          "runAfter": {},
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "ListRecords"
+            },
+            "parameters": {
+              "entityName": "cr4f2_settings",
+              "$filter": "cr4f2_name eq 'NotifyMode'",
+              "$top": 1
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Get_NotifyAllowlist": {
+          "type": "OpenApiConnection",
+          "runAfter": {
+            "Get_NotifyMode": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "ListRecords"
+            },
+            "parameters": {
+              "entityName": "cr4f2_settings",
+              "$filter": "cr4f2_name eq 'NotifyAllowlist'",
+              "$top": 1
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Is_live": {
+          "type": "Compose",
+          "runAfter": {
+            "Get_NotifyAllowlist": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@equals(coalesce(first(outputs('Get_NotifyMode')?['body/value'])?['cr4f2_value'], 'Test'), 'Live')"
+        },
+        "Allowlist": {
+          "type": "Compose",
+          "runAfter": {
+            "Is_live": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@coalesce(first(outputs('Get_NotifyAllowlist')?['body/value'])?['cr4f2_value'], '')"
+        },
+        "Safe_to_main": {
+          "type": "Compose",
+          "runAfter": {
+            "Allowlist": [
+              "Succeeded"
+            ]
+          },
+          "inputs": "@if(outputs('Is_live'), triggerOutputs()?['body/cr4f2_approveremail'], outputs('Allowlist'))"
+        },
+        "Has_recipients": {
+          "type": "If",
+          "runAfter": {
+            "Safe_to_main": [
+              "Succeeded"
+            ]
+          },
+          "expression": {
+            "not": {
+              "equals": [
+                "@empty(outputs('Safe_to_main'))",
+                true
+              ]
+            }
+          },
+          "actions": {
+            "Email_the_approver": {
+              "type": "OpenApiConnection",
+              "runAfter": {},
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                  "connectionName": "shared_office365",
+                  "operationId": "SendEmailV2"
+                },
+                "parameters": {
+                  "emailMessage/To": "@outputs('Safe_to_main')",
+                  "emailMessage/Subject": "Approval needed: @{triggerOutputs()?['body/cr4f2_name']}",
+                  "emailMessage/Body": "@{if(outputs('Is_live'), '', concat('<p><b>TEST</b> - intended for ', triggerOutputs()?['body/cr4f2_requesteremail'], '</p>'))}<p>A request is waiting for your approval.</p>"
+                },
+                "authentication": "@parameters('$authentication')"
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          }
+        }
+      }
+    }
+  },
+  "schemaVersion": "1.0.0.0"
+}

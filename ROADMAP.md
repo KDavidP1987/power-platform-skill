@@ -18,16 +18,26 @@ actually shipped.
   filter as its own delegation point; defaulted list filters end with an invitation to change them;
   `check-canvas-format.mjs` resolves `Gallery.Selected.Column` against `--schema`.
 
+## 0.7.0 (done 2026-10-02)
+
+- **The last 0.5.1 evaluation finding** (done): a writing scenario must carry `confirm` checks, and
+  `walk` reads the rows back over the Web API after the steps on every run, failing unless they hold
+  the expected values and changed during the run. Proved against a real tenant: a setting changed in
+  the published app, confirmed, restored and confirmed.
+- **Harder loop and recipient tests** (done): task 5 is now a cycle through three flows among five,
+  every trigger filtered and every flow guarded, with a drifting date that defeats a "skip unchanged
+  values" fix; task 6 asks for a new flow in a set where an existing flow's failure path emails a real
+  person, and nobody says so.
+- **Static overlap check** (done): `check-canvas-overlap.mjs` and its hook, from a defect class that
+  recurred across real builds (a control placed over another that shows only under some condition).
+- **`canvas-browser.mjs` on a real tenant** (partly done): `--fresh`, `check --headless`, `walk`
+  with writes and `confirm` ran against a real tenant and two driver bugs were fixed. `--channel`,
+  `publish --reload-first`, the save proof and `doctor`'s Studio half are still untried.
+
 ## 0.7.x and 0.8.x: confirm what is still assumed
 
-- **The last 0.5.1 evaluation finding:** the verification script must confirm the write in
-  Dataverse on every run, not behind an option.
-- **Re-run the full evaluation on 0.6.x** with three runs per configuration, as the 1.0 criteria
-  require.
-- **Harder loop and recipient tests.** The unaided model already catches an explicit two-flow cycle
-  and caps recipients when told to, so those tests guard against regression without measuring the
-  skill. Replace them with a cycle through three flows among several, and a recipient leak in an
-  existing flow that nobody points out.
+- **Re-run the full evaluation** with three runs per configuration, as the 1.0 criteria require, on
+  the 0.7.0 task set.
 - **Calibrate the long-text estimate** (`check-canvas-format.mjs`, 0.56 em per character) against
   rendered output, with Power Fx `measurefont` or screenshots of the published player, and publish
   the measured range per font.
@@ -37,7 +47,7 @@ actually shipped.
   - the empty-means-All classic dropdown (`AllowEmptySelection: =true`, `Default: =Blank()`);
   - whether a Tooltip shows on hover inside a gallery row in the published player;
   - clearing a single-select ComboBox, across control versions.
-- **Run `canvas-browser.mjs`'s untried paths against a real tenant**: `--fresh`, the save proof,
+- **Run `canvas-browser.mjs`'s remaining untried paths against a real tenant**: the save proof,
   `publish --reload-first`, `--channel`, and `doctor`'s Studio half.
 - **Run the long-text and list checks over more apps**, and turn any recurring false positive into a
   rule or an exclusion with a self-test case.

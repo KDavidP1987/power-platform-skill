@@ -453,7 +453,7 @@ function findCollects(node, acc = []) {
 }
 
 // ---------- the control tree ----------
-function flatten(doc, file) {
+export function flatten(doc, file) {
   const out = [];
   const visit = (items, parent, screen) => {
     for (const item of items || []) {

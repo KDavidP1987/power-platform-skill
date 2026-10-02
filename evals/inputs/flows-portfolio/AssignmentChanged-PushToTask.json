@@ -1,0 +1,86 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_commondataserviceforapps": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr4f2_commondataserviceforapps"
+        },
+        "api": {
+          "name": "shared_commondataserviceforapps"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        }
+      },
+      "triggers": {
+        "When_an_assignment_is_rescheduled": {
+          "type": "OpenApiConnectionWebhook",
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "SubscribeWebhookTrigger"
+            },
+            "parameters": {
+              "subscriptionRequest/message": 3,
+              "subscriptionRequest/entityname": "cr4f2_assignment",
+              "subscriptionRequest/scope": 4,
+              "subscriptionRequest/filteringattributes": "cr4f2_duedate,cr4f2_assignee"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        }
+      },
+      "actions": {
+        "Has_an_assignee": {
+          "type": "If",
+          "runAfter": {},
+          "expression": {
+            "and": [
+              {
+                "not": {
+                  "equals": [
+                    "@empty(triggerOutputs()?['body/_cr4f2_assignee_value'])",
+                    true
+                  ]
+                }
+              }
+            ]
+          },
+          "actions": {
+            "Update_the_task": {
+              "type": "OpenApiConnection",
+              "runAfter": {},
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+                  "connectionName": "shared_commondataserviceforapps",
+                  "operationId": "UpdateRecord"
+                },
+                "parameters": {
+                  "entityName": "cr4f2_requesttasks",
+                  "recordId": "@triggerOutputs()?['body/_cr4f2_task_value']",
+                  "item/cr4f2_duedate": "@addDays(triggerOutputs()?['body/cr4f2_duedate'], -1, 'yyyy-MM-dd')",
+                  "item/cr4f2_lastsyncnote": "Rescheduled from assignment @{triggerOutputs()?['body/cr4f2_name']}"
+                },
+                "authentication": "@parameters('$authentication')"
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          }
+        }
+      }
+    }
+  },
+  "schemaVersion": "1.0.0.0"
+}

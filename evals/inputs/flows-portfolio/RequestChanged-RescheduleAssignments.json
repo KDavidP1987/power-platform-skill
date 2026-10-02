@@ -1,0 +1,109 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_commondataserviceforapps": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr4f2_commondataserviceforapps"
+        },
+        "api": {
+          "name": "shared_commondataserviceforapps"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        }
+      },
+      "triggers": {
+        "When_the_next_due_date_changes": {
+          "type": "OpenApiConnectionWebhook",
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "SubscribeWebhookTrigger"
+            },
+            "parameters": {
+              "subscriptionRequest/message": 3,
+              "subscriptionRequest/entityname": "cr4f2_request",
+              "subscriptionRequest/scope": 4,
+              "subscriptionRequest/filteringattributes": "cr4f2_nextduedate,cr4f2_owner"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        }
+      },
+      "actions": {
+        "Has_a_due_date": {
+          "type": "If",
+          "runAfter": {},
+          "expression": {
+            "not": {
+              "equals": [
+                "@empty(triggerOutputs()?['body/cr4f2_nextduedate'])",
+                true
+              ]
+            }
+          },
+          "actions": {
+            "Get_the_assignments": {
+              "type": "OpenApiConnection",
+              "runAfter": {},
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+                  "connectionName": "shared_commondataserviceforapps",
+                  "operationId": "ListRecords"
+                },
+                "parameters": {
+                  "entityName": "cr4f2_assignments",
+                  "$filter": "_cr4f2_request_value eq @{triggerOutputs()?['body/cr4f2_requestid']} and statecode eq 0"
+                },
+                "authentication": "@parameters('$authentication')"
+              }
+            },
+            "Reschedule_each": {
+              "type": "Foreach",
+              "foreach": "@outputs('Get_the_assignments')?['body/value']",
+              "runAfter": {
+                "Get_the_assignments": [
+                  "Succeeded"
+                ]
+              },
+              "actions": {
+                "Update_the_assignment": {
+                  "type": "OpenApiConnection",
+                  "runAfter": {},
+                  "inputs": {
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+                      "connectionName": "shared_commondataserviceforapps",
+                      "operationId": "UpdateRecord"
+                    },
+                    "parameters": {
+                      "entityName": "cr4f2_assignments",
+                      "recordId": "@items('Reschedule_each')?['cr4f2_assignmentid']",
+                      "item/cr4f2_duedate": "@triggerOutputs()?['body/cr4f2_nextduedate']",
+                      "item/cr4f2_syncedon": "@utcNow()"
+                    },
+                    "authentication": "@parameters('$authentication')"
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          }
+        }
+      }
+    }
+  },
+  "schemaVersion": "1.0.0.0"
+}

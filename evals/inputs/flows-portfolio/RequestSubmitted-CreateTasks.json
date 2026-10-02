@@ -1,0 +1,120 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_commondataserviceforapps": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr4f2_commondataserviceforapps"
+        },
+        "api": {
+          "name": "shared_commondataserviceforapps"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        }
+      },
+      "triggers": {
+        "When_a_request_is_submitted": {
+          "type": "OpenApiConnectionWebhook",
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "SubscribeWebhookTrigger"
+            },
+            "parameters": {
+              "subscriptionRequest/message": 3,
+              "subscriptionRequest/entityname": "cr4f2_request",
+              "subscriptionRequest/scope": 4,
+              "subscriptionRequest/filteringattributes": "cr4f2_status"
+            },
+            "authentication": "@parameters('$authentication')"
+          },
+          "conditions": [
+            {
+              "expression": "@and(equals(triggerOutputs()?['body/cr4f2_status'], 100000001), not(equals(triggerOutputs()?['body/cr4f2_tasksgenerated'], true)))"
+            }
+          ]
+        }
+      },
+      "actions": {
+        "Get_the_template_items": {
+          "type": "OpenApiConnection",
+          "runAfter": {},
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "ListRecords"
+            },
+            "parameters": {
+              "entityName": "cr4f2_templateitems",
+              "$filter": "_cr4f2_requesttype_value eq @{triggerOutputs()?['body/_cr4f2_requesttype_value']}"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Create_each_task": {
+          "type": "Foreach",
+          "foreach": "@outputs('Get_the_template_items')?['body/value']",
+          "runAfter": {
+            "Get_the_template_items": [
+              "Succeeded"
+            ]
+          },
+          "actions": {
+            "Create_the_task": {
+              "type": "OpenApiConnection",
+              "runAfter": {},
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+                  "connectionName": "shared_commondataserviceforapps",
+                  "operationId": "CreateRecord"
+                },
+                "parameters": {
+                  "entityName": "cr4f2_requesttasks",
+                  "item/cr4f2_name": "@items('Create_each_task')?['cr4f2_name']",
+                  "item/cr4f2_Request@odata.bind": "cr4f2_requests(@{triggerOutputs()?['body/cr4f2_requestid']})",
+                  "item/cr4f2_duedate": "@addDays(utcNow(), int(items('Create_each_task')?['cr4f2_leaddays']), 'yyyy-MM-dd')",
+                  "item/cr4f2_status": 100000000
+                },
+                "authentication": "@parameters('$authentication')"
+              }
+            }
+          }
+        },
+        "Mark_the_request_in_progress": {
+          "type": "OpenApiConnection",
+          "runAfter": {
+            "Create_each_task": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "UpdateRecord"
+            },
+            "parameters": {
+              "entityName": "cr4f2_requests",
+              "recordId": "@triggerOutputs()?['body/cr4f2_requestid']",
+              "item/cr4f2_tasksgenerated": true,
+              "item/cr4f2_status": 100000002
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        }
+      }
+    }
+  },
+  "schemaVersion": "1.0.0.0"
+}

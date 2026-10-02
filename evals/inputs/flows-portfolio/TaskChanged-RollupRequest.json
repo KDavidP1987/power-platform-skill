@@ -4,7 +4,7 @@
       "shared_commondataserviceforapps": {
         "runtimeSource": "embedded",
         "connection": {
-          "connectionReferenceLogicalName": "cr4f2_sharedcommondataserviceforapps_x1"
+          "connectionReferenceLogicalName": "cr4f2_commondataserviceforapps"
         },
         "api": {
           "name": "shared_commondataserviceforapps"
@@ -21,7 +21,7 @@
         }
       },
       "triggers": {
-        "When_an_order_line_is_modified": {
+        "When_a_task_changes": {
           "type": "OpenApiConnectionWebhook",
           "inputs": {
             "host": {
@@ -31,15 +31,16 @@
             },
             "parameters": {
               "subscriptionRequest/message": 3,
-              "subscriptionRequest/entityname": "cr4f2_orderline",
-              "subscriptionRequest/scope": 4
+              "subscriptionRequest/entityname": "cr4f2_requesttask",
+              "subscriptionRequest/scope": 4,
+              "subscriptionRequest/filteringattributes": "cr4f2_status,cr4f2_duedate"
             },
             "authentication": "@parameters('$authentication')"
           }
         }
       },
       "actions": {
-        "Get_the_order_lines": {
+        "Get_the_sibling_tasks": {
           "type": "OpenApiConnection",
           "runAfter": {},
           "inputs": {
@@ -49,43 +50,42 @@
               "operationId": "ListRecords"
             },
             "parameters": {
-              "entityName": "cr4f2_orderlines",
-              "$filter": "_cr4f2_order_value eq @{triggerOutputs()?['body/_cr4f2_order_value']}",
-              "$select": "cr4f2_amount"
+              "entityName": "cr4f2_requesttasks",
+              "$filter": "_cr4f2_request_value eq @{triggerOutputs()?['body/_cr4f2_request_value']} and statecode eq 0",
+              "$orderby": "cr4f2_duedate asc",
+              "$select": "cr4f2_status,cr4f2_duedate"
             },
             "authentication": "@parameters('$authentication')"
           }
         },
-        "Order_total": {
+        "Done_count": {
           "type": "Compose",
           "runAfter": {
-            "Get_the_order_lines": [
+            "Get_the_sibling_tasks": [
               "Succeeded"
             ]
           },
-          "inputs": "@length(outputs('Get_the_order_lines')?['body/value'])"
+          "inputs": "@length(filter(outputs('Get_the_sibling_tasks')?['body/value'], equals(item()?['cr4f2_status'], 100000003)))"
         },
-        "Only_when_the_line_is_active": {
+        "Only_active_tasks": {
           "type": "If",
           "runAfter": {
-            "Order_total": [
+            "Done_count": [
               "Succeeded"
             ]
           },
           "expression": {
             "and": [
               {
-                "not": {
-                  "equals": [
-                    "@triggerOutputs()?['body/statecode']",
-                    1
-                  ]
-                }
+                "equals": [
+                  "@triggerOutputs()?['body/statecode']",
+                  0
+                ]
               }
             ]
           },
           "actions": {
-            "Update_the_order_total": {
+            "Update_the_request_rollup": {
               "type": "OpenApiConnection",
               "runAfter": {},
               "inputs": {
@@ -95,17 +95,21 @@
                   "operationId": "UpdateRecord"
                 },
                 "parameters": {
-                  "entityName": "cr4f2_orders",
-                  "recordId": "@triggerOutputs()?['body/_cr4f2_order_value']",
-                  "item/cr4f2_total": "@outputs('Order_total')",
-                  "item/cr4f2_recalculatedon": "@utcNow()"
+                  "entityName": "cr4f2_requests",
+                  "recordId": "@triggerOutputs()?['body/_cr4f2_request_value']",
+                  "item/cr4f2_percentcomplete": "@div(mul(outputs('Done_count'), 100), max(1, length(outputs('Get_the_sibling_tasks')?['body/value'])))",
+                  "item/cr4f2_nextduedate": "@first(outputs('Get_the_sibling_tasks')?['body/value'])?['cr4f2_duedate']"
                 },
                 "authentication": "@parameters('$authentication')"
               }
             }
+          },
+          "else": {
+            "actions": {}
           }
         }
       }
     }
-  }
+  },
+  "schemaVersion": "1.0.0.0"
 }

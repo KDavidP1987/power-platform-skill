@@ -192,11 +192,26 @@ wrong handler. A control missing its tab condition in `Visible` draws over every
 
 ## 7. What a static geometry audit must do to be worth running
 
+`scripts/check-canvas-overlap.mjs` implements the rules below; run it over the whole `Src` folder
+after any layout change, and wire `--hook` so a write that puts a control over another is refused
+at once. It reports `overlap` (two text-bearing or interactive controls that can be on screen
+together), `covers-control` and `hidden-under` (decoration declared after a button or a label, so
+the click or the text is lost), and the warnings `off-canvas` and `outside-row`. Each finding names
+both controls, their lines, which one is drawn on top, the two conditions, and the layout (the
+`If` branch) it occurs in. Its first run on a real 700-control app found five real overlaps,
+including a count label that a card declared after it had hidden since the screen was built, and a
+mentor search panel that could open over the manager's (the app closed one when the other opened,
+but no `Visible` said so - the fix was to write the rule into `Visible`, which makes it provable).
+
 - **Compare across `Visible` conditions.** An audit that only compares controls sharing the same
   `Visible` expression missed seven overlaps a user found in an afternoon. An always-visible control
   is in every group. Two groups are compared unless their conditions are **provably exclusive**
   (same local against different literals, `A` vs `!A`, `A || B` vs `!A && !B`); anything not
   provably exclusive is concurrent.
+- **Compare each geometry branch under its own condition.** `Y: =If(locType = "on", 140, 100)` is
+  140 only while `locType = "on"`; comparing every branch against every control without that
+  condition produced 44 false warnings on one screen. Numeric tests are conditions too: `x > 0`
+  against `x = 0` is exclusive, and so is `x = y` against `x <> y` whatever `y` is.
 - **Exempt overlays narrowly.** A later control is an overlay only when its `Visible` carries every
   term of the covered control's plus more, or it is driven by a panel local and its group contains
   a full-size backdrop rectangle. A card whose `Visible` is only a role or tab test is body content,

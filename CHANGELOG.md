@@ -11,6 +11,52 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-02
+
+Verification that reaches the database on every run, a check for the commonest layout defect in
+agent-built apps, harder flow tests, and a first-run guide. Everything here ran against a real app
+before release.
+
+### Added
+
+- `scripts/check-canvas-overlap.mjs`: controls drawn over other controls, from canvas source, across
+  every `Visible` condition (own and ancestors'). Finds text-bearing or interactive controls that
+  overlap and are not provably exclusive (`overlap`), decoration declared after a button
+  (`covers-control`) or a label (`hidden-under`), and controls off the design surface or outside
+  their gallery row. Geometry resolves literals, `App.OnStart` globals, `Parent`, other controls,
+  `Min`/`Max` and every `If`/`Switch` branch, each branch compared only under the condition that
+  selects it. Exclusivity covers literals, `!A`, `A || B` against `!A && !B`, numeric ranges,
+  `x = y` against `x <> y`, and `in` lists. `--explain` lists every exempted pair; `--hook` blocks
+  a write that creates an overlap. 36 self-test layouts in CI. First run on a real 704-control app:
+  697 resolved, five real defects found and fixed, every exemption audited.
+- `canvas-browser.mjs`: Dataverse confirmation. A scenario's `confirm` checks (`entitySet`, `filter`,
+  `expect`, `count`, `absent`, `changedThisRun`) run after the steps on every walk, over the Web API
+  with a token from the app config's `dataverseTokenCommand` (or `DATAVERSE_TOKEN`), and fail the
+  verdict unless the rows hold the expected values (choice labels accepted) and changed during the
+  run. `lint` refuses a writing scenario without a check that finds the written row. `confirm
+  <scenario.json> [--since]` runs only the checks.
+- `references/first-run.md`: from nothing to a working agent - what the person must hold, the
+  machine, pac, a self-renewing token, a browser that signs in by itself (and why it can need no
+  prompt on a managed device), Studio and the authoring server, the app config, the hand-back
+  pattern for refused actions, a smoke test, and what removed each manual step over time.
+- Evaluation tasks 5 and 6 replaced with harder versions (`evals/inputs/flows-portfolio`,
+  `evals/inputs/flows-notify`): a loop through three of five filtered, guarded flows with a date that
+  drifts every pass; and a recipient leak in an existing flow's failure path that the prompt never
+  mentions. The grader lints task 6's shipped set with `--require-safe-recipients`.
+
+### Fixed
+
+- `canvas-browser.mjs`: `expect` and `absent` also search the player's frames, because `Notify()`
+  banners are drawn outside the app frame (a visible "Saved" was reported "not in the DOM").
+- `canvas-browser.mjs`: the service-worker update error the player logs after `--fresh` clears its
+  caches is platform noise, not an app error (it failed a clean walk).
+
+### Changed
+
+- `SKILL.md`: the working loop requires the overlap check after layout changes and Dataverse
+  confirmation on every writing walk; the example scenario declares `writes`, `restore` and
+  `confirm`; `assets/canvas-app.example.json` carries `dataverseTokenCommand`.
+
 ## [0.6.0] - 2026-10-02
 
 The first measured release: a fresh evaluation on 0.5.1, the fixes for what it found in canvas

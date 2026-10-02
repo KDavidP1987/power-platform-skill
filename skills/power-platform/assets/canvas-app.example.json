@@ -7,6 +7,9 @@
   "solutionUniqueName": "YourSolution",
   "canvasSrc": "canvas/your-app/Src",
 
+  "_comment_confirm": "Read by canvas-browser.mjs walk to confirm writes in Dataverse: a command that prints a bearer token for environmentUrl (never stored here).",
+  "dataverseTokenCommand": "az account get-access-token --resource https://yourorg.crm.dynamics.com --query accessToken -o tsv",
+
   "_comment_ship": "Optional keys read by scripts/ship-canvas.py. Defaults shown; paths are relative to the repo root.",
   "appLogicalName": "app_yourapp_1a2b3",
   "externalTables": ["core_*"],

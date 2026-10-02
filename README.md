@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.6.0](https://img.shields.io/badge/plugin-0.6.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.7.0](https://img.shields.io/badge/plugin-0.7.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.6.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.7.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -131,8 +131,11 @@ The method and references need nothing installed. The tools need:
 3. **Wire the hooks** (optional, recommended). Copy `skills/power-platform/scripts/hooks/` to
    `.claude/hooks/` and merge `assets/settings.snippet.json` into `.claude/settings.json`.
 4. **Describe your app once** for the browser driver. Copy
-   `assets/canvas-app.example.json` to `scripts/canvas-app.json` and fill in the environment id, app
-   id and app name. Nothing about your app is ever written into the tools themselves.
+   `assets/canvas-app.example.json` to `scripts/canvas-app.json` and fill in the environment id and
+   URL, app id, app name, and a command that prints a Dataverse token. Nothing about your app is ever
+   written into the tools themselves. Starting on a new machine or a new environment?
+   [`first-run.md`](skills/power-platform/references/first-run.md) is the order to set everything up
+   in, with a smoke test to run before the first change.
 5. **Verify in the product.** After a change ships, have the agent run a scenario against the
    published app (`canvas-browser.mjs walk`), as the role that will use it, and confirm the effect
    in Dataverse.
@@ -216,6 +219,12 @@ was verified. Use `--channel chrome`, `msedge` or `chromium` to choose the brows
 {
   "name": "approve-request",
   "build": "Build 2026-01-01 12:00 abc1234",
+  "writes": true,
+  "restore": "revert-approve-request",
+  "confirm": [
+    { "entitySet": "app_requests", "filter": "app_number eq 'REQ-0042'",
+      "expect": { "app_status": "Denied" }, "count": 1 }
+  ],
   "steps": [
     { "click": "Approvals", "settle": 5000 },
     { "type": "REQ-0042", "into": "Search" },
@@ -235,6 +244,9 @@ The driver knows what makes naive automation lie:
 - A gallery keeps every row in the DOM.
 - Studio's Save must be clicked, not keyed, and is proved by the "Saved:" time moving.
 - Studio must be left through Back, or the edit lock is stranded.
+- A `Notify()` banner is drawn outside the app's frame.
+- "Saved" on screen proves nothing about the row: `confirm` reads it back from Dataverse after the
+  steps, and a row that did not change during this run fails.
 
 ## Bundled tools
 
@@ -253,6 +265,7 @@ proves it goes red on a known-bad input, and CI runs them on every push.
 | `shot <url> <name>` | Screenshot plus accessibility dump of any page |
 | `doctor [--record]` | Check every UI anchor in `assets/selectors.json` against a live session: `0` all resolve, `9` stale, `2` cannot verify |
 | `lint <scenario.json>` | Check a scenario's verbs without a browser |
+| `confirm <scenario.json> [--since ISO]` | Run only the scenario's Dataverse checks, no browser |
 
 Scenario verbs: `click`, `type`, `select`, `fillCell`, `expect`, `absent`, `scroll`, `clipcheck`,
 `deadclick`, `overlapcheck`, `measurefont`, `capture`. `--trace` records which tables each `$batch`
@@ -326,6 +339,34 @@ echo '{"tool_input":{"file_path":"canvas/app/Src/Home.pa.yaml"}}' | node check-c
 Every run prints how many controls it examined, read data and could measure. Exit codes: `0` clean,
 `1` findings, `2` nothing examined, which is not a pass. The room is an estimate that errs toward
 "does not fit"; `canvas-browser.mjs clipcheck` is the authority in the running app.
+
+### `check-canvas-overlap.mjs`: controls drawn over other controls
+
+The commonest layout defect in an agent-built app: a new button or label placed where another
+control already sits, and the other control shows only under some condition - a warning, an empty
+state, a tab, a role. With the condition off, every screenshot looks right. This reads the source,
+so it sees every state at once: each pair of text-bearing or interactive controls in the same
+coordinate space whose boxes overlap, unless their `Visible` conditions (and their ancestors') are
+provably exclusive.
+
+```bash
+node check-canvas-overlap.mjs canvas/<app>/Src
+node check-canvas-overlap.mjs canvas/<app>/Src --explain     # also list every exempted pair
+echo '{"tool_input":{"file_path":"canvas/app/Src/Home.pa.yaml"}}' | node check-canvas-overlap.mjs --hook
+```
+
+| Check | Catches |
+|---|---|
+| `overlap` | Two text-bearing or interactive controls that can be on screen together and overlap; names which is on top, both conditions, and the `If` branch of the layout it happens in |
+| `covers-control` | A Rectangle, Image or non-clickable Icon declared after a button and covering its centre: the click does nothing |
+| `hidden-under` | Decoration declared after a label or gallery and covering it: the text never shows |
+| `off-canvas`, `outside-row` | Warnings: past the design surface, or past the gallery row that clips it |
+
+Exclusive means provable: the same name against different literals, `A` against `!A`,
+`A || B` against `!A && !B`, `x > 0` against `x = 0`, `x = y` against `x <> y`, `in` lists. A
+modal over its full-surface backdrop, an empty-state label over its own gallery, a text-less click
+pad over a tile and a results list whose `Visible` reads its input are exempt. Every run prints how
+many controls it resolved and why it skipped the rest; exit `2` when it resolved none.
 
 ### `lint-flows.mjs`: static checks on cloud-flow definitions
 
@@ -401,6 +442,7 @@ Copy `skills/power-platform/scripts/hooks/` to `.claude/hooks/` and merge
 | `check-pa-yaml.mjs` | PostToolUse | Colon-space in single-line Power Fx, YAML comments, `Tooltip` on a modern Button, shallow block-scalar lines, the file ceiling: faults that fail a whole-app compile |
 | `check-standards.mjs` | PostToolUse | Optional, configurable output standards (by default emoji and purple accents, Power Fx `RGBA` included) |
 | `check-canvas-format.mjs --hook` | PostToolUse | Long data-bound text with no remedy, and literal colours or fonts once theme tokens exist; blocks only on lengths it knows (`textFitSchema` in `standards.config.json`) |
+| `check-canvas-overlap.mjs --hook` | PostToolUse | A control placed over another that can be on screen at the same time, or decoration declared over a button or label; blocks on errors in the file just written |
 | `audit-stop.mjs` | Stop | Repo-wide standards, leftover debug markers, file ceiling, bookkeeping reminders; blocks once, never loops |
 
 Hooks flag only what is known to break, never style: a hook that fires on style gets switched off.
@@ -429,6 +471,7 @@ Configure them with `.claude/hooks/standards.config.json` (example in `assets/`)
 | | [`project-setup`](skills/power-platform/references/project-setup.md) | Repository layout, bootstrapping with `pac`, hooks, continuity documents |
 | | [`shared-environments`](skills/power-platform/references/shared-environments.md) | Several apps in one environment: ownership, shared tables, change protocol |
 | | [`alm-pipelines`](skills/power-platform/references/alm-pipelines.md) | CI/CD with `pac` in GitHub Actions and Azure DevOps: service principals, Solution Checker, managed vs unmanaged, deployment settings, activating flows, the skill's tools as gates. Each statement marked documented, observed or untested |
+| | [`first-run`](skills/power-platform/references/first-run.md) | From nothing to a working agent: rights, machine, pac, a self-renewing token, a browser that signs in by itself, Studio, the app config, the hand-back pattern, the smoke test |
 | | [`tooling-and-auth`](skills/power-platform/references/tooling-and-auth.md) | `pac`, tokens, the TDS endpoint, MCP servers, Windows and PowerShell traps |
 
 ## Rules the skill will not bend
@@ -507,13 +550,14 @@ evals/                          the evaluation tasks, inputs, harness and result
 scripts/                        repo validator and its version-agreement tests
 skills/power-platform/
   SKILL.md                      the method, the non-negotiables, where to look
-  references/                   18 self-contained guides (see Reference library)
+  references/                   19 self-contained guides (see Reference library)
   scripts/ship-canvas.py        the ship pipeline: live baseline, reconcile, stamp, pack, assert
   scripts/check-drift.py        cached app metadata vs live Dataverse, read-only
   scripts/canvas-browser.mjs    Playwright driver, scenario runner and selector doctor
   scripts/inspect-artifact.py   what a solution zip or .msapp really contains
   scripts/lint-flows.mjs        static checks on cloud-flow definitions
   scripts/check-canvas-format.mjs  long data-bound text and theme tokens in canvas source
+  scripts/check-canvas-overlap.mjs controls drawn over other controls, across Visible conditions
   scripts/hooks/                preflight, check-pa-yaml, check-standards, audit-stop, lib
   assets/                       hook wiring, config examples, selectors, tested versions, templates
   tests/prompts.md              should-trigger and should-not-trigger prompts

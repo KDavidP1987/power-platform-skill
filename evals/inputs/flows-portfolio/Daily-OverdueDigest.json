@@ -1,0 +1,125 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_commondataserviceforapps": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr4f2_commondataserviceforapps"
+        },
+        "api": {
+          "name": "shared_commondataserviceforapps"
+        }
+      },
+      "shared_office365": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr4f2_office365"
+        },
+        "api": {
+          "name": "shared_office365"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        }
+      },
+      "triggers": {
+        "Every_morning": {
+          "type": "Recurrence",
+          "recurrence": {
+            "frequency": "Day",
+            "interval": 1,
+            "schedule": {
+              "hours": [
+                "7"
+              ]
+            },
+            "timeZone": "UTC"
+          }
+        }
+      },
+      "actions": {
+        "Get_overdue_tasks": {
+          "type": "OpenApiConnection",
+          "runAfter": {},
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "ListRecords"
+            },
+            "parameters": {
+              "entityName": "cr4f2_requesttasks",
+              "$filter": "statecode eq 0 and cr4f2_status ne 100000003 and cr4f2_duedate lt @{utcNow('yyyy-MM-dd')}"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Get_the_digest_mailbox": {
+          "type": "OpenApiConnection",
+          "runAfter": {
+            "Get_overdue_tasks": [
+              "Succeeded"
+            ]
+          },
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "ListRecords"
+            },
+            "parameters": {
+              "entityName": "cr4f2_settings",
+              "$filter": "cr4f2_name eq 'DigestMailbox'",
+              "$top": 1
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Any_overdue": {
+          "type": "If",
+          "runAfter": {
+            "Get_the_digest_mailbox": [
+              "Succeeded"
+            ]
+          },
+          "expression": {
+            "greater": [
+              "@length(outputs('Get_overdue_tasks')?['body/value'])",
+              0
+            ]
+          },
+          "actions": {
+            "Send_the_digest": {
+              "type": "OpenApiConnection",
+              "runAfter": {},
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                  "connectionName": "shared_office365",
+                  "operationId": "SendEmailV2"
+                },
+                "parameters": {
+                  "emailMessage/To": "@first(outputs('Get_the_digest_mailbox')?['body/value'])?['cr4f2_value']",
+                  "emailMessage/Subject": "Overdue tasks: @{length(outputs('Get_overdue_tasks')?['body/value'])}",
+                  "emailMessage/Body": "<p>@{length(outputs('Get_overdue_tasks')?['body/value'])} open tasks are past their due date.</p>"
+                },
+                "authentication": "@parameters('$authentication')"
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          }
+        }
+      }
+    }
+  },
+  "schemaVersion": "1.0.0.0"
+}

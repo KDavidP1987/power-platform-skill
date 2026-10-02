@@ -7,7 +7,7 @@ against checks fixed before any run.
 | File | What it is |
 |---|---|
 | `evals.json` | 10 tasks and 74 checks: the prompt, the input files, the expected outcome and the checks |
-| `inputs/` | the files the tasks hand over: two looping flows, two canvas screens, the column lengths for the long-text test |
+| `inputs/` | the files the tasks hand over: five flows with a three-flow loop, two notification flows with a hidden recipient leak, two canvas screens, the column lengths for the long-text test |
 | `run_iteration.py` | runs every task N times per configuration in parallel; with the skill, it is installed as a project skill in the run's folder |
 | `grade_iteration.py` | runs the bundled checkers on each answer (`lint-flows.mjs`, `check-pa-yaml.mjs`, `check-canvas-format.mjs`, `node --check`), then a grader session that does not know the configuration judges every check and quotes its evidence |
 | `analyze.py` | totals, spread between runs, and which checks separate the two configurations |
@@ -36,6 +36,16 @@ is longer than 260 characters. The skill-creator `aggregate_benchmark` script re
 From 0.1.0 to 0.5.1 three checks were tightened (one split into three) and six tasks were added. 47 of
 the 74 checks pass in every run of both configurations, so they guard against regression rather than
 measure the skill. `results/benchmark-0.5.1.md` lists the checks that still fail with the skill.
+
+### Tasks 5 and 6 replaced in 0.7.0
+
+The unaided model already found an explicit two-flow cycle and capped recipients when told to, so
+the 0.5.1 versions of tasks 5 and 6 guarded against regression without measuring the skill. Task 5
+is now a cycle through three of five flows, each trigger filtered and each flow guarded, with a
+one-day buffer that moves the date on every pass so a "skip unchanged values" fix still loops; the
+prompt never mentions loops. Task 6 asks for a new reminder flow in a set where an existing flow's
+failure path emails the requester directly, outside the allowlist; nobody points it out. Both have a
+reference fix that lints clean, so both are solvable.
 
 ### Check 4.8 reworded in 0.6.0
 

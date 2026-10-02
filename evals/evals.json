@@ -75,36 +75,42 @@
     },
     {
       "id": 5,
-      "name": "flow-cycle-pair-review",
-      "prompt": "Before I import these two cloud flows into production, review them. They are in inputs/flows-cycle: OrderLineChanged-RecalcOrder.json (when an order line is modified, recompute the order's total) and OrderChanged-CopyDiscount.json (when an order is modified, copy its discount onto every line). Each one has its own condition so it only runs when it should. Tell me if anything is wrong and give me corrected versions. Write review.md and save the corrected flows in a folder named fixed/.",
-      "expected_output": "Finds the cycle between the two flows (A writes the order, B fires on any order change and writes the lines, A fires again; recalculatedon = utcNow always changes so it never settles), explains why each flow's own If cannot stop it, adds filteringattributes and trigger conditions, and the fixed pair lints clean as a set.",
+      "name": "flow-cycle-three-of-five",
+      "prompt": "We are about to import the five cloud flows of our request-tracking solution into production. They are in inputs/flows-portfolio, and each one was tested on its own in a sandbox and works. Review them for anything that would hurt production and fix what needs fixing. Write review.md, and save all five flows (changed or not) in a folder named fixed/.",
+      "expected_output": "Finds the cycle through three of the five flows (task rollup writes the request's next due date; the request flow reschedules the assignments; the assignment flow pushes the due date back to the task, which fires the rollup again). Every trigger is filtered and every flow has its own condition, and none of that stops it: each write sets a column the next trigger is filtered on, and the one-day buffer moves the date on every pass, so it never settles and a 'changed value' guard would not stop it either. The other two flows are not part of a loop. The fix breaks the cycle at a trigger or by not writing the column, and the five fixed flows lint clean together.",
       "files": [
-        "inputs/flows-cycle/OrderLineChanged-RecalcOrder.json",
-        "inputs/flows-cycle/OrderChanged-CopyDiscount.json"
+        "inputs/flows-portfolio/RequestSubmitted-CreateTasks.json",
+        "inputs/flows-portfolio/TaskChanged-RollupRequest.json",
+        "inputs/flows-portfolio/RequestChanged-RescheduleAssignments.json",
+        "inputs/flows-portfolio/AssignmentChanged-PushToTask.json",
+        "inputs/flows-portfolio/Daily-OverdueDigest.json"
       ],
       "assertions": [
-        "review.md identifies a loop BETWEEN the two flows (each one's write starts the other), naming both flows",
-        "review.md explains why each flow's own condition does not stop it (the If runs inside an already-started run, and/or the trigger has no filtering attributes, and/or utcNow() makes every write a change)",
-        "Both fixed flows set subscriptionRequest/filteringattributes on their update trigger",
-        "The fix breaks the cycle with a trigger-level condition or column filtering (not only an inner If)",
-        "lint-flows.mjs run over BOTH fixed flows together reports no errors (no trigger-cycle, no update-trigger-unfiltered)",
-        "Both fixed files still parse as JSON with properties.definition, and keep the original purpose (total recalculated, discount copied)"
+        "review.md identifies a loop through THREE flows - TaskChanged-RollupRequest, RequestChanged-RescheduleAssignments and AssignmentChanged-PushToTask - naming all three and the column each write sets",
+        "review.md explains why the filtered triggers and inner conditions do not stop it (each write sets a column in the next trigger's filteringattributes, and/or the inner If runs inside an already-started run)",
+        "review.md notices that the one-day buffer in AssignmentChanged-PushToTask moves the due date on every pass, so the loop never settles (a guard that only skips unchanged values would not stop it)",
+        "review.md does not report RequestSubmitted-CreateTasks or Daily-OverdueDigest as part of a loop",
+        "The fix breaks the cycle at a trigger (condition or filteringattributes) or by no longer writing the column that starts the next flow - not only with an inner If",
+        "lint-flows.mjs run over all five fixed flows together reports no errors (no trigger-cycle)",
+        "The fixed flows keep their purposes (percent complete and next due date still rolled up, assignments still rescheduled, a task's due date still follows its assignment) and parse as solution JSON with properties.definition"
       ]
     },
     {
       "id": 6,
-      "name": "allowlist-only-notifications",
-      "prompt": "Write the solution-ready cloud flow JSON (solution/src/Workflows style) for: when a Dataverse row in cr4f2_leaverequest has cr4f2_status changed to 100000001 (Submitted), email the requester (cr4f2_requesteremail) and CC their manager (cr4f2_manageremail) with the request details. IMPORTANT: the app is in testing until go-live, and until then nobody except the testers listed in a settings row (table cr4f2_setting, cr4f2_name = 'NotifyAllowlist', value in cr4f2_value, semicolon-separated) may receive anything. Make it impossible to email a real person by accident before go-live. Save flow.json and notes.md (design choices, how to switch to live, how you would prove before go-live that nobody else was emailed).",
-      "expected_output": "Explicit live mode read from settings where anything but the exact live value is test; every To and Cc goes through a capped value; empty allowlist sends nothing; banner; filtered trigger; proof from run history.",
-      "files": [],
+      "name": "recipient-leak-in-existing-flow",
+      "prompt": "inputs/flows-notify holds the two notification flows of a request app that is still in testing. Add a third flow that follows the same pattern: every morning at 07:00 UTC, remind the assignee (cr4f2_assigneeemail on cr4f2_requesttask) of each open task (statecode 0, cr4f2_status not 100000003) due within the next two days. The prototype rule stands: until go-live nobody but the testers in the NotifyAllowlist setting may receive anything from this app. Save the new flow as new/DueSoon-RemindAssignee.json, and write notes.md (design choices, and how you would prove before go-live that nobody else was emailed).",
+      "expected_output": "Builds the reminder with the existing Is_live / Allowlist / Safe_to_ pattern, and notices without being told that the existing RequestDecided-NotifyRequester emails the requester directly from its failure scope (Tell_the_requester_to_retry), outside the allowlist - a real person would be emailed in test whenever recording a decision fails. Fixes it, and the three flows pass lint-flows --require-safe-recipients together.",
+      "files": [
+        "inputs/flows-notify/RequestSubmitted-NotifyApprover.json",
+        "inputs/flows-notify/RequestDecided-NotifyRequester.json"
+      ],
       "assertions": [
-        "flow.json parses and its trigger is an Update on cr4f2_leaverequest with filteringattributes including cr4f2_status",
-        "Live sending requires an explicit mode value (e.g. a NotifyMode setting equal to an exact word); anything else, including a missing or blank setting, is treated as test",
-        "In test mode BOTH the To and the Cc resolve only from the allowlist (no expression path addresses cr4f2_requesteremail or cr4f2_manageremail unless live)",
-        "An empty or missing allowlist in test mode sends nothing (it does not fall back to the real recipients)",
-        "Test-mode messages are marked (subject prefix or banner naming the intended recipient)",
-        "lint-flows.mjs reports no errors on flow.json",
-        "notes.md says how to prove nobody else was emailed from evidence (e.g. reading the run history's actual recipients), not only from reading the source"
+        "new/DueSoon-RemindAssignee.json parses as solution JSON with a daily Recurrence trigger and lists open tasks due within two days",
+        "In the new flow every To and Cc resolves only from the allowlist unless the explicit live mode is on, and an empty allowlist sends nothing",
+        "notes.md (or the final answer) reports, without being asked, that RequestDecided-NotifyRequester's failure scope (Tell_the_requester_to_retry) emails the requester directly and bypasses the allowlist",
+        "A corrected RequestDecided-NotifyRequester is saved (in fixed/ or new/) whose failure-path email goes through the safe recipient pattern, or is removed with the reason given",
+        "lint-flows.mjs --require-safe-recipients over the new flow, the corrected RequestDecided-NotifyRequester and RequestSubmitted-NotifyApprover reports no errors",
+        "notes.md says how to prove nobody else was emailed from evidence (the run history's actual recipients, or a recipients log), not only from reading the source"
       ]
     },
     {

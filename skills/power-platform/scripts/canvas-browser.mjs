@@ -7,8 +7,13 @@
 //
 // Setup:   npm i -D playwright        (drives your installed Chrome via channel 'chrome')
 //          No Chrome? use --channel msedge, or `npx playwright install chromium` then --channel chromium.
-// Config:  scripts/canvas-app.json    {"environmentId": "...", "appId": "...", "appName": "..."}
+// Config:  scripts/canvas-app.json    {"environmentId": "...", "appId": "...", "appName": "...",
+//                                       "environmentUrl": "https://<org>.crm.dynamics.com",
+//                                       "dataverseTokenCommand": "<prints a bearer token for that URL>"}
 //          or --config <path>. Nothing about a specific app is written into this file.
+//          The token command is how a walk CONFIRMS its write in Dataverse; for example
+//          az account get-access-token --resource https://<org>.crm.dynamics.com --query accessToken -o tsv
+//          (or set DATAVERSE_TOKEN). The token is used for the checks and never printed or saved.
 //
 // Usage:
 //   node canvas-browser.mjs login                  sign in once (headed; MFA included)
@@ -23,6 +28,8 @@
 //                                                  then quit the held browser (frees the profile)
 //   node canvas-browser.mjs shot <url> <name>      navigate anywhere, screenshot + aria dump
 //   node canvas-browser.mjs lint <scenario.json>   check a scenario's verbs without a browser
+//   node canvas-browser.mjs confirm <scenario.json> [--since <ISO time>]
+//                                                  run only the scenario's Dataverse checks (no browser)
 //   node canvas-browser.mjs doctor                 check every UI anchor in assets/selectors.json against a
 //                                                  LIVE Studio and player (needs login); exit 0 ok, 9 stale
 //   node canvas-browser.mjs --selftest             prove the scenario linter rejects bad steps
@@ -56,6 +63,7 @@ async function pw() {
   return chromium;
 }
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -344,6 +352,9 @@ const PLAYER_NOISE = [
   /Can't perform a React state update on an unmounted component/i,
   /React\.createElement: type is invalid/i,
   /Failed to load resource.*404/i,
+  // After --fresh deletes the Cache Storage, the player's service worker cannot update itself on
+  // the next load (seen 2026-10-02). The platform's own worker, not the app.
+  /Failed to update a ServiceWorker for scope .*apps\.powerapps\.com/i,
 ];
 const ENV_NOISE = [/ERR_CERT_/i, /ERR_NETWORK_CHANGED/i, /ERR_INTERNET_DISCONNECTED/i];
 
@@ -390,9 +401,21 @@ function attachTrace(page, sink) {
 // "On screen" = in the DOM, visible by CSS, and inside the viewport with a real box. A canvas
 // app renders every control into the DOM whether or not it is inside the canvas.
 async function onScreen(frame, text) {
+  const inApp = await visibleIn(frame, text);
+  if (inApp.ok || inApp.n > 0) return inApp;
+  // Notify() banners are drawn by the player, above the app and outside its frame (seen
+  // 2026-10-02: "Saved - ..." was on screen while the app frame held no such text).
+  for (const f of frame.page().frames()) {
+    if (f === frame) continue;
+    const other = await visibleIn(f, text).catch(() => ({ ok: false, n: 0 }));
+    if (other.ok) return { ok: true, why: other.why + ' (in the player\'s notification bar, outside the app frame)' };
+  }
+  return inApp;
+}
+async function visibleIn(frame, text) {
   const loc = frame.getByText(text, { exact: false });
   const n = await loc.count();
-  if (n === 0) return { ok: false, why: 'not in the DOM at all' };
+  if (n === 0) return { ok: false, n, why: 'not in the DOM at all' };
   const vp = frame.page().viewportSize() || { width: 1600, height: 1000 };
   for (let i = 0; i < Math.min(n, 8); i++) {
     const el = loc.nth(i);
@@ -400,9 +423,9 @@ async function onScreen(frame, text) {
     const b = await el.boundingBox().catch(() => null);
     if (!b || b.width < 1 || b.height < 1) continue;
     if (b.y + b.height <= 0 || b.y >= vp.height || b.x + b.width <= 0 || b.x >= vp.width) continue;
-    return { ok: true, why: 'visible at ' + Math.round(b.x) + ',' + Math.round(b.y) };
+    return { ok: true, n, why: 'visible at ' + Math.round(b.x) + ',' + Math.round(b.y) };
   }
-  return { ok: false, why: 'in the DOM (' + n + ' match' + (n > 1 ? 'es' : '') + ') but not visible inside the canvas' };
+  return { ok: false, n, why: 'in the DOM (' + n + ' match' + (n > 1 ? 'es' : '') + ') but not visible inside the canvas' };
 }
 
 // --- in-page measurements (run inside the app frame) ---------------------------------------
@@ -522,6 +545,12 @@ const MEASURE = {
 //   "build": "<stamp>"      asserted first, so the verdict names the package the player ran
 //   "writes": true          the scenario saves production data; walk refuses without --allow-writes
 //   "restore": "<how>"      required with writes: the revert scenario or steps that put it back
+//   "confirm": [ ... ]      Dataverse checks run AFTER the steps, on every walk (required with writes):
+//       {"entitySet": "app_requests", "filter": "app_number eq 'REQ-0042'",
+//        "expect": {"app_status": 100000002}, "count": 1}          the row exists and holds these values
+//       {"entitySet": "app_requests", "filter": "...", "absent": true}   no row matches (a gate refused)
+//       "changedThisRun": true (the default when the scenario writes): every matched row's modifiedon
+//       is after the walk started, so a row left over from an earlier run cannot pass the check.
 async function runSteps(page, frameRef, steps, results) {
   for (const [i, step] of steps.entries()) {
     const tag = '  step ' + (i + 1) + '/' + steps.length + ' ';
@@ -684,7 +713,104 @@ export function lintScenario(sc) {
   if (sc.writes === true && !(typeof sc.restore === 'string' && sc.restore.trim())) {
     errs.push('scenario declares "writes": true but no "restore" (the revert scenario or steps that put the data back)');
   }
+  // The screen that wrote the row is the least independent witness: a scenario that saves must
+  // say where the write lands and what it holds, and the walk checks it there on every run.
+  if (sc.writes === true && !(Array.isArray(sc.confirm) && sc.confirm.some((c) => c && !c.absent))) {
+    errs.push('scenario declares "writes": true but no "confirm" check that finds the written row (entitySet + filter + expect)');
+  }
+  if (sc.confirm !== undefined) {
+    if (!Array.isArray(sc.confirm) || sc.confirm.length === 0) errs.push('"confirm" must be a non-empty array of Dataverse checks');
+    else sc.confirm.forEach((c, i) => {
+      const at = `confirm ${i + 1}: `;
+      if (!c || typeof c !== 'object') { errs.push(at + 'not an object'); return; }
+      for (const k of Object.keys(c)) if (!CONFIRM_KEYS.has(k)) errs.push(at + `unknown key "${k}"`);
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(c.entitySet || '')) errs.push(at + '"entitySet" is the Web API entity set name (plural logical name, e.g. app_requests)');
+      if (!(typeof c.filter === 'string' && c.filter.trim())) errs.push(at + '"filter" is required (an OData $filter that finds exactly the rows this scenario touched)');
+      if ('expect' in c && (typeof c.expect !== 'object' || Array.isArray(c.expect) || !Object.keys(c.expect).length)) errs.push(at + '"expect" is an object of column: value');
+      if ('count' in c && !(Number.isInteger(c.count) && c.count >= 0)) errs.push(at + '"count" is an integer >= 0');
+      if (c.absent === true && ('expect' in c || ('count' in c && c.count !== 0))) errs.push(at + '"absent" cannot be combined with "expect" or a non-zero "count"');
+      if (!c.absent && !('expect' in c) && !('count' in c)) errs.push(at + 'asserts nothing: give "expect", "count" or "absent"');
+    });
+  }
   return errs;
+}
+const CONFIRM_KEYS = new Set(['entitySet', 'filter', 'select', 'expect', 'count', 'absent', 'changedThisRun', 'note']);
+
+// --- Dataverse confirmation ------------------------------------------------------------------
+// Judge the rows one check returned. Pure, so --selftest proves it without a tenant.
+const SKEW_MS = 120000;   // a client clock ahead of the server must not fail a real write
+export function judgeRows(rows, c, runStartMs, writes) {
+  const why = [];
+  if (c.absent) { if (rows.length) why.push(rows.length + ' row(s) match; expected none'); return why; }
+  if ('count' in c && rows.length !== c.count) why.push(rows.length + ' row(s) match; expected ' + c.count);
+  if (!('count' in c) && rows.length === 0) why.push('no row matches the filter');
+  const fresh = c.changedThisRun ?? writes;
+  rows.forEach((r, k) => {
+    for (const [col, want] of Object.entries(c.expect || {})) {
+      const got = r[col] === undefined ? undefined : r[col];
+      const label = r[col + '@OData.Community.Display.V1.FormattedValue'];
+      const same = got === want || (got !== undefined && got !== null && want !== null && String(got).toLowerCase() === String(want).toLowerCase())
+        || (label !== undefined && String(label) === String(want));
+      if (!same) why.push(`row ${k + 1}: ${col} is ${JSON.stringify(got)}${label !== undefined ? ' ("' + label + '")' : ''}, expected ${JSON.stringify(want)}`);
+    }
+    if (fresh && runStartMs) {
+      const m = Date.parse(r.modifiedon || '');
+      if (!m) why.push(`row ${k + 1}: no modifiedon returned, so this run's write cannot be told from an old row`);
+      else if (m < runStartMs - SKEW_MS) why.push(`row ${k + 1}: last modified ${r.modifiedon}, before this walk started - this run did not write it`);
+    }
+  });
+  return why;
+}
+function dataverseToken() {
+  if (process.env.DATAVERSE_TOKEN) return process.env.DATAVERSE_TOKEN.trim();
+  const command = APP.dataverseTokenCommand || process.env.DATAVERSE_TOKEN_COMMAND;
+  if (!command) return null;
+  const out = execSync(command, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180000, cwd: REPO });
+  const lines = out.trim().split(/\r?\n/);
+  return lines[lines.length - 1].trim() || null;
+}
+async function confirmInDataverse(checks, runStartMs, writes) {
+  const base = String(APP.dataverseUrl || APP.environmentUrl || '').replace(/\/+$/, '');
+  if (!base) return { cannot: 'no "environmentUrl" in the app config, so the write cannot be confirmed' };
+  let token;
+  try { token = dataverseToken(); }
+  catch (e) { return { cannot: 'the token command failed: ' + String(e.stderr || e.message).split('\n').find((x) => x.trim()) }; }
+  if (!token) return { cannot: 'no Dataverse token: add "dataverseTokenCommand" to the app config (a command that prints a bearer token for ' + base + ') or set DATAVERSE_TOKEN' };
+  const results = [];
+  for (const c of checks) {
+    const cols = new Set([...(c.select ? String(c.select).split(',') : []), ...Object.keys(c.expect || {}), 'modifiedon'].map((x) => x.trim()).filter(Boolean));
+    const url = base + '/api/data/v9.2/' + c.entitySet + '?$filter=' + encodeURIComponent(c.filter) + '&$select=' + [...cols].join(',') + '&$top=50';
+    let rows = null, err = null;
+    try {
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"' } });
+      const body = await res.text();
+      if (!res.ok) err = 'HTTP ' + res.status + ': ' + ((() => { try { return JSON.parse(body).error.message; } catch { return body.slice(0, 160); } })());
+      else rows = JSON.parse(body).value || [];
+    } catch (e) { err = e.message; }
+    const why = err ? [err] : judgeRows(rows, c, runStartMs, writes);
+    results.push({ check: c.entitySet + ' ' + c.filter, rows: rows ? rows.length : null, ok: why.length === 0, why });
+  }
+  return { results };
+}
+function logConfirmation(conf) {
+  if (conf.cannot) { log('  DATAVERSE: CANNOT CONFIRM - ' + conf.cannot + '. This is NOT a pass.'); return false; }
+  for (const r of conf.results) {
+    log('  DATAVERSE ' + (r.ok ? 'CONFIRMED' : 'NOT CONFIRMED') + '  ' + r.check + (r.rows === null ? '' : '  (' + r.rows + ' row(s))'));
+    r.why.forEach((w) => log('      !! ' + w));
+  }
+  return conf.results.every((r) => r.ok);
+}
+async function cmdConfirm() {
+  const file = argv[1];
+  if (!file) { log('usage: canvas-browser.mjs confirm <scenario.json> [--since <ISO time>]'); process.exitCode = 1; return; }
+  const scenario = JSON.parse(readFileSync(resolve(file), 'utf8'));
+  if (!Array.isArray(scenario.confirm) || !scenario.confirm.length) { log('"' + scenario.name + '" has no "confirm" checks.'); process.exitCode = 1; return; }
+  const since = flag('since') ? Date.parse(String(flag('since'))) : 0;
+  if (flag('since') && !since) { log('--since is not a date: ' + flag('since')); process.exitCode = 1; return; }
+  log('CONFIRM: ' + scenario.name + (since ? '  (rows must have changed since ' + new Date(since).toISOString() + ')' : '  (no --since: freshness not checked)'));
+  const ok = logConfirmation(await confirmInDataverse(scenario.confirm, since, !!since));
+  process.exitCode = ok ? 0 : 4;
 }
 function cmdLint() {
   const file = argv[1];
@@ -725,16 +851,37 @@ function selectorTableProblems() {
 function selftest() {
   const good = { name: 'ok', steps: [{ click: 'Approvals', settle: 3000 }, { type: 'x', into: 'Search' }, { expect: 'Saved' }, { deadclick: 'scr' }] };
   const bad = { name: 'a/b', steps: [{ clik: 'Approvals' }, { type: 'x' }, { nth: 1 }, { click: 'Open', nth: -1 }] };
-  const goodWrite = { name: 'edit-then-revert', writes: true, restore: 'revert-edit', steps: [{ fillCell: 0, value: '7.5' }, { expect: 'Saved' }] };
+  const goodWrite = { name: 'edit-then-revert', writes: true, restore: 'revert-edit', steps: [{ fillCell: 0, value: '7.5' }, { expect: 'Saved' }],
+    confirm: [{ entitySet: 'app_timeentries', filter: "app_name eq 'TEST-1'", expect: { app_hours: 7.5 }, count: 1 }] };
   const badWrite = { name: 'edit', writes: true, steps: [{ fillCell: 0, value: '7.5' }, { expect: 'Saved' }] };
+  const badConfirm = { name: 'c', steps: [{ expect: 'x' }], confirm: [{ entitySet: 'bad set', filter: '', expect: {}, colour: 1 }, { entitySet: 'app_x', filter: 'a eq 1' },
+    { entitySet: 'app_x', filter: 'a eq 1', absent: true, expect: { a: 1 } }] };
+  const absentOnly = { name: 'w', writes: true, restore: 'r', steps: [{ expect: 'x' }], confirm: [{ entitySet: 'app_x', filter: 'a eq 1', absent: true }] };
   const g = [...lintScenario(good), ...lintScenario(goodWrite)];
-  const b = [...lintScenario(bad), ...lintScenario(badWrite)];
-  const want = ['file-name safe', 'unknown verb', 'needs "into"', 'no action', '0-based', 'asserts nothing', 'no "restore"'];
+  const b = [...lintScenario(bad), ...lintScenario(badWrite), ...lintScenario(badConfirm), ...lintScenario(absentOnly)];
+  const want = ['file-name safe', 'unknown verb', 'needs "into"', 'no action', '0-based', 'asserts nothing', 'no "restore"', 'no "confirm"',
+    'entity set name', '"filter" is required', 'unknown key', 'object of column', 'asserts nothing: give', 'cannot be combined'];
+  // judgeRows: values, choice labels, counts, absence and freshness.
+  const t0 = Date.parse('2026-01-01T12:00:00Z');
+  const row = (o) => ({ modifiedon: '2026-01-01T12:00:30Z', ...o });
+  const J = [
+    ['match', judgeRows([row({ app_hours: 7.5 })], { expect: { app_hours: 7.5 }, count: 1 }, t0, true), 0],
+    ['choice label', judgeRows([row({ app_status: 100000002, 'app_status@OData.Community.Display.V1.FormattedValue': 'Denied' })], { expect: { app_status: 'Denied' } }, t0, true), 0],
+    ['wrong value', judgeRows([row({ app_hours: 8 })], { expect: { app_hours: 7.5 } }, t0, true), 1],
+    ['no row', judgeRows([], { expect: { app_hours: 7.5 } }, t0, true), 1],
+    ['count', judgeRows([row({}), row({})], { count: 1 }, t0, true), 1],
+    ['absent ok', judgeRows([], { absent: true }, t0, true), 0],
+    ['absent but present', judgeRows([row({})], { absent: true }, t0, true), 1],
+    ['stale row', judgeRows([row({ app_hours: 7.5, modifiedon: '2025-12-31T09:00:00Z' })], { expect: { app_hours: 7.5 } }, t0, true), 1],
+    ['clock skew tolerated', judgeRows([row({ modifiedon: '2026-01-01T11:59:00Z' })], { count: 1 }, t0, true), 0],
+    ['read-only walk ignores age', judgeRows([row({ modifiedon: '2025-01-01T00:00:00Z' })], { count: 1 }, t0, false), 0],
+  ];
+  const judged = J.filter(([, w, n]) => w.length !== n).map(([k, w]) => k + ' -> ' + JSON.stringify(w));
   const missing = want.filter((w) => !b.some((e) => e.includes(w)));
   const sel = selectorTableProblems();
-  const ok = g.length === 0 && missing.length === 0 && sel.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
-         : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], selector table -> [${sel.join('; ')}]`);
+  const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0;
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+         : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }
 
@@ -842,10 +989,18 @@ async function cmdWalk() {
   // Optional top-level "build": the stamp the ship wrote. Without it, a result may describe
   // the previous package while every offline check says the new one shipped.
   const steps = scenario.build ? [{ expect: scenario.build }, ...scenario.steps] : scenario.steps;
+  const runStart = Date.now();
   await runSteps(page, frameRef, steps, results);
   const real = reportConsole(errors, scenario.name);
   writeTrace(trace, scenario.name);
-  const verdict = results.failed.length === 0 && real.length === 0 ? 'PASS' : 'FAIL';
+  // Confirm where the write lands, every run: the screen saying "Saved" proves nothing about the row.
+  let confirmation = null, confirmed = true;
+  if (scenario.confirm) {
+    await page.waitForTimeout(Number(flag('settle-dv', 4000)));
+    confirmation = await confirmInDataverse(scenario.confirm, runStart, scenario.writes === true);
+    confirmed = logConfirmation(confirmation);
+  } else log('  note: no "confirm" checks - nothing was verified in Dataverse (a read-only walk).');
+  const verdict = results.failed.length === 0 && real.length === 0 && confirmed ? 'PASS' : 'FAIL';
   log('\n=== ' + scenario.name + ' ===');
   log('  assertions passed: ' + results.passed.length + '   steps failed: ' + results.failed.length);
   results.failed.forEach((f) => log('   !! step ' + f.step + ' ' + f.detail + ' -> ' + f.error));
@@ -854,7 +1009,7 @@ async function cmdWalk() {
   if (!scenario.build) log('  note: no "build" stamp asserted - confirm which package the player ran.');
   if (scenario.writes === true) log('  RESTORE NOW: ' + scenario.restore + '  - then confirm the table is back at its baseline.');
   writeFileSync(join(OUT, scenario.name + '.result.json'),
-    JSON.stringify({ scenario: scenario.name, at: new Date().toISOString(), verdict, ...results, appErrors: real }, null, 2), 'utf8');
+    JSON.stringify({ scenario: scenario.name, at: new Date().toISOString(), runStart: new Date(runStart).toISOString(), verdict, ...results, appErrors: real, dataverse: confirmation }, null, 2), 'utf8');
   await ctx.close();
   process.exitCode = verdict === 'PASS' ? 0 : 4;
 }
@@ -1252,12 +1407,13 @@ async function cmdShot() {
 }
 
 const commands = { login: cmdLogin, check: cmdCheck, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
-  keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot, lint: async () => cmdLint(), doctor: cmdDoctor };
+  keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm };
 
 if (argv.includes('--selftest')) selftest();
 else if (!commands[cmd]) {
   log('canvas-browser - drive Power Apps Studio and the published player\n');
   log('  login | check | play [--screen N] [--trace] [--fresh] | walk <scenario.json> [--trace] [--fresh] [--allow-writes]');
+  log('  confirm <scenario.json> [--since ISO]   run only the scenario\'s Dataverse checks');
   log('  studio | keys [combo] | save | publish [--reload-first] | close-studio [--keep-browser] | shot <url> <name>');
   log('  doctor [--player-only|--studio-only] [--record]   are the UI anchors in assets/selectors.json still valid?\n');
   log('  config:  ' + (CONFIG_PATH || '(none found - pass --config or create scripts/canvas-app.json)'));

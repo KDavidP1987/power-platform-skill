@@ -1,7 +1,9 @@
 {
   "name": "approve-request",
-  "description": "An approver opens the queue, denies one request with a reason, and sees it leave the queue. Run as a NON-admin approver to prove the gate; afterwards confirm the row in Dataverse and restore it.",
+  "description": "An approver opens the queue, denies one request with a reason, and sees it leave the queue. Run as a NON-admin approver to prove the gate. The walk confirms the denial in Dataverse; restore with the revert scenario.",
   "build": "Build 2026-01-01 12:00 abc1234",
+  "writes": true,
+  "restore": "revert-approve-request (sets REQ-0042 back to Submitted and confirms it)",
   "steps": [
     { "click": "Approvals", "settle": 5000, "capture": "01-queue" },
     { "expect": "REQ-0042" },
@@ -13,5 +15,8 @@
     { "expect": "Denied" },
     { "deadclick": "request-detail" },
     { "clipcheck": "request-detail" }
+  ],
+  "confirm": [
+    { "entitySet": "app_requests", "filter": "app_number eq 'REQ-0042'", "expect": { "app_status": "Denied", "app_denyreason": "Missing cost centre" }, "count": 1 }
   ]
 }

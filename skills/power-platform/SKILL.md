@@ -14,7 +14,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.6.0"
+  version: "0.7.0"
 ---
 
 # Power Platform development
@@ -97,6 +97,10 @@ user unproven.
    data must fit the longest value it can show, or clamp with an ellipsis and a tooltip** -
    `scripts/check-canvas-format.mjs` checks it, with lengths from Dataverse metadata, and also
    fails literal colours once the theme exists (`references/canvas-layout.md` sections 8 and 9).
+   **No control may sit over another that can be on screen at the same time** - a new button over
+   a label that only shows under some condition is the commonest layout defect an agent makes.
+   `scripts/check-canvas-overlap.mjs` compares every pair across all their `Visible` conditions
+   and fails unless the conditions are provably exclusive (`references/canvas-layout.md` section 7).
 4. **Audit.** Run the project's audit suite. Treat a stale-input result as unverified, not as a
    pass.
 5. **Compile against a live Studio session** (canvas only). This is the only step that proves the
@@ -110,8 +114,10 @@ user unproven.
 7. **Import / publish.** Then confirm what landed: download the app, read `LoadFromYaml`, search the
    half that runs for your markers, compare data-source counts with the previous live app.
 8. **Perform the task in the published app** with Playwright, after refreshing past any cached
-   build and confirming the build stamp. Check the result in the database. Restore anything you
-   wrote, and record what you touched.
+   build and confirming the build stamp. Check the result in the database on every run: a scenario
+   that writes carries `confirm` checks, and `canvas-browser.mjs walk` reads the row back over the
+   Web API and fails unless it holds the expected values and changed during this run. Restore
+   anything you wrote, and record what you touched.
 9. **Document in the same change.** Changelog, dependency register, decisions log, state file.
 10. **Refresh the audit inputs** so the next audit describes the app that now exists.
 11. **Offer the documentation set** once the app works end to end, and again at each major
@@ -145,6 +151,7 @@ Read only the reference the task needs. Each one is self-contained.
 | Cloud flows: definition shape, triggers and message codes, `runtimeSource`, loops and sentinels, activation-only defects, dates and nulls, imports changing flow on/off state, run-as identity, notifications and safety caps, bulk writes, FetchXML, run history, the communication log and resend, documents and templates (link, stored file, generated), attachment encoding | `references/power-automate.md` |
 | **Process and environment** | |
 | Writing or trusting an audit; stale inputs; vacuous passes; reusable tool designs | `references/audits.md` |
+| Starting from nothing: what the person needs, the machine, pac, a self-renewing token, a browser that signs in by itself, Studio and the authoring server, the app config, what the agent hands back, and the smoke test to run before the first change | `references/first-run.md` |
 | Starting a repo or a new app: theme intake (palette, fonts, logo, imagery, symbolism, landing page) before the first screen, layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights | `references/project-setup.md` |
 | CI/CD: service-principal pac auth, export/unpack on a branch, pack + Solution Checker, managed vs unmanaged and upgrade, deployment settings for connection references and environment variables, importing flows off then activating, powerplatform-actions / Build Tools, the skill's tools as pipeline gates | `references/alm-pipelines.md` |
 | Several apps sharing one environment or a shared reference solution | `references/shared-environments.md` |
@@ -159,12 +166,13 @@ than carrying an id. Run any of them with `--help`.
 
 | Tool | Use |
 |---|---|
-| `scripts/canvas-browser.mjs` | Playwright driver for the maker portal and the published player: `login`, `check`, `play`, `walk <scenario.json>`, `studio`, `save`, `publish`, `close-studio`, `shot`, `doctor`. `--fresh` clears the player's cached build, `--trace` records `$batch` traffic, `--channel` picks Chrome, Edge or bundled Chromium, and a scenario that writes must declare a `restore`. `lint` checks a scenario without a browser. Every UI anchor it depends on is in `assets/selectors.json`; `doctor` checks them against a live, signed-in session (exit 0 all resolve, 9 stale, 2 cannot verify - never a pass offline). Needs `npm i playwright`. |
+| `scripts/canvas-browser.mjs` | Playwright driver for the maker portal and the published player: `login`, `check`, `play`, `walk <scenario.json>`, `studio`, `save`, `publish`, `close-studio`, `shot`, `doctor`, `confirm`. `--fresh` clears the player's cached build, `--trace` records `$batch` traffic, `--channel` picks Chrome, Edge or bundled Chromium. A scenario that writes must declare a `restore` and `confirm` checks: after the steps the walk reads the rows back over the Web API (token from `dataverseTokenCommand` in the app config) and fails unless they hold the expected values and changed during this run. `expect` also finds `Notify()` banners, which the player draws outside the app frame. `lint` checks a scenario without a browser. Every UI anchor it depends on is in `assets/selectors.json`; `doctor` checks them against a live, signed-in session (exit 0 all resolve, 9 stale, 2 cannot verify - never a pass offline). Needs `npm i playwright`. |
 | `scripts/inspect-artifact.py` | Opens a solution zip or `.msapp` and reports what is really inside: root components vs built metadata, security roles, canvas `LoadFromYaml`, build stamp, data-source count, `DatabaseReferences` vs `DataSources.json`, marker search in the half that runs. Python 3 standard library only. |
 | `scripts/check-drift.py` | Compares a canvas app's cached Dataverse metadata with the live environment, read-only: tables, entity set names (every cached copy), columns the formulas use, column types, choice members in both caches, lookup navigation names, and `<DatabaseReferences>` vs `DataSources.json`. Each drift names what breaks in the published app and the fix. `--dump` / `--offline` run it in CI without a tenant. Exit 2 is never a pass. Python 3 standard library only. |
 | `scripts/ship-canvas.py` | The solution-import ship: build on the LIVE manifest, reconcile the caches, stamp the build, strip roles, repair the player list, pack with pac, then assert on the finished zip (inspect-artifact + check-drift). `--dry-run` writes nothing and runs no pac; it never imports without `--import`. Reads `scripts/canvas-app.json`. Python 3 standard library only. |
 | `scripts/lint-flows.mjs` | Static checks on cloud-flow definition JSON: invoker runtime on non-app triggers, self-writes whose path conditions are not FALSE after the write (it parses the expressions and follows one level of Compose/variable indirection; warns when a guard holds only if a run-time value is non-blank), apostrophes in expression literals, references outside the `runAfter` path, trigger message codes, sends chained after `Failed`, single-`@` property names, multiple triggers, date-only columns used as instants (`--date-only`), cross-flow cycles. Node 18+. |
 | `scripts/check-canvas-format.mjs` | Formatting rules no compile enforces, from canvas source: every data-bound text control must fit the widest value its expression can produce (lengths from a Dataverse-metadata schema, choices by their labels, collections from the formulas that build them) or carry a remedy - clamp plus a tooltip that reads the same columns, a flexible-height row, a detail view, or a scrolling detail pane; and screens use theme tokens, not literal colours or fonts. `--hook` runs it as a PostToolUse hook. Prints what it examined; exit 2 when nothing was. Node 18+. |
+| `scripts/check-canvas-overlap.mjs` | Controls drawn over other controls, from canvas source: every pair of text-bearing or interactive controls in the same coordinate space (screen, container, gallery row) whose boxes overlap and whose `Visible` conditions - their own and every ancestor's - are not provably exclusive; decoration declared after a button (dead click) or a label (hidden text); controls off the design surface or outside their gallery row. Geometry from literals, `App.OnStart` globals, `Parent`, other controls and every `If`/`Switch` branch, each branch compared only with the conditions it holds under. Modal backdrops, empty states over their own gallery and text-less click pads are exempt; `--explain` lists every exemption. `--hook` runs it at write time. Prints how many controls it resolved; exit 2 when none. Node 18+. |
 | `scripts/hooks/check-pa-yaml.mjs` | Claude Code PostToolUse hook: flags the `.pa.yaml` faults that fail a whole-app compile, at write time. |
 | `scripts/hooks/check-standards.mjs`, `audit-stop.mjs`, `preflight.mjs` | Optional output-standards hook, end-of-turn audit, and session pre-flight. Wiring in `assets/settings.snippet.json`. |
 

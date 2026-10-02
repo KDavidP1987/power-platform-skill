@@ -2,7 +2,8 @@
 
 The tools around Power Platform - pac, Web API tokens, the TDS endpoint, MCP servers, Windows
 PowerShell, a synced documents folder, and Claude Code itself - each have failure modes that look
-like a platform fault or, worse, like success. This file collects them.
+like a platform fault or, worse, like success. This file collects them. For the order to set them up
+in on a new machine, and the smoke test that proves the setup, see `first-run.md`.
 
 ## Contents
 
