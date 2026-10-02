@@ -380,6 +380,10 @@ Data-pane badge, the network log, then the formula.
   with the same display name;
 - adding a second source whose name is taken creates `Orders_1`. Treat `_1` as the tell, confirm
   the logical name (hover the pane entry), and remove it before saving unless you meant it.
+- when two tables share a display name and the app has neither, the picker lists both with nothing
+  to tell them apart; the order followed the logical name (`aaa_person` before `bbb_person`). Add
+  one, hover it in the Data pane to read the logical name, and remove it if it is the wrong one
+  before adding the other.
 
 Before adding an ambiguous name, query `EntityDefinitions?$select=LogicalName,DisplayCollectionName`
 for collisions, and rename your own table while it is empty. When the `_1` source is deliberate (a

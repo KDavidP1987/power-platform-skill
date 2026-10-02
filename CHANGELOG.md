@@ -11,6 +11,32 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-01
+
+First real build of a new app with the skill: a Dataverse + canvas onboarding app, from tables to a
+published, imported, stamped build in one session.
+
+### Fixed
+
+- `ship-canvas.py`: every second run refused, because `pac canvas download` has no `--overwrite`
+  and the previous run's `live.msapp` was still in the work folder. The old baseline is now removed
+  first. The self-test's fake `pac` refuses an existing file as the real one does, and a new case
+  downloads twice into one folder (it fails without the fix).
+
+### Added
+
+- `ship-canvas.py`: refuses a zip in which a table matched by `externalTables` ships WITH its
+  subcomponents (`behavior="0"`), since an import would write that copy over the owning solution's
+  table. `--allow-shared-schema` overrides it and says so. Three self-test cases.
+- References:
+  - A lookup into another solution's table adds that table to yours with every subcomponent, and how
+    to check and fix it (`dataverse-web-api.md`, `dataverse.md`).
+  - A push whose Save button stays disabled, what saved it, and the alternative of compiling only
+    as a check and shipping by import (`authoring-sessions.md`).
+  - An unset variable compared with `= 0` divides by Blank; `x in Column` delegates on Dataverse and
+    finds surnames (`power-fx-and-pa-yaml.md`).
+  - The Add-data picker with two tables of the same display name (`manifest-caches.md`).
+
 ## [0.2.1] - 2026-10-01
 
 ### Changed

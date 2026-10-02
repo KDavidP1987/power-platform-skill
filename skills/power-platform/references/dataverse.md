@@ -208,6 +208,9 @@ import **overwrites**. Three consequences, each paid for:
   solution with `AddSolutionComponent` and `DoNotIncludeSubcomponents = true`; remove ones it already
   carries with `RemoveSolutionComponent` (which unlinks, never deletes data). The payloads are not
   symmetric - see `dataverse-web-api.md`, section 10.
+- **Check membership after you build lookups.** A lookup created into a shared table adds that table
+  to your solution with every subcomponent (behavior 0), silently. Query `solutioncomponents` for
+  `componenttype 1` and `rootcomponentbehavior`, and expect 1 for every table you do not own.
 
 Around any import that touches shared tables:
 

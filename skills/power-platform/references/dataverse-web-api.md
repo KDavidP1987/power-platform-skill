@@ -124,6 +124,13 @@ Rules for every step:
 - **Send `MSCRM.SolutionUniqueName: <solution>` on every metadata create**, naming the solution that
   **owns** the component. Without it the component lands in the Default solution and the next export
   does not carry it.
+- **A lookup to ANOTHER solution's table drags that table in whole.** Creating the lookup column with
+  your solution header adds the referenced table to your solution as a root component WITH all its
+  subcomponents (`rootcomponentbehavior` 0) - measured on a new app whose three lookups into a shared
+  reference layer put all three shared tables in its solution, schema included, before any app
+  existed. Read `solutioncomponents` after provisioning, and turn any foreign table into a reference
+  (remove, then add with `DoNotIncludeSubcomponents`; section 10). `ship-canvas.py` refuses a zip
+  that carries an `externalTables` table with behavior 0.
 - **Check existence by reading the list once** (section 3); treat "already exists" as success.
 - **Settle after creating a table.** A column POST straight after `CreateEntity` hit a metadata race
   and returned a spurious 400; pausing about 3 s and retrying the signatures in section 6 fixed it.

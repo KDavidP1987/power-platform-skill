@@ -441,6 +441,12 @@ duplicate**.
   `x = 0` does not catch Blank, so a percentage divided by it threw; a Blank persisted to a header
   total recorded "unknown" rather than zero. Wrap every displayed, persisted or dividing aggregate:
   `Coalesce(Sum(...), 0)`, and sweep every total when you find one.
+- **The same holds for a variable that has not been set yet.** `If(gblTotal = 0, 0, done / gblTotal)`
+  divided by Blank in Studio before any record was opened, and Studio showed "Invalid operation:
+  division by zero" on the first compile. Guard with `Coalesce(gblTotal, 0) = 0`.
+- **Search with `in`, not `StartsWith`, when people type a surname.** `StartsWith('Person Name', x)`
+  cannot find "Lee" in "Ada Lee". On Dataverse `x in 'Person Name'` (substring) delegates - measured:
+  the compile's warning count did not change. Keep `StartsWith` for emails and codes.
 - **`Text(x, "0.##")` keeps a dangling separator.** `Text(40, "[$-en-US]0.##")` renders "40." (as
   Excel does). It compiled, passed every audit and shipped twice in one app (eighteen sites, then
   seven). Use a fixed format (`"0.00"`) or bare `Text(x)`.

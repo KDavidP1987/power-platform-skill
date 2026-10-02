@@ -26,6 +26,7 @@ Options:
     --offline DUMP         reconcile from a check-drift.py --dump file instead of the Web API
     --org / --token-cmd / --token-env   as check-drift.py (read-only GETs)
     --allow-missing-tables do not refuse when a bound table is not in the solution's entities
+    --allow-shared-schema  do not refuse when an externalTables table ships with its subcomponents
     --accept-drift         do not refuse on drift no build step can repair (columns the formulas use
                            that the cache lacks, column types, status/state/yes-no members)
     --no-bump              keep the solution version (default: bump the last segment)
@@ -569,6 +570,25 @@ def build_solution(export_items, msapp_bytes, cfg, opts, log=print):
         log("    tables gate   : every bound table is a solution entity%s"
             % (" or listed in externalTables" if by_design else ""))
 
+    # A table another solution owns may be listed here only as a REFERENCE (behavior 1/2: no
+    # subcomponents). With behavior 0 the zip carries that table's full definition, and an import
+    # writes this solution's copy over the owner's - silently reverting columns another app added.
+    # Creating a lookup to a shared table with the solution header adds it exactly this way.
+    full = re.findall(r'<RootComponent\s+type="1"\s+schemaName="([^"]+)"\s+behavior="0"', sol)
+    shared_full = sorted(n.lower() for n in full if any(fnmatch.fnmatchcase(n.lower(), p) for p in patterns))
+    facts["shared_with_schema"] = shared_full
+    if shared_full:
+        msg = ("%d table(s) matched by externalTables ship WITH their subcomponents (behavior 0): %s - an "
+               "import would overwrite the owning solution's definition. Re-add them as references "
+               "(RemoveSolutionComponent, then AddSolutionComponent with DoNotIncludeSubcomponents=true)"
+               % (len(shared_full), ", ".join(shared_full[:12])))
+        if opts.get("allow_shared_schema"):
+            log("    shared schema : ALLOWED by --allow-shared-schema: " + msg)
+        else:
+            raise Refuse(msg)
+    elif patterns:
+        log("    shared schema : no externalTables table ships with subcomponents")
+
     data["solution.xml"] = bom_encode(sol_bom, sol)
     data["customizations.xml"] = bom_encode(cus_bom, cus)
     data[doc] = msapp_bytes
@@ -670,6 +690,7 @@ def ship(argv, pac=None, now=None):
     ap.add_argument("--token-cmd")
     ap.add_argument("--token-env", default="DATAVERSE_TOKEN")
     ap.add_argument("--allow-missing-tables", action="store_true")
+    ap.add_argument("--allow-shared-schema", action="store_true")
     ap.add_argument("--accept-drift", action="store_true")
     ap.add_argument("--no-bump", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
@@ -751,6 +772,11 @@ def ship(argv, pac=None, now=None):
     if not live_msapp:
         if real_id(cfg.get("appId")):
             live_msapp = os.path.join(work, "live.msapp")
+            # `pac canvas download` has no --overwrite and refuses when the file exists, so the
+            # previous run's baseline would stop every second ship. Remove it first; a stale
+            # baseline must never be reused anyway.
+            if not dry and os.path.isfile(live_msapp):
+                os.remove(live_msapp)
             pac("canvas", "download", "--name", cfg["appId"], "--file-name", live_msapp, *env_args)
         elif not dry or os.path.isfile(live_solution):
             print("    no appId: the .msapp inside the solution export is the baseline")
@@ -893,7 +919,8 @@ def ship(argv, pac=None, now=None):
               "is not a solution entity")
     else:
         sol_opts = {"bump": cfg.get("bumpVersion", True) and not a.no_bump,
-                    "allow_missing_tables": a.allow_missing_tables}
+                    "allow_missing_tables": a.allow_missing_tables,
+                    "allow_shared_schema": a.allow_shared_schema}
         new_items, facts = build_solution(export_items, msapp_bytes if msapp_bytes is not None else
                                           _dry_msapp(baseline_bytes, live), cfg, sol_opts)
         if not dry:
@@ -991,6 +1018,8 @@ class FakePac(Pac):
         if verb == "solution export":
             open(opt("--path"), "wb").write(self.export_bytes)
         elif verb == "canvas download":
+            if os.path.exists(opt("--file-name")):  # as the real pac: no --overwrite, refuses
+                raise CannotRun("pac canvas download failed (exit 1): file already exists")
             open(opt("--file-name"), "wb").write(self.msapp_bytes)
         elif verb == "canvas unpack":
             d = opt("--sources")
@@ -1169,6 +1198,18 @@ def selftest():
               rc == 0 and verbs[-3:] == ["org who", "solution export", "solution import"]
               and "--publish-changes" not in pac.calls[-1])
 
+        # Downloading (no --live): pac canvas download has no --overwrite, so the previous run's
+        # baseline in the work folder must be cleared, or every second ship refuses.
+        dl = make_repo(extra_cfg={"appId": "11111111-2222-3333-4444-555555555555",
+                                  "environmentId": "22222222-3333-4444-5555-666666666666"})
+        tmps.append(dl)
+        dl_argv = ["--config", os.path.join(dl, "scripts", "canvas-app.json"), "--offline",
+                   os.path.join(dl, "live.json"), "--markers", "NewThingMarker"]
+        rc1, _ = quiet(main, dl_argv, pac=FakePac(export, stale_msapp), now=now)
+        rc2, out2 = quiet(main, dl_argv, pac=FakePac(export, stale_msapp), now=now)
+        check("downloading baseline: a second run in the same folder rebuilds (old live.msapp replaced)",
+              rc1 == 0 and rc2 == 0 and "already exists" not in out2)
+
         rc, out, _ = go(d, ["--markers", "NotInTheAppAnywhere"])
         check("a marker missing from the running half refuses (exit 1)", rc == 1 and "inspect-artifact" in out)
         check("... and the refused zip is renamed so it cannot be imported by mistake",
@@ -1203,6 +1244,24 @@ def selftest():
         rc, out, _ = go(d4, export_bytes=no_tbl)
         check("... and a table matched by externalTables passes as owned elsewhere by design",
               rc == 0 and "by design" in out)
+        # The fixture lists app_order as a full root component (behavior 0). Marking it external
+        # makes it a shared table shipped with its schema: refuse, unless explicitly allowed.
+        d5 = make_repo(extra_cfg={"externalTables": ["app_order"]})
+        tmps.append(d5)
+        rc, out, _ = go(d5)
+        check("an externalTables table shipped WITH subcomponents refuses", rc == 1 and "behavior 0" in out)
+        rc, out, _ = go(d5, ["--allow-shared-schema"])
+        check("... and --allow-shared-schema lets it through, saying so", rc == 0 and "ALLOWED" in out)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for info, data in read_entries(export):
+                if info.filename == "solution.xml":
+                    data = data.replace(b'schemaName="app_order" behavior="0"', b'schemaName="app_order" behavior="1"')
+                z.writestr(info.filename, data)
+        ref = buf.getvalue()
+        open(os.path.join(d5, "export.zip"), "wb").write(ref)
+        rc, out, _ = go(d5, export_bytes=ref)
+        check("... and the same table as a reference (behavior 1) passes", rc == 0 and "no externalTables table ships" in out)
         open(os.path.join(d, "export.zip"), "wb").write(export)
 
         used = drift.fixture_dump(drift.fixture_table(priority_opts={"1": "Low", "2": "High", "3": "Urgent"}, nav="app_Customer",

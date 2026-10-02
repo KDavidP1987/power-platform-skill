@@ -23,6 +23,17 @@ What strands the lock:
 - **A Studio crash mid-push** (white screen, `TypeError: Cannot read properties of undefined`) -
   same 422 / read-only signature.
 - **An ordinary push/save/publish cycle**, observed in one project with nothing killed.
+- **A push whose Save button stays disabled.** Measured on a new app (2026-10): after a clean
+  compile Studio spent one to two minutes walking the pushed controls (the status line names a
+  different selected control every few seconds) with Save disabled and a spinner in its place. A
+  Save click in that state does nothing; a reload then discards the push - the reopened app was the
+  blank Screen1. What worked: wait for the walk to stop, real-click an empty part of the canvas, press
+  Ctrl+S; "Saving to Power Apps" covered the canvas for about two minutes, then Publish (real click,
+  "Publish this version") moved `lastpublishtime`.
+- **Or do not save the push at all.** The compile is the formula check; the session only has to
+  exist for schemas to resolve. Compile in a throwaway session, leave Studio without saving, and ship
+  the same commit with `ship-canvas.py --import`. The player showed the new build stamp after the
+  "old version - Refresh" banner was clicked. This sidesteps every save failure above.
 - **Your own authoring-server processes.** `connect` opens a co-authoring session **under the
   signed-in user's identity**, so the agent is indistinguishable from the user and "I don't have it
   open anywhere" can be true while the app is locked. When the client launches the server through
