@@ -1,0 +1,14 @@
+{
+  "emoji": true,
+  "purpleAccents": true,
+  "canvasSrcGlob": "canvas",
+  "canvasFileCeiling": 50,
+  "canvasFileWarnAt": 45,
+  "debugMarkers": true,
+  "bookkeeping": {
+    "solutionDir": "solution/",
+    "dependencyRegister": "docs/dependencies.md",
+    "stateFile": "docs/STATE.md",
+    "changelog": "CHANGELOG.md"
+  }
+}

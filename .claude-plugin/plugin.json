@@ -1,0 +1,23 @@
+{
+  "name": "power-platform",
+  "version": "0.1.0",
+  "description": "Power Platform development the way software is built: canvas apps as .pa.yaml in git, Dataverse solutions and Power Automate flows shipped by solution import, and every change proved by performing the task in the published app with Playwright.",
+  "author": {
+    "name": "SkillEra IO, LLC",
+    "url": "https://skillera.io"
+  },
+  "homepage": "https://skillera.io",
+  "repository": "https://github.com/KDavidP1987/power-platform-skill",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "skillera",
+    "claude-code",
+    "power-platform",
+    "power-apps",
+    "power-automate",
+    "dataverse",
+    "playwright"
+  ],
+  "skills": "./skills"
+}

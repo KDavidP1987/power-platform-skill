@@ -1,0 +1,17 @@
+{
+  "name": "approve-request",
+  "description": "An approver opens the queue, denies one request with a reason, and sees it leave the queue. Run as a NON-admin approver to prove the gate; afterwards confirm the row in Dataverse and restore it.",
+  "build": "Build 2026-01-01 12:00 abc1234",
+  "steps": [
+    { "click": "Approvals", "settle": 5000, "capture": "01-queue" },
+    { "expect": "REQ-0042" },
+    { "type": "REQ-0042", "into": "Search" },
+    { "click": "Open", "nth": 0, "settle": 4000 },
+    { "absent": "Deny reason required" },
+    { "type": "Missing cost centre", "into": "Reason" },
+    { "click": "Deny", "settle": 6000, "capture": "02-after-deny" },
+    { "expect": "Denied" },
+    { "deadclick": "request-detail" },
+    { "clipcheck": "request-detail" }
+  ]
+}

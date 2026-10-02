@@ -1,0 +1,401 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
+  <img alt="SkillEra Skills: open-source Agent Skills for Claude Code, Codex, Cursor and any agent that reads SKILL.md" src="assets/banner-light.svg" width="100%">
+</picture>
+
+[![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
+[![plugin 0.1.0](https://img.shields.io/badge/plugin-0.1.0-1F3A5F)](.claude-plugin/plugin.json)
+[![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
+[![evaluation 32/32 vs 14/32](https://img.shields.io/badge/evaluation-32%2F32%20vs%2014%2F32-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+
+# power-platform
+
+**Power Platform development the way software is built, and proved in the product.**
+
+Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with the definition in
+git, a portable artifact built from it, a deliberate deployment, and every change proved by
+performing the task in the published app, driven by Playwright. A clean compile is not enough.
+
+Version 0.1.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+
+> [!NOTE]
+> On four realistic Power Platform tasks, the same model passed **32 of 32** graded checks with this
+> skill and **14 of 32** without it. The [evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+> shows every check, what went wrong without the skill, and the limits of the measurement.
+
+## Contents
+
+1. [Why this skill exists](#why-this-skill-exists)
+2. [What you get](#what-you-get)
+3. [Install](#install)
+4. [Quick start](#quick-start)
+5. [The working loop](#the-working-loop)
+6. [Playwright: the published app is the test harness](#playwright-the-published-app-is-the-test-harness)
+7. [Bundled tools](#bundled-tools)
+8. [Hooks](#hooks)
+9. [Reference library](#reference-library)
+10. [Rules the skill will not bend](#rules-the-skill-will-not-bend)
+11. [Evaluation](#evaluation)
+12. [Limits of this version](#limits-of-this-version)
+13. [Repository layout](#repository-layout)
+14. [Versioning and changes](#versioning-and-changes)
+15. [Contributing](#contributing)
+16. [License](#license)
+
+## Why this skill exists
+
+Power Platform has an unusual property: **almost every failure is silent.**
+
+| What you see | What actually happened |
+|---|---|
+| `pac solution pack` exits 0 | A component was dropped from the zip |
+| The canvas compile passes | It validated against no data sources at all |
+| The import reports success | It imported whatever zip it was handed, including the wrong one |
+| A flow saves and turns on | It listens to the wrong event, or re-triggers itself on its own write |
+| A button does nothing | One failing step abandoned the rest of the formula without a message |
+| It works in Studio Preview | The published app resolves against a cached copy of your table metadata that no longer matches Dataverse |
+
+A change can compile clean, work in Preview, pass every audit, and do nothing for every user. This
+skill is a working method built from those failures. Every trap it describes comes with its
+**signature**, so a symptom is recognised in minutes instead of days, and every step of shipping
+states **what it proves and what it does not**.
+
+## What you get
+
+| Part | What it is |
+|---|---|
+| **The method** | `SKILL.md`: ten non-negotiables, a ten-step working loop, and a routing table into the references. Loaded whenever a task touches Power Apps, Power Automate, Dataverse or a solution. |
+| **17 references** | Self-contained guides loaded only when a task needs them: canvas shipping, manifest caches, Power Fx and `.pa.yaml`, controls, layout, browser verification, Dataverse, the Web API, security, data migration, flows, audits, project setup and more. |
+| **Three tools** | An artifact inspector, a cloud-flow linter, and a Playwright driver for Studio and the published player. Each proves it can fail with `--selftest`. |
+| **Four hooks** | Claude Code hooks that stop known compile-killers at the moment a file is written, plus a session pre-flight and an end-of-turn audit. |
+| **Templates** | Hook settings, config examples, an example browser scenario, and state, decisions and dependency templates. |
+
+## Install
+
+**Any agent that reads `SKILL.md`** (Claude Code, Codex, Cursor and others):
+
+```bash
+npx skills add KDavidP1987/power-platform-skill
+```
+
+**Claude Code plugin marketplace:**
+
+```text
+/plugin marketplace add KDavidP1987/power-platform-skill
+/plugin install power-platform@power-platform-skill
+```
+
+**Manually:** copy `skills/power-platform/` to `~/.claude/skills/power-platform/`, or to the
+equivalent skills folder for your agent.
+
+### Requirements
+
+The method and references need nothing installed. The tools need:
+
+| Need | For | Notes |
+|---|---|---|
+| **Node 20+** | Hooks, flow linter, browser driver | No npm dependencies for the hooks or the linter |
+| **Python 3** | `inspect-artifact.py` | Standard library only |
+| **Power Platform CLI** (`pac`) | Packing, importing, environment checks | `pac org who` is part of every pre-flight |
+| **Playwright** (optional) | Browser verification | `npm i -D playwright`; drives the Chrome or Edge you already have. See [below](#if-playwright-is-not-installed) |
+| **Playwright MCP server** (optional) | Interactive browser investigation | Used when present; not required |
+
+## Quick start
+
+1. **Install the skill** (above) and open your Power Platform repository in your agent.
+2. **Ask for real work.** The skill loads on its own for Power Platform tasks, for example:
+   - *"The Save button works in Studio but does nothing in the published app. Why?"*
+   - *"Add a vendor picker to `src/Screens/scrOrders.pa.yaml` over a 3,500-row Dataverse table."*
+   - *"Write the solution flow JSON that locks a request row after it is submitted."*
+   - *"Set up this repo for canvas app and Dataverse work: layout, hooks, ship checks."*
+3. **Wire the hooks** (optional, recommended). Copy `skills/power-platform/scripts/hooks/` to
+   `.claude/hooks/` and merge `assets/settings.snippet.json` into `.claude/settings.json`.
+4. **Describe your app once** for the browser driver. Copy
+   `assets/canvas-app.example.json` to `scripts/canvas-app.json` and fill in the environment id, app
+   id and app name. Nothing about your app is ever written into the tools themselves.
+5. **Verify in the product.** After a change ships, have the agent run a scenario against the
+   published app (`canvas-browser.mjs walk`), as the role that will use it, and confirm the effect
+   in Dataverse.
+
+## The working loop
+
+Every non-trivial change moves through the same cycle. Each step proves one thing, and skipping one
+is how a change reaches users unproven.
+
+| # | Step | What it proves |
+|---|---|---|
+| 1 | **Pre-flight**: branch, clean tree, `pac org who`, read the state file | You are changing the right thing in the right environment |
+| 2 | **Specify**: who uses it, what proves it, what it touches | There is a test before there is a change |
+| 3 | **Build in source**: `.pa.yaml`, solution XML, flow JSON; hooks check each write | The known compile-killers are absent |
+| 4 | **Audit**: a stale input is unverified, not a pass | Project rules hold on current inputs |
+| 5 | **Compile against a live Studio session**, and read the first line of the result | Formulas bind to real data sources |
+| 6 | **Build on the live manifest and assert on the artifact** | The zip contains every component and marker you changed |
+| 7 | **Import, then confirm what landed**: `LoadFromYaml`, markers in the half that runs, data-source count | The environment runs what you built |
+| 8 | **Perform the task in the published app**: fresh build, right role, effect checked in the database, data restored | The feature works for the person who uses it |
+| 9 | **Document in the same change** | The next session starts from the truth |
+| 10 | **Refresh the audit inputs** | The next audit describes the app that now exists |
+
+The full table of what each step does *not* prove, and the two ship paths (solution import and
+co-authoring push), are in [`references/canvas-shipping.md`](skills/power-platform/references/canvas-shipping.md).
+
+## Playwright: the published app is the test harness
+
+A canvas app has no test framework. Opening Studio, adding a data source, capturing a network trace
+and running the app all used to be "needs a person". All of them are browser work, and a browser
+can be driven. Verifying in the published app is the standard here, not a fallback.
+
+### Two ways to drive the browser
+
+| | Playwright MCP tools | Bundled `canvas-browser.mjs` |
+|---|---|---|
+| **Best for** | Looking: an investigation, a one-off check, finding a selector | Anything repeatable: post-ship verification, regression scenarios, sweeps |
+| **Form** | Step-by-step tool calls in the session | JSON scenarios, reviewable and re-runnable |
+| **Needs** | The MCP server attached to the session | `npm i -D playwright` in the repo |
+| **When the other is missing** | | Works when the MCP server did not attach, which happens |
+
+### What the skill asks the agent to do
+
+- **Prefer the published player to Studio Preview.** Preview runs live metadata; users run the
+  published app and its cached copy.
+- **Clear the stale player first.** The player serves a cached build from IndexedDB behind a
+  late-arriving banner; `play --fresh` and `walk --fresh` clear it and the scenario asserts the
+  build stamp.
+- **Perform the task as the role that uses it.** An admin session proves nothing about a
+  restriction. If only an admin account is available, the result is reported as unverified.
+- **Confirm the effect where it lands.** Read the row back through the Web API, not the screen that
+  wrote it.
+- **Restore what it wrote.** A scenario that writes must declare `"writes": true` and a `"restore"`;
+  the driver refuses to run it without `--allow-writes`.
+
+### If Playwright is not installed
+
+The skill never installs anything silently. When neither the MCP tools nor the Playwright library
+is available, the agent:
+
+1. **Says so:** the change is **unverified**, not passed.
+2. **Asks before installing**, offering the lightest option first:
+
+   ```bash
+   npm i -D playwright                 # drives the Chrome or Edge already on the machine
+   npx playwright install chromium     # only if neither is installed; then use --channel chromium
+   claude mcp add playwright -- npx @playwright/mcp@latest   # optional: interactive browser tools
+   ```
+
+3. **Keeps going with what needs no browser:** scenario `lint`, every `--selftest`,
+   `inspect-artifact.py` on the solution or `.msapp`, the flow linter and the hooks.
+4. **Hands over the manual check:** the exact steps to perform in the published app and the Web API
+   query that confirms the effect.
+
+The driver itself loads Playwright lazily, so `lint` and `--selftest` run without it. When a
+browser command cannot run it prints the install options above and exits with code **8**: nothing
+was verified. Use `--channel chrome`, `msedge` or `chromium` to choose the browser.
+
+### A scenario
+
+```json
+{
+  "name": "approve-request",
+  "build": "Build 2026-01-01 12:00 abc1234",
+  "steps": [
+    { "click": "Approvals", "settle": 5000 },
+    { "type": "REQ-0042", "into": "Search" },
+    { "click": "Open", "nth": 0 },
+    { "type": "Missing cost centre", "into": "Reason" },
+    { "click": "Deny", "settle": 6000 },
+    { "expect": "Denied" },
+    { "deadclick": "request-detail" }
+  ]
+}
+```
+
+The driver knows what makes naive automation lie:
+- The app lives in an iframe.
+- A TextInput commits on blur, so typed text is not entered until focus leaves.
+- A DropDown has no accessible name.
+- A gallery keeps every row in the DOM.
+- Studio's Save must be clicked, not keyed, and is proved by the "Saved:" time moving.
+- Studio must be left through Back, or the edit lock is stranded.
+
+## Bundled tools
+
+All tools live in `skills/power-platform/scripts/`. Every checker carries a `--selftest` that
+proves it goes red on a known-bad input, and CI runs them on every push.
+
+### `canvas-browser.mjs`: Playwright driver
+
+| Command | Does |
+|---|---|
+| `login` / `check` | Sign in once (headed, MFA included) / confirm the saved profile is still signed in |
+| `play [--fresh]` | Open the published app, capture it, and report console errors |
+| `walk <scenario.json> [--fresh] [--trace]` | Perform a task and assert the result |
+| `studio` / `keys` | Open Studio in edit mode and hold it / reattach and send keys |
+| `save` / `publish [--reload-first]` / `close-studio` | Save with proof, publish, and leave through Back to free the lock |
+| `shot <url> <name>` | Screenshot plus accessibility dump of any page |
+| `lint <scenario.json>` | Check a scenario's verbs without a browser |
+
+Scenario verbs: `click`, `type`, `select`, `fillCell`, `expect`, `absent`, `scroll`, `clipcheck`,
+`deadclick`, `overlapcheck`, `measurefont`, `capture`. `--trace` records which tables each `$batch`
+touched, and the failures hidden inside a 200 response.
+
+### `inspect-artifact.py`: what a solution zip or `.msapp` really contains
+
+Root components against built metadata, security roles, workflows, `LoadFromYaml`, the build
+stamp, data-source counts, `DatabaseReferences` against `DataSources.json`, and markers searched
+in the half of the app that runs. Exit codes: `0` as expected, `1` a check failed, `2` the
+artifact could not be read.
+
+### `lint-flows.mjs`: static checks on cloud-flow definitions
+
+| Check | Catches |
+|---|---|
+| `runtime-invoker` | A non-app trigger running connections as the invoker |
+| `trigger-message-mismatch` | The SDK message code does not match the event described |
+| `self-trigger-loop` | A flow writing its own trigger table without a sentinel guard |
+| `apostrophe-in-literal` | An apostrophe that ends an expression string early |
+| `not-on-runafter-path` | A reference to an action that may not have run |
+| `send-after-failed` | A notification chained to run after another one failed |
+| `at-property-name` | A single `@` property name the runtime reads as an expression |
+| `multiple-triggers` | More than one trigger in one definition |
+| `date-only-as-instant` | A date-only column used as a point in time (`--date-only`) |
+| `unknown-entity-set` | An entity set name that does not exist (`--entity-sets`) |
+| cross-flow cycles | Flows that trigger each other through shared tables |
+
+Exit codes: `0` clean, `1` findings, `2` no flow definitions found, which is not a pass.
+Activation is still the only real compile: turn each flow on once before trusting it.
+
+## Hooks
+
+Copy `skills/power-platform/scripts/hooks/` to `.claude/hooks/` and merge
+`assets/settings.snippet.json` into `.claude/settings.json`.
+
+| Hook | Event | Does |
+|---|---|---|
+| `preflight.mjs` | SessionStart | Git state, `pac org who`, the top of `docs/STATE.md`, the ship loop in one line |
+| `check-pa-yaml.mjs` | PostToolUse | Colon-space in single-line Power Fx, YAML comments, `Tooltip` on a modern Button, shallow block-scalar lines, the file ceiling: faults that fail a whole-app compile |
+| `check-standards.mjs` | PostToolUse | Optional, configurable output standards (by default emoji and purple accents, Power Fx `RGBA` included) |
+| `audit-stop.mjs` | Stop | Repo-wide standards, leftover debug markers, file ceiling, bookkeeping reminders; blocks once, never loops |
+
+Hooks flag only what is known to break, never style: a hook that fires on style gets switched off.
+Configure them with `.claude/hooks/standards.config.json` (example in `assets/`).
+
+## Reference library
+
+`SKILL.md` routes each task to one reference. Each is self-contained.
+
+| Area | Reference | Covers |
+|---|---|---|
+| Canvas | [`canvas-shipping`](skills/power-platform/references/canvas-shipping.md) | The ship loop and what each step proves; solution import vs co-authoring push; build stamps; `LoadFromYaml`; Save vs Publish |
+| | [`authoring-sessions`](skills/power-platform/references/authoring-sessions.md) | Studio edit locks, the authoring MCP server, what a live session can and cannot prove |
+| | [`manifest-caches`](skills/power-platform/references/manifest-caches.md) | Why the published app disagrees with Dataverse: cached choice members, column types, entity set names, column lists |
+| | [`power-fx-and-pa-yaml`](skills/power-platform/references/power-fx-and-pa-yaml.md) | Silent formula abandonment, `App.OnStart` races, choice and Yes/No types, delegation and the row limit, `.pa.yaml` syntax that fails the compile |
+| | [`canvas-controls-and-patterns`](skills/power-platform/references/canvas-controls-and-patterns.md) | TextInput, ComboBox, DropDown, gallery and timer behaviour; read models; save handlers, concurrency and partial failure |
+| | [`canvas-layout`](skills/power-platform/references/canvas-layout.md) | Measured text width, wrap and clipping, galleries, z-order, unclickable controls, geometry audits |
+| | [`browser-verification`](skills/power-platform/references/browser-verification.md) | Playwright against Studio and the player, the stale player cache, proving a save or publish, scenario design, negative tests |
+| Dataverse | [`dataverse`](skills/power-platform/references/dataverse.md) | Solution shape, asserting on the artifact, schema hygiene, attribute types, connection references, safe data writes |
+| | [`dataverse-web-api`](skills/power-platform/references/dataverse-web-api.md) | Tokens, names, idempotent provisioning, eventual consistency, choice members, alternate keys, dependency checks, paging |
+| | [`security-and-access`](skills/power-platform/references/security-and-access.md) | Roles kept out of the solution, roles as code, impersonation, sharing, column security, onboarding |
+| | [`data-migration`](skills/power-platform/references/data-migration.md) | Profiling, crosswalk keys, spreadsheet loads, backfills on watched tables, read models, cut-over |
+| | [`model-driven-and-docs`](skills/power-platform/references/model-driven-and-docs.md) | Model-driven forms by script, guides generated from the running product, licensing as a dependency |
+| Power Automate | [`power-automate`](skills/power-platform/references/power-automate.md) | Solution flow JSON, `runtimeSource`, SDK message codes, trigger loops and sentinel guards, activation as the only compile, notification safety |
+| Process | [`audits`](skills/power-platform/references/audits.md) | Proving a check can fail, floors against vacuous passes, stale-input detection, the audits worth having |
+| | [`project-setup`](skills/power-platform/references/project-setup.md) | Repository layout, bootstrapping with `pac`, hooks, continuity documents |
+| | [`shared-environments`](skills/power-platform/references/shared-environments.md) | Several apps in one environment: ownership, shared tables, change protocol |
+| | [`tooling-and-auth`](skills/power-platform/references/tooling-and-auth.md) | `pac`, tokens, the TDS endpoint, MCP servers, Windows and PowerShell traps |
+
+## Rules the skill will not bend
+
+- **The repo is the source of truth.** Studio is never the last place a change was made.
+- **Assert on the finished artifact, never on an exit code.**
+- **Verify by performing the task in the published app, as the role that uses it.** An admin
+  session proves nothing about a restriction; the skill says "unverified" rather than imply it.
+- **Verify the effect where it lands:** in the table, not on the screen that wrote it.
+- **Schema before screens, and never in one step.**
+- **Security roles stay out of the solution.**
+- **A flow that writes its own trigger table guards on a value that write changes.**
+- **Before any bulk write, count the messages and park the sender.**
+- **An audit that can pass vacuously will:** floors, self-tests, stale-input detection.
+
+## Evaluation
+
+The skill was evaluated the way skills should be: the same model, the same prompt, run once with
+the skill and once without, graded against checks written before the runs.
+
+| Test | With the skill | Without |
+|---|---|---|
+| A Submit button that does nothing after a three-part release | **8/8** | 1/8 |
+| A cloud flow that writes to its own trigger table | **9/9** | 7/9 |
+| A Playwright check of an approval in the published app | **8/8** | 4/8 |
+| Search and a 3,500-row picker in a `.pa.yaml` screen | **7/7** | 2/7 |
+| **Total** | **32/32 (100%)** | **14/32 (44%)** |
+
+Triggering was tested separately on 20 requests, half of them near misses such as Power BI DAX,
+Dynamics 365 C# plug-ins, Power Automate Desktop and Logic Apps. The shipped description was right
+on 8 of 8 held-out requests, with no false triggers in any round.
+
+The cost is real: about 1.8 times the tokens and about a minute more per task, spent reading the
+references. Each configuration ran once, and nothing ran against a live tenant. The
+[full evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+([source](docs/evaluation.html)) shows every check and the limits of the measurement.
+
+## Limits of this version
+
+- **The ship pipeline is described, not shipped as a script.** Live-manifest build, cache
+  reconciliation and stamping depend on each project's layout and are short to write from the
+  reference. `inspect-artifact.py` is the assertion half of it.
+- **`lint-flows.mjs` is a floor.** It detects guard columns by name tokens in conditions, so an
+  unusual guard shape can be missed or misread. Activation is still the only compile.
+- **Browser selectors track today's player and Studio.** Microsoft changes both. The driver fails
+  loudly, with a screenshot and an accessibility snapshot, rather than passing when a selector
+  stops matching.
+- **Model-driven apps, Power Pages, Copilot Studio and Power BI** are outside the method, apart
+  from model-driven forms edited by script.
+
+## Repository layout
+
+```text
+.claude-plugin/                 plugin and marketplace manifests
+.github/workflows/validate.yml  CI: validator, manifests, versions, every self-test
+docs/evaluation.html            the evaluation report (served by GitHub Pages)
+scripts/                        repo validator and its version-agreement tests
+skills/power-platform/
+  SKILL.md                      the method, the non-negotiables, where to look
+  references/                   17 self-contained guides (see Reference library)
+  scripts/canvas-browser.mjs    Playwright driver and scenario runner
+  scripts/inspect-artifact.py   what a solution zip or .msapp really contains
+  scripts/lint-flows.mjs        static checks on cloud-flow definitions
+  scripts/hooks/                preflight, check-pa-yaml, check-standards, audit-stop, lib
+  assets/                       hook wiring, config examples, scenario example, doc templates
+  tests/prompts.md              should-trigger and should-not-trigger prompts
+CHANGELOG.md                    every change, newest first
+```
+
+## Versioning and changes
+
+Releases follow [Semantic Versioning](https://semver.org). Every change is recorded in
+[CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` first, then moved under a version heading on
+release. The plugin version lives in `.claude-plugin/plugin.json`; the marketplace entry,
+`package.json`, this README's badge and version line, and the newest changelog heading must all
+agree with it. To release, bump them together and run:
+
+```bash
+npm run validate
+node scripts/validate-skills.mjs --check-versions
+node scripts/tests/check-versions.test.mjs
+```
+
+CI runs the same checks plus every bundled tool's `--selftest`, and fails if any version disagrees.
+
+## Contributing
+
+Issues and pull requests are welcome. The most useful contributions are **traps with signatures**:
+a Power Platform failure, the symptom it shows, the cause, and the shortest test that proves it.
+Please keep examples generic (no tenant, company or person identifiers), add a `--selftest` case
+for any new checker rule, and record the change under `[Unreleased]` in the changelog.
+
+## License
+
+[MIT](LICENSE) © SkillEra IO, LLC.
+
+---
+
+An [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io).

@@ -1,0 +1,379 @@
+# Setting up a Power Platform repository
+
+## Contents
+
+1. Layout
+2. Bootstrapping
+3. First session for a new canvas app
+4. The hooks
+5. Continuity documents
+6. Trackers that cannot drift
+7. Issue and PR templates, and the dependency register
+8. Branches, commits and CI
+9. Shipping without pipeline rights, and going live
+10. Several apps sharing one environment
+11. Keeping the method current
+
+## 1. Layout
+
+```
+<project>/
+  CLAUDE.md                       project guide: app identity, environments, links to docs
+  README.md  CHANGELOG.md  CONTRIBUTING.md
+  .claude/
+    settings.json                 hook wiring (assets/settings.snippet.json)
+    hooks/                        check-pa-yaml.mjs, check-standards.mjs, audit-stop.mjs, preflight.mjs
+  canvas/<app>/Src/*.pa.yaml      canvas source (the app)
+  solution/src/                   pac solution unpack output (tables, choices, flows, conn refs)
+  scripts/
+    canvas-app.json               the app's identity, read by every tool (assets/canvas-app.example.json)
+    pack.ps1 / import.ps1         plain pack + guarded import (refuses a stale default)
+    ship-canvas.(py|ps1)          live-manifest build, reconcile, stamp, assert, import
+    audit-all.(py|mjs)            the audit runner (OK / FINDINGS / STALE / SKIPPED)
+    dv-query.ps1                  read-only Web API window, resolves entity set names
+    entity-specs/*.json           one spec per table, with _why_* keys recording intent
+    seed/                         idempotent loaders + CSVs + a README of their conventions
+    migrate/NNN-*.ps1             numbered, idempotent, dry-run-by-default migrations
+    browser/
+      canvas-browser.mjs          (copied from this skill)
+      scenarios/*.json            repeatable verifications, named by the task they prove
+  docs/
+    STATE.md                      current state, next up, pending user actions - read first
+    decisions.md                  numbered: what was decided and why
+    dependencies.md               components, integrations, who depends on what
+    data-model.md  security-roles.md  deployment.md
+  out/                            build artifacts, reports, captures (gitignored)
+  scratchpad/                     downloads, syncs, captures (gitignored)
+```
+
+`.gitignore` must cover `out/`, `scratchpad/`, `node_modules/`, token caches and any browser
+profile. Never commit tokens, connection strings, or a browser profile (it holds live session
+cookies). Also keep out of git: roster and payroll extracts, source workbooks, pre-purge JSON
+backups, and generated documents and reports - screenshots and reports carry colleagues' names.
+Record the ignored paths in the document that produces them, so nobody "fixes" the ignore.
+
+Two generated-artifact rules:
+
+- **Do not commit the `.msapp`.** It changes on every ship, a committed copy must be re-synced by
+  hand, and a lagging copy ships an old app with nothing to say so. Commit `Src/`, the stable
+  sidecars and the `<CanvasApps>` block; the packer rebuilds the `.msapp` every time.
+- **Never write build products into `solution/src`.** The packer copies the tree to a staging folder
+  and injects the fresh `.msapp` there; a generated file written into source gets committed by the
+  next `git add -A`.
+
+**A change that needs schema and UI ships as a numbered script pair.** `migrate/NN-add-x.ps1` writes
+the schema (dry-run by default, `-Apply` to write) and prints the manual Studio step that must follow
+and why; `migrate/NN-stage-x-ui.py` edits the canvas source and refuses to run until the schema step
+has. Every script header states what it creates, why this shape, what it deliberately does not do,
+the manual-step order and the impact on any shared schema, and the script closes by printing an
+honest count of what it changed. The schema half and the canvas half often ship on different days;
+the pair and its header are what let the second half be picked up cold.
+
+`scripts/canvas-app.json` holds everything a tool needs to find the app: environment id, **app
+id**, app display name, app logical name, solution id and unique name, and the sign-in hint. Label
+the app id clearly - the id in a downloaded app's `Properties.json` is the *document* id, a
+different GUID, and `pac canvas download` given it downloads nothing with an error that does not
+say why.
+
+## 2. Bootstrapping
+
+```
+git init -b main
+pac auth create --environment <url>          # then: pac org who
+pac solution export --name <Solution> --path out/probe.zip
+pac solution unpack --zipfile out/probe.zip --folder solution/src --packagetype Unmanaged --allowDelete true
+pac canvas download --name <app id GUID> --file-name out/live.msapp
+pac canvas unpack --msapp out/live.msapp --sources canvas/<app>     # or extract Src/ from the msapp
+npm i -D playwright
+node scripts/browser/canvas-browser.mjs login
+```
+
+Then copy the hooks from this skill's `scripts/hooks/` into `.claude/hooks/`, merge
+`assets/settings.snippet.json` into `.claude/settings.json`, and run each hook once by hand to see
+it pass on a clean tree and fail on a seeded fault. Templates for the continuity documents are in
+`assets/templates/`.
+
+Bootstrap traps:
+
+- **`pac canvas download --name` wants the app id GUID.** Given the logical name it answers "No
+  canvas apps in the selected environment", which reads like a deleted app; a display name can
+  resolve to the wrong app when names repeat.
+- **`pac canvas unpack` refuses old packages** ("MSAppStructureVersion 2.0 is below the minimum
+  supported version 2.4.0"). To bring such an app into git, open and re-save it in current Studio.
+  To read a legacy app only as a specification, unzip the `.msapp` and read the JSON - it is not
+  corrupt.
+- **`--allowDelete true` on unpack** when syncing, or components removed live stay in
+  `solution/src` forever.
+- **A managed zip cannot be packed from an unmanaged unpack** ("Solution package type did not match
+  requested type"). Either export the managed build from the environment (`pac solution export
+  --managed true`), or unpack with `--packagetype Both` so the tree can produce either (general pac
+  behaviour, not exercised in the projects behind this skill).
+- **`pac canvas validate` is retired**, and `pac canvas pack` may refuse an app "until validated by
+  opening it for edit in Studio". There is no headless compile: a live Studio session is the only
+  formula validator, so a stranded edit lock means stop shipping canvas, not ship unverified.
+
+**Measure the environment before planning on beliefs about it.** Notes said legacy tables lived in
+another environment; they were in the same one, with production data. Lists slated for migration
+were already virtual tables, and a planned table already existed. Inventory live tables, columns and
+solutions before proposing schema, snapshot live schema to JSON, and let the measured section of an
+assessment supersede sections written from repos and exports.
+
+**State the real ALM direction honestly.** In one project tables were authored in a JSON manifest and
+applied to live by script, and `solution/src` held no entity definitions until a sync pulled them
+back. Write down "`solution/src` is a mirror of live" rather than claim offline-first, run the sync
+after every schema change, and record that the repo cannot yet rebuild the environment.
+
+Source control for neighbouring platforms, when a repo grows a reporting layer: save Power BI as
+PBIP (report JSON, model as TMDL - diffable), parameterise connections per stage, and record RLS,
+refresh and gateway configuration in the dependency register. For Excel, version the logic (Office
+Scripts `.ts`, Power Query `.m`, exported VBA) rather than the binary workbook.
+
+## 3. First session for a new canvas app
+
+pac and `.pa.yaml` can edit and ship an app but cannot create one. Do this once, in Studio, before
+the first screen:
+
+1. **Create the app in Studio with the form factor the layout assumes** (for example tablet
+   1366x768). Absolute layout does not reflow; state the supported size in the app's guide.
+2. **Save it into the solution**, not as a loose app. An app created outside a solution has no row in
+   the `canvasapps` table, cannot be a solution component, cannot use the unattended import path,
+   does not travel to another environment, and has nowhere to carry a build stamp. Moving it into a
+   solution once it is live is an owner decision; decide it at project start. Query `canvasapps`
+   before planning a ship path.
+3. **Record its id** in `scripts/canvas-app.json`.
+4. **Turn on modern controls** (Settings > Updates or Display). The manifest reads
+   `fluentv9controls: false` when off, and every modern control name then fails to bind. Turning it
+   on changes default properties: free on a blank app, a re-style after ten screens. Check this flag
+   in a downloaded `.msapp` before following any guide that prescribes modern controls.
+5. **Turn on collaborative editing** (Settings > Updates > Preview) if you will use the co-authoring
+   path. `connect` fails with "Coauthoring is not enabled for this app" until it is on **and** the
+   app has been saved and reopened. Several settings take effect only after save, close and reopen;
+   re-check this one after toggling others. There is no API for it.
+6. **Publish**, then confirm from a fresh download. Studio settings (a raised row limit, an added
+   data source) are saved-but-unpublished until you do.
+
+## 4. The hooks
+
+| Hook | Event | Does |
+|---|---|---|
+| `preflight.mjs` | SessionStart | Prints branch and dirty state, unpushed commits, `pac org who`, and the top of `docs/STATE.md`. Never blocks. |
+| `check-pa-yaml.mjs` | PostToolUse Write/Edit | On `.pa.yaml` only: colon-space in a single-line Power Fx value, YAML comments, `Tooltip` on a modern Button, file-count ceiling, block-scalar continuation indented shallower than its block. Exit 2 feeds the problem back so it is fixed in the same turn. |
+| `check-standards.mjs` | PostToolUse Write/Edit | Optional, configurable output standards (by default: no emoji, no purple/violet accent colours in UI and docs). Turn off or edit `standards.config.json` to taste. |
+| `audit-stop.mjs` | Stop | Repo-wide standards scan, leftover debug markers, file ceiling, and bookkeeping reminders (solution changed without the dependency register or state file; commits today without a changelog entry). Blocks once on findings, never loops. |
+
+Keep hooks **narrow**: only things known to break, never style. Exempt a line with a
+`standards-ignore` marker in a comment.
+
+Wiring rules that decide whether a hook runs at all:
+
+- **Anchor every hook command on `$CLAUDE_PROJECT_DIR`.** `node .claude/hooks/x.mjs` resolves
+  against the current directory; once a session works from a subfolder (a compile leaves the shell
+  in `Src`), the hook silently stops running, which is indistinguishable from a clean result. Use
+  `node "$CLAUDE_PROJECT_DIR/.claude/hooks/x.mjs"`.
+- **Open the project folder, not its parent.** Project hooks and `CLAUDE.md` load from the folder
+  Claude Code was opened in; opening an umbrella folder silently skips every guard.
+- **Every hook is runnable by hand** by piping JSON:
+  `echo '{"tool_input":{"file_path":"canvas/app/Src/Home.pa.yaml"}}' | node .claude/hooks/check-pa-yaml.mjs`.
+- **A SessionStart hook should not shell out to another runtime.** A pre-flight that calls Python
+  gets disabled the first time Python is missing. Report the canvas file count against the ceiling
+  and the age of cached audit inputs with a crude mtime check in the hook's own language; the
+  precise answer is one command away.
+
+Design rules for write-time hooks:
+
+- **Two tiers: BLOCK and NOTE.** Block compile killers and paid-for rules; emit a non-blocking note
+  (`additionalContext`) for real but non-fatal issues - YAML comments existed on 177 lines across 27
+  files in one app, and a rule that blocks every existing file gets switched off. Prove a hook red on
+  a crafted file with one of each fault **and** green on every existing file; the second half
+  decides whether it survives.
+- **A comment line legitimately ends a block scalar.** Section-banner comments written at control
+  indent (`# ---- TAB ----`) end the block just as a key does; treating them as formula
+  continuations blocked every edit to a screen that compiled clean. Skip comment lines and keep
+  scanning.
+- **Graduate the file-ceiling check:** a note from about 25 files, block from 45, refuse over 50, so
+  growth is a conversation long before it is a crisis.
+- **Stop hooks fire every turn**: keep them non-blocking reminders unless a finding is serious, fire
+  only when the project tree changed, and decide "touched X" from added diff lines, not from files
+  that merely mention it.
+
+## 5. Continuity documents
+
+Power Platform work spans sessions, people and environments, and the platform keeps almost no
+history of why. These files are what make the next session start from a known state:
+
+- **`docs/STATE.md`** - a short, current snapshot: what is live (build stamp), what is in flight,
+  what is next, what is waiting on a person (consent for a connection, a non-admin tester). The
+  pre-flight hook prints its top lines. Update it before ending a session. When saved and published
+  diverge (a push saved but not published), say so in a banner at the top.
+- **`docs/decisions.md`** - numbered decisions with the reason. "Why is this a full-screen overlay
+  instead of a screen?" should have an answer (the file ceiling). When a later measurement changes a
+  decision, amend it in place with the re-measurement rather than deleting it - one ship path was
+  retired on a correct measurement and re-adopted days later when the same instrument said otherwise.
+- **`docs/dependencies.md`** - every table, flow, connection reference, shared component and
+  external integration, and what depends on it. Consult before a change; update with it (section 7).
+- **`CHANGELOG.md`** - dated, plain-English entries; it doubles as the raw material for status
+  reports.
+- **A risks file** when something is known and unresolved ("nothing in the app has been verified
+  by a non-admin").
+- **A human-steps runbook** in dependency order: every step only a person can do (interactive
+  sign-in, connection consent, creating the app, Studio-only settings, licences, decisions), each
+  numbered, marked person or agent, saying what it unblocks, ending with a "blocked on right now"
+  table. These items carry forward into every report until done.
+- **A feedback triage file.** Put all tester feedback in one place, label each diagnosis CONFIRMED
+  (checked against live data or source in the same session) or UNVERIFIED, and look for common
+  causes first - 24 items once resolved to three root causes, and five findings explained thirteen
+  of twenty-two in a demo. Reported "duplicates" were two people sharing a name; "copy is broken" was
+  a reused, wrong message. Fix data before testing behaviour that depends on it.
+- **A data-completeness note before every test round**: null vs zero and populated counts per
+  column, and which features are correct but will show nothing yet, so testers do not file empty
+  tables as bugs. A gate nobody has ever exercised is untested by construction - say so.
+
+Update these **in the same change** as the work. The stop hook reminds you. When quoting Power Fx
+in a markdown table, escape the pipes (`\|\|`) or move the formula out of the table: an unescaped
+`||` splits the row into extra cells and the table renders broken.
+
+**Record what a theory is NOT.** Incidents in these projects followed one pattern: every theory was
+plausible and wrong, every measurement decisive and cheap. A stale-cache explanation was asserted
+twice and wrong both times. Write eliminated causes into the commit message or the decision with the
+measurement that eliminated them, leave a root cause "not proven" with the next instrument named
+rather than closing on a guess, and record a correlation as a correlation. When a theory is
+disproved, retire it completely: roll back the change it motivated, delete any check written to
+enforce it, and rewrite any standard that repeated it.
+
+## 6. Trackers that cannot drift
+
+Trackers drift, and a stale tracker does real damage: one register said twenty-odd items were open
+when four were; another listed four items "not started" that were built; an autonomous loop acted on
+a stale "next" list and redid shipped work.
+
+- **One line per item, a stable never-reused id**, separate id series for build work and human-only
+  work (numbered to match the runbook steps). Owner tags (agent / human / both). Statuses Open / In
+  progress / Blocked / Done / Dropped; every Blocked line names its blocker. Closed items record the
+  evidence (what was performed, where).
+- **The checkbox is the record.** Twice in one day a hand-written "DONE: ..." summary sat above
+  checkboxes nobody ticked: 15 items read open when 12 had shipped, and one line naming four
+  deliverables (three built) made an unstarted phase read nearly done. A summary may restate the
+  checkboxes, never replace them. Split an item that names several deliverables. Keep exactly one
+  "resume here" marker.
+- **Name one file as the status authority** and reconcile the others against it before any report;
+  recompute status from the items at session close. A status line in the project guide that outlives
+  its subject is the same defect - correct it in the change that makes it false.
+- **Verify queued work against the environment before starting it.** Check the done-log and the live
+  app first; make "next" sections pointers into the tracker, not copies of it.
+- **The count in a done-note is a claim.** "All 9 converted" was the number converted, not the
+  number that existed (12). Enumerate mechanically (every control matching a pattern, read its
+  type), not by re-reading a diff.
+- **Measure "feature-complete" against the source** with a coverage table: what the design names,
+  what is built, what is loaded. One such table showed half a project complete and the other half
+  (the half the project was named after) not started, hidden by one stale backlog line.
+- **Check the data before building.** An "only mine" default, a role-permission matrix and a tag
+  filter were all built correctly and inert, because the ownership columns and roster were nearly
+  empty. A live count before building changes what the item is; record the data load that releases
+  it. Equally, before dropping designed work as unused, check whether the *function* moved - a list
+  named for a process was empty because the process lived in a different list.
+
+When several repos are worked together, keep one umbrella backlog beside the per-project state
+files: per project, newest first, the work performed in each session and what remains, with pointers
+into the project's own tracker. It is what a new session reads to pick up multi-repo work.
+
+## 7. Issue and PR templates, and the dependency register
+
+Three issue templates have worked across projects:
+
+- **Component**: type, module, proposed logical name, purpose, draft definition, depends-on and
+  depended-on-by; acceptance: packs cleanly, spec written, register updated.
+- **Change request**: current vs desired behaviour, impact analysis copied from the dependency
+  register; acceptance: dependent forms, views, flows, roles and reports verified.
+- **Bug report**: steps, expected, actual, environment, affected component, suspected dependencies.
+
+The PR template's checklist: dependency register updated for any table, relationship or flow
+change; solution version bumped if this ships to a shared environment; verification performed in
+the running product (imported and exercised, not "it packs"). A per-component spec file
+(`docs/components/<name>.md`) mirrors its dependencies into the register.
+
+The dependency register (`assets/templates/dependencies.md`) earns its keep through sections that
+are easy to omit:
+
+- data sources and connections, with the auth source and the **connection owner** (never the
+  values) - a person's connection is a single point of failure;
+- automations, with the tables, columns and literal names each reads (a FetchXML `link-entity`
+  chain or a flow keyed on a row's display name breaks at run time when another team renames it);
+- external integrations: direction, mechanism, owner - including Power BI hand-off links, which
+  address a workspace and report by id and break silently when the workspace moves;
+- model-driven forms and views, which block column deletes and are a write path that bypasses canvas
+  gates (`model-driven-and-docs.md`);
+- a change-impact checklist to walk on any shared change: UI that shows or edits it;
+  views, queries, filters and measures; automations that read or write it; calculated logic; access
+  and permissions; downstream reports and exports.
+
+Generate the parts that can be generated (the flow table, from the flow definitions, with a
+`--check` mode in the audit suite) - a hand-written flow table once listed six invented flows while
+eleven real ones ran.
+
+## 8. Branches, commits and CI
+
+- **Push early.** A long branch with dozens of commits existed on one machine only. Push at least at
+  each session close.
+- **Push history with git, not a file API.** An initial upload through a GitHub API or MCP file push
+  creates remote commits that share no history with the local repo, so the next `git push` is
+  rejected. If it has happened: push the working branch, merge the stale remote root with
+  `git merge -s ours --allow-unrelated-histories`, then fast-forward - no force push needed.
+  An equally valid recovery: `git reset --soft origin/<branch>` moves the branch pointer onto the
+  remote while keeping your working tree; commit the staged difference and push normally. It
+  collapses the local commits into one, so use it when that local history need not be kept.
+- **Commit messages carry the evidence**: what was performed to verify, which causes were
+  eliminated, and the shipped/unshipped boundary when a session ends mid-ship.
+- **Scripted bulk edits assert their occurrence counts** before applying, and assert what they must
+  not match; restore from git and re-run a broken scripted edit rather than patching forward.
+- **Port a cross-project fix as a commit in each sibling repo**, with that repo's own fixture, rather
+  than as an action item in a shared log - the log then records what happened, not what someone
+  still has to do.
+- **Bump the solution version on every delivery.** Building from an environment export carries the
+  live version forward, so a good and a broken build become indistinguishable by version.
+- **CI packs the solution on every pull request**: cheap proof the unpacked source still builds.
+  Fail on pac's silent-skip warnings ("unexpected children", "root components are not defined in
+  customizations"). The generic installer action did not reliably put `pac` on PATH ("command not
+  found"); the pack-solution wrapper action did. `pac solution check` is the cloud Solution Checker
+  step.
+- **Environment values**: commit connection reference and environment variable definitions, and
+  supply values at import with a settings file from `pac solution create-settings`.
+
+## 9. Shipping without pipeline rights, and going live
+
+A maker who holds System Customizer on the target environment but no pipeline or tenant rights can
+still ship: build the zip from git, self-import it (`pac solution import`, or Solutions > Import),
+or hand the zip to IT for higher environments. Worth stating early, because it decides the ALM
+design for most departmental makers. Bump `<Version>` in `Solution.xml` per release and record it in
+the changelog.
+
+**Cut over at a period boundary; never run two apps on one database.** A replacement app in the same
+environment as the one it replaces is not an isolated parallel run - people enter data in the wrong
+one and neither total is right. Decide in advance whether the old app goes read-only or is retired
+and who tells users, and empty the new period of test data first (backup taken, senders parked).
+
+Licences are a deployment dependency with lead time - see `model-driven-and-docs.md`.
+
+## 10. Several apps sharing one environment
+
+When more than one app lives in an environment and shares reference tables, the shared layer needs
+an owner, a registry, a change protocol and a sync log. That is now its own reference:
+`shared-environments.md`.
+
+## 11. Keeping the method current
+
+Write a lesson down where the next person will look. Apply one test to every lesson: **would another
+project here hit this?** Yes - the shared standards; no - the project's docs; both - the rule in the
+shared standards and the specifics locally, with a link. The absence of that test let two projects
+pay for the same canvas traps twice.
+
+- **Put the shared standards folder under git from day one.** One shared framework sat as plain
+  synced files for five to seven weeks with no history; nothing could show it had gone stale, and a
+  note in it ("canvas is designer-authored") outlived reality. A `.git` written from two machines
+  through a file-sync service can corrupt - give it a remote.
+- **A project's local copy of a shared standard drifts, then contradicts it.** One forked standard
+  predated a "verify in the running product" step added to the shared one, and argued against the
+  portfolio on exactly that point. Mark local copies with their source and the rule "if the two
+  disagree the shared file wins; if the local one is right, fix the shared one", and re-sync them in
+  reviews.
+- **Correct a standard in the same change that makes it false**; a standards file is only worth
+  reading if it is true.

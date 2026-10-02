@@ -1,0 +1,9 @@
+{
+  "_comment": "The canvas app's identity, stated once and read by every tool. Copy to scripts/canvas-app.json.",
+  "environmentId": "00000000-0000-0000-0000-000000000000",
+  "environmentUrl": "https://yourorg.crm.dynamics.com",
+  "appId": "00000000-0000-0000-0000-000000000000",
+  "appName": "Your App Display Name",
+  "solutionUniqueName": "YourSolution",
+  "canvasSrc": "canvas/your-app/Src"
+}

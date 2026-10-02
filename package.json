@@ -1,0 +1,16 @@
+{
+  "name": "power-platform-skill",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Power Platform development the way software is built: canvas apps as .pa.yaml in git, Dataverse solutions and Power Automate flows shipped by solution import, and every change proved by performing the task in the published app with Playwright.",
+  "author": "SkillEra IO, LLC (https://skillera.io)",
+  "type": "module",
+  "scripts": {
+    "validate": "node scripts/validate-skills.mjs",
+    "test": "node scripts/validate-skills.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

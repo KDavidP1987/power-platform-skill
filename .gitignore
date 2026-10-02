@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+
+# Local design-tool working files (not part of the skill)
+PRODUCT.md
+DESIGN.md
+DESIGN.*.json
+.impeccable/

@@ -1,0 +1,32 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Our own checker: frontmatter, name == folder, placeholders, secrets.
+      - run: npm run validate
+      # Anthropic's parser, on the skills and on the manifests.
+      - run: npx -y @anthropic-ai/claude-code plugin validate --strict skills
+      - run: npx -y @anthropic-ai/claude-code plugin validate --strict .
+      # Version agreement between plugin.json, marketplace.json and SKILL.md.
+      - run: node scripts/validate-skills.mjs --check-versions
+      - run: node scripts/tests/check-versions.test.mjs
+      # Every bundled checker must prove it can go red on a known-bad input.
+      - run: node skills/power-platform/scripts/lint-flows.mjs --selftest
+      - run: node skills/power-platform/scripts/hooks/check-pa-yaml.mjs --selftest
+      - run: python skills/power-platform/scripts/inspect-artifact.py --help
+      - run: node --check skills/power-platform/scripts/canvas-browser.mjs
+      - run: node skills/power-platform/scripts/canvas-browser.mjs --selftest
