@@ -25,6 +25,7 @@ This file covers packaging and schema. Three companions carry the rest:
 13. Rules the schema cannot hold
 14. Effective-dated tables
 15. Hand-authoring entity XML
+16. Creating schema with `deploy-tables.py`
 
 ---
 
@@ -539,3 +540,62 @@ many. Keep one spec per table (`scripts/entity-specs/<table>.json`) with keys re
 Many projects find it easier to create schema through the Web API and sync it back into source
 (`dataverse-web-api.md`, section 4). If you do, write down that `solution/src` is a mirror of live,
 run the sync after every schema change, and record that the repo cannot yet rebuild the environment.
+
+## 16. Creating schema with `deploy-tables.py`
+
+The bundled `scripts/deploy-tables.py` is section 4 of `dataverse-web-api.md` as one command. The
+schema lives in the repo as a manifest (`tables.json`; the shape, with every column type, is in
+`assets/tables.example.json`), and the tool makes the environment match it:
+
+```bash
+python scripts/deploy-tables.py --manifest tables.json --org https://<org>.crm.dynamics.com --plan
+python scripts/deploy-tables.py --manifest tables.json --org https://<org>.crm.dynamics.com
+```
+
+**Plan first, every time.** `--plan` issues GET requests only and prints every publisher, solution,
+table, column, choice option and lookup it would create, the shared tables it would turn into
+references, and any conflict. Show the person the plan before the apply. Without `--plan` it runs,
+in order: publisher, solution, tables (the primary name column inside the create), scalar columns,
+appended choice options, lookups once every table exists, `PublishAllXml`, shared tables as
+references, then a read-back. The token comes from `--token-env`, `--token-cmd` or the Azure CLI, as
+for `check-drift.py`, and is never printed. The account needs System Customizer or System
+Administrator.
+
+What it holds to, and why:
+
+- **Additive and idempotent.** It creates what is missing and skips what exists, so a re-run is a
+  no-op and a run that stopped part-way is finished by running it again. It never renames, retypes
+  or deletes (section 4 says why that cannot be done in place anyway). A column that exists with
+  another type, a lookup with another target, or a publisher with another prefix is a **conflict**:
+  the run refuses before writing anything, and the remedy is a change to the manifest.
+- **Choice options are append-only.** Option N of a choice gets the value
+  `optionValuePrefix x 10000 + N`, so a new option goes at the **end** of its list; never reorder or
+  remove options in the manifest. A live label that differs from the manifest is reported, never
+  changed - relabel deliberately (`dataverse-web-api.md`, section 8).
+- **Lookup schema names must be lower case.** The manifest is refused otherwise, because the
+  navigation property takes the schema name's casing (section 11).
+- **Shared tables become references.** A lookup created with the solution header pulls a table
+  owned by another solution into yours with its whole schema (section 8). After the lookups, every
+  table matching the manifest's `sharedTables` patterns, and every lookup target that does not carry
+  the publisher prefix, is removed and added back with `DoNotIncludeSubcomponents`, then checked for
+  `rootcomponentbehavior` 1.
+- **Manifest errors are refused before any call** (exit 2): an unknown type, a name without the
+  prefix, duplicate tables, columns or display names, a column on a reserved `<lookup>name` or
+  `<table>id`, a mixed-case lookup, an empty choice, a `sharedTables` pattern that matches the
+  manifest's own table.
+
+**What a green run proves**, and what it does not. Exit 0 means every table, column (with its type),
+choice option and lookup target in the manifest was read back live after the apply, and every shared
+table in the solution is a reference. Exit 1 names each thing that is missing or wrong. It does not
+prove a canvas app can see the new columns - the app's cached copy must be refreshed
+(`manifest-caches.md`; `check-drift.py` says whether it is stale) - and it does not prove anyone can
+read the tables.
+
+**Security roles are deliberately not in it.** Roles must stay out of the solution (section 5), the
+agent's safety layer correctly refuses to create or assign them, and granting access is a separate,
+reviewed step proved by impersonation. Build them with `ReplacePrivilegesRole` as described in
+`security-and-access.md` (sections 1 to 4), and grant every table the manifest creates.
+
+Not covered by the tool, by design: global choices, alternate keys, many-to-many relationships,
+column security and forms. Create those by script as in `dataverse-web-api.md`, after the tool has
+run.

@@ -11,6 +11,23 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/deploy-tables.py`: Dataverse schema from a JSON manifest in one command - publisher,
+  solution, tables, columns (text, memo, whole number, decimal, currency, yes/no, date, date and
+  time, choice, autonumber, file), lookups and publish, then every shared table a lookup pulled into
+  the solution with its schema turned back into a reference, then a read-back of every table,
+  column, option and lookup that exits 1 if anything is missing. `--plan` prints every change and
+  writes nothing. Idempotent; never renames, retypes or deletes; choice options append-only; lookup
+  schema names must be lower case; manifest errors are refused before any call. Python 3 standard
+  library only, with a self-test against a simulated Web API, run in CI.
+- `assets/tables.example.json`: an example manifest (a small request tracker) using every column
+  type.
+- `references/dataverse.md` section 16: creating schema with the tool, plan first, what a green run
+  proves, and why security roles are not part of it. Pointers from the SKILL.md working loop,
+  `first-run.md` (the agent creates tables itself once the token command works, with System
+  Customizer or System Administrator) and `dataverse-web-api.md` section 4.
+
 ### Changed
 
 - `check-canvas-overlap.mjs` names every control it skipped, with file and line, in the report and

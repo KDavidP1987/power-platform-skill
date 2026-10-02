@@ -99,6 +99,14 @@ the command in the app config as `dataverseTokenCommand` (section 9). The token 
 user profile, never in the repo; treat it as a credential. The agent should use the token only
 through that command and never print it.
 
+**Once the token command works, the agent creates tables itself.** It writes the schema as a
+manifest and runs `scripts/deploy-tables.py --plan` with `--token-cmd`, shows the person the plan,
+then applies it and reads every table, column and option back (`dataverse.md`, section 16). That
+needs **System Customizer or System Administrator** in the environment (section 1), for the plan as
+well as the apply, because a plain user token cannot read all metadata. Without it the tool stops at
+the first refused request with exit 2, never a partial pass. Security roles stay a step the person
+runs (section 10).
+
 ## 6. A browser that signs in by itself
 
 The published app is the test harness, so the browser has to reach it without a person typing a

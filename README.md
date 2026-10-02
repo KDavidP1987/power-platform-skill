@@ -86,7 +86,7 @@ states **what it proves and what it does not**.
 |---|---|
 | **The method** | `SKILL.md`: ten non-negotiables, a ten-step working loop, and a routing table into the references. Loaded whenever a task touches Power Apps, Power Automate, Dataverse or a solution. |
 | **18 references** | Self-contained guides loaded only when a task needs them: canvas shipping, manifest caches, Power Fx and `.pa.yaml`, controls, layout, browser verification, Dataverse, the Web API, security, data migration, flows, CI/CD pipelines, audits, project setup and more. |
-| **Five tools** | A ship pipeline, a metadata drift checker, an artifact inspector, a cloud-flow linter, and a Playwright driver for Studio and the published player. Each proves it can fail with `--selftest`. |
+| **Six tools** | A Dataverse schema deployer, a ship pipeline, a metadata drift checker, an artifact inspector, a cloud-flow linter, and a Playwright driver for Studio and the published player. Each proves it can fail with `--selftest`. |
 | **Four hooks** | Claude Code hooks that stop known compile-killers at the moment a file is written, plus a session pre-flight and an end-of-turn audit. |
 | **Templates** | Hook settings, config examples, an example browser scenario, and state, decisions and dependency templates. |
 
@@ -302,6 +302,25 @@ python check-drift.py out/app.msapp --offline metadata.json                # in 
 ```
 
 Exit codes: `0` clean, `1` drift, `2` could not verify, which is never a pass.
+
+### `deploy-tables.py`: Dataverse schema from a manifest
+
+Creates the publisher, solution, tables, columns, choice options and lookups described in a JSON
+manifest (the shape, with every column type, is in `skills/power-platform/assets/tables.example.json`),
+publishes, turns every table owned by another solution that a lookup pulled in with its schema back
+into a reference, and then reads every table, column, option and lookup back from the environment.
+It only adds: a re-run is a no-op, nothing is renamed, retyped or deleted, choice options are
+append-only, and a column that exists with another type stops the run before any write. A manifest
+error (unknown type, missing prefix, duplicate names, a mixed-case lookup) is refused before any call.
+Security roles are deliberately not part of it.
+
+```bash
+python deploy-tables.py --manifest tables.json --org https://<org>.crm.dynamics.com --plan   # GET only
+python deploy-tables.py --manifest tables.json --org https://<org>.crm.dynamics.com          # apply, then read back
+```
+
+Exit codes: `0` deployed and read back, `1` a conflict or something missing on read-back, `2` a
+manifest error or a run that could not complete, which is never a pass.
 
 ### `inspect-artifact.py`: what a solution zip or `.msapp` really contains
 
@@ -556,6 +575,7 @@ skills/power-platform/
   references/                   19 self-contained guides (see Reference library)
   scripts/ship-canvas.py        the ship pipeline: live baseline, reconcile, stamp, pack, assert
   scripts/check-drift.py        cached app metadata vs live Dataverse, read-only
+  scripts/deploy-tables.py      Dataverse schema from a manifest: plan, apply, references, read-back
   scripts/canvas-browser.mjs    Playwright driver, scenario runner and selector doctor
   scripts/inspect-artifact.py   what a solution zip or .msapp really contains
   scripts/lint-flows.mjs        static checks on cloud-flow definitions

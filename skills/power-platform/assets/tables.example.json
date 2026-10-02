@@ -1,0 +1,60 @@
+{
+  "solution": "abc_requests",
+  "solutionFriendlyName": "Request Tracker",
+  "publisher": {
+    "uniqueName": "abcpublisher",
+    "friendlyName": "ABC Publisher",
+    "prefix": "abc",
+    "optionValuePrefix": 10000
+  },
+  "sharedTables": ["core_*"],
+  "tables": [
+    {
+      "schemaName": "abc_category",
+      "displayName": "Category",
+      "displayCollectionName": "Categories",
+      "description": "A kind of request, used to route it to a team.",
+      "primaryName": { "schemaName": "abc_name", "displayName": "Name", "maxLength": 100 },
+      "columns": [
+        { "schemaName": "abc_code", "displayName": "Code", "type": "string", "maxLength": 10 },
+        { "schemaName": "abc_active", "displayName": "Active", "type": "boolean" }
+      ]
+    },
+    {
+      "schemaName": "abc_request",
+      "displayName": "Request",
+      "displayCollectionName": "Requests",
+      "description": "Something a person asked for, from submission to closure.",
+      "ownership": "user",
+      "hasNotes": true,
+      "primaryName": { "schemaName": "abc_title", "displayName": "Title", "maxLength": 200 },
+      "columns": [
+        { "schemaName": "abc_number", "displayName": "Number", "type": "autonumber", "format": "REQ-{SEQNUM:5}" },
+        { "schemaName": "abc_details", "displayName": "Details", "type": "memotext", "maxLength": 4000 },
+        { "schemaName": "abc_status", "displayName": "Status", "type": "choice",
+          "options": ["New", "In Progress", "Waiting", "Done", "Cancelled"] },
+        { "schemaName": "abc_priority", "displayName": "Priority", "type": "choice",
+          "options": ["Low", "Normal", "High"] },
+        { "schemaName": "abc_duedate", "displayName": "Due Date", "type": "datetime" },
+        { "schemaName": "abc_closedon", "displayName": "Closed On", "type": "datetimefull" },
+        { "schemaName": "abc_estimatehours", "displayName": "Estimate (hours)", "type": "decimal" },
+        { "schemaName": "abc_cost", "displayName": "Cost", "type": "money" },
+        { "schemaName": "abc_reopencount", "displayName": "Times Reopened", "type": "integer" },
+        { "schemaName": "abc_category", "displayName": "Category", "type": "lookup", "target": "abc_category" },
+        { "schemaName": "abc_requester", "displayName": "Requester", "type": "lookup", "target": "core_person" }
+      ]
+    },
+    {
+      "schemaName": "abc_requestcomment",
+      "displayName": "Request Comment",
+      "displayCollectionName": "Request Comments",
+      "description": "One entry in a request's history.",
+      "primaryName": { "schemaName": "abc_summary", "displayName": "Summary", "maxLength": 200 },
+      "columns": [
+        { "schemaName": "abc_request", "displayName": "Request", "type": "lookup", "target": "abc_request" },
+        { "schemaName": "abc_body", "displayName": "Comment", "type": "memotext", "maxLength": 10000 },
+        { "schemaName": "abc_internal", "displayName": "Internal Only", "type": "boolean" }
+      ]
+    }
+  ]
+}

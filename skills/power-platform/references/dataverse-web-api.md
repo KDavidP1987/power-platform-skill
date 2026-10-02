@@ -99,6 +99,8 @@ a two-minute fix into an afternoon.
 ## 4. Idempotent provisioning: publisher, solution, choices, tables, columns, lookups
 
 Schema can be created from a manifest (JSON or one spec per table), idempotently, without modules.
+The bundled `scripts/deploy-tables.py` does steps 1, 2, 4, 6 and 7 below from one JSON manifest,
+with a plan mode, shared tables turned into references and a read-back (`dataverse.md`, section 16).
 Order matters:
 
 1. **Publisher** (`publishers`, with `customizationprefix` and `customizationoptionvalueprefix`).

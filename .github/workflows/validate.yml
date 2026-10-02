@@ -31,6 +31,7 @@ jobs:
       - run: node skills/power-platform/scripts/hooks/check-pa-yaml.mjs --selftest
       - run: python skills/power-platform/scripts/inspect-artifact.py --help
       - run: python skills/power-platform/scripts/check-drift.py --selftest
+      - run: python skills/power-platform/scripts/deploy-tables.py --selftest
       - run: python skills/power-platform/scripts/ship-canvas.py --selftest
       - run: node --check skills/power-platform/scripts/canvas-browser.mjs
       - run: node skills/power-platform/scripts/canvas-browser.mjs --selftest
