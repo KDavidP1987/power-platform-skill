@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.5.0](https://img.shields.io/badge/plugin-0.5.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.5.1](https://img.shields.io/badge/plugin-0.5.1-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 32/32 vs 14/32](https://img.shields.io/badge/evaluation-32%2F32%20vs%2014%2F32-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,15 +16,35 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.5.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.5.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On four realistic Power Platform tasks, the same model passed **32 of 32** graded checks with this
 > skill and **14 of 32** without it. The [evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 > shows every check, what went wrong without the skill, and the limits of the measurement.
 
+## Status: public beta (0.x)
+
+The skill is usable today and is being hardened toward 1.0; see the [roadmap](ROADMAP.md).
+
+- **Proven:** every bundled script has a `--selftest` that CI runs on each commit, with known-bad
+  and fixed fixtures. The method has been used end to end on real apps: a canvas app, Dataverse
+  schema and eight cloud flows built, imported, published and driven in the published player, with
+  the flow loop and safe-recipient gates, a real `ship-canvas.py` export, pack and import, and a
+  sent attachment checked byte for byte.
+- **Guidance only:** advice that no script checks, such as which filters a list needs or how to word
+  a guide. Snippets still marked "confirm in your tenant" in the references have not been through a
+  real compile.
+- **May change before 1.0:** script options and exit codes, finding codes, and the layout of
+  `assets/`. Changes are recorded in the [changelog](CHANGELOG.md).
+- **Issues:** open one at
+  [github.com/KDavidP1987/power-platform-skill/issues](https://github.com/KDavidP1987/power-platform-skill/issues)
+  with the symptom, what you expected, and the shortest reproduction. Leave out tenant, company and
+  person identifiers.
+
 ## Contents
 
+1. [Status: public beta (0.x)](#status-public-beta-0x)
 1. [Why this skill exists](#why-this-skill-exists)
 2. [What you get](#what-you-get)
 3. [Install](#install)
@@ -448,9 +468,9 @@ references. Each configuration ran once, and nothing ran against a live tenant. 
 
 ## Limits of this version
 
-- **`ship-canvas.py` has only been run against a simulated `pac`.** Its dry run was checked
-  against a real app's source, but a real export, pack and import have not been run through it
-  yet. Watch the first real build.
+- **`ship-canvas.py` has run real ships on one app** (export, reconcile, pack, assert, import,
+  publish, build stamp read back in the player). More apps will find more cases; its refusals print
+  the remedy they know.
 - **`lint-flows.mjs` is still a floor.** It evaluates the expressions it understands and treats
   anything else as unknown, which never counts as a guard. Activation is still the only compile.
 - **`doctor` has not yet been run against Studio in a real tenant.** The portal anchors resolved;
@@ -485,6 +505,8 @@ CHANGELOG.md                    every change, newest first
 ```
 
 ## Versioning and changes
+
+The way to 1.0, with measurable criteria, is in [ROADMAP.md](ROADMAP.md).
 
 Releases follow [Semantic Versioning](https://semver.org). Every change is recorded in
 [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` first, then moved under a version heading on

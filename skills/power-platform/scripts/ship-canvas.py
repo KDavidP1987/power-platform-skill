@@ -639,6 +639,15 @@ def assert_finished(zip_path, msapp_bytes, facts, live, live_count, opts, log=pr
             log("        used at %s" % f["evidence"])
     if repairable:
         raise Refuse("a reconciled cache did not survive into the finished zip")
+    uncached = sorted({f["what"].split(":")[0] for f in other
+                       if f["check"] == "column" and "cached column list" in f["what"]})
+    if uncached:
+        # Seen 2026-10-02: columns added after the last publish. The build starts from the PUBLISHED app's
+        # manifest, so a Studio refresh that was only saved (or not done) leaves them out of the cache.
+        log("    REMEDY: the build reads the PUBLISHED app's data-source cache. In Studio, refresh %s "
+            "(Data pane, the source's '...' menu, Refresh), save and PUBLISH, then run this again. No build step "
+            "can add a column to that cache; --accept-drift would ship formulas the player cannot bind."
+            % ", ".join(uncached))
     if other and not opts.get("accept_drift"):
         raise Refuse("the finished app still disagrees with live in ways no build step can repair (fix printed by "
                      "check-drift.py); pass --accept-drift only if you have read each one")
@@ -1271,6 +1280,19 @@ def selftest():
         check("drift no build can repair (column type) refuses", rc == 1 and "column-type" in out)
         rc, out, _ = go(d, ["--accept-drift"])
         check("... and --accept-drift lets it through, listing it", rc == 0 and "column-type" in out)
+        json.dump(dump, open(os.path.join(d, "live.json"), "w"))
+
+        # A column added live after the last publish, used by a formula: refuse with the publish remedy.
+        newcol = drift.fixture_dump(drift.fixture_table(priority_opts={"1": "Low", "2": "High", "3": "Urgent"}, nav="app_Customer",
+                                                        customer_schema="app_Customer",
+                                                        extra_attrs=[("app_deliverynote", "Delivery Note", "String")]))
+        json.dump(newcol, open(os.path.join(d, "live.json"), "w"))
+        extra_screen = os.path.join(d, "canvas", "app", "Src", "ScreenNote.pa.yaml")
+        open(extra_screen, "w").write(drift.FIXTURE_FORMULAS + "            Text: =ThisItem.'Delivery Note'\n")
+        rc, out, _ = go(d)
+        check("a column live but not in the published cache refuses with the refresh-and-publish remedy",
+              rc == 1 and "cached column list" in out and "REMEDY" in out and "PUBLISH" in out)
+        os.remove(extra_screen)
         json.dump(dump, open(os.path.join(d, "live.json"), "w"))
 
         os.remove(os.path.join(d, "live.json"))

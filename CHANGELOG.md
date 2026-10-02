@@ -11,6 +11,40 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-02
+
+Beta hardening: what a second real build taught, the snippets it confirmed, and the roadmap to 1.0.
+
+### Added
+
+- `ROADMAP.md`: the releases to 1.0 and the measurable criteria for 1.0.
+- README: a "Status: public beta (0.x)" section - what is proven, what is guidance only, what may
+  change before 1.0, and how to report issues.
+- `ship-canvas.py`: when it refuses on a column that exists live but not in the app's cached column
+  list, it prints the remedy (refresh the data source in Studio, save and PUBLISH, rebuild - the build
+  starts from the published app's cache). New self-test case.
+- `canvas-shipping.md`: the live baseline is the published app; the exported solution carries the
+  flows, so deploy flows first and build the canvas package after; a push that reported clean while
+  Studio never showed it, after a data-source refresh.
+- `tooling-and-auth.md`: the automation boundary by category (connections, security roles,
+  production imports) with what to prepare for each, and reusing existing connections through the
+  connections API and a deployment-settings file instead of creating them.
+- `dataverse-web-api.md`: enabling `HasNotes` before binding annotations; URL-encoding `$filter`
+  string values.
+- `power-automate.md`: inspecting runs, loop repetitions, inputs and outputs, trigger histories and
+  running a recurrence from the command line (flow management API); the attachment fix confirmed
+  byte for byte; uploading a file column from canvas.
+
+### Changed
+
+- `manifest-caches.md`: the Add-data picker has listed tables by the singular name in one build and
+  by the plural only in another - search a stem.
+- Confirmed in a real compile and publish (2026-10-02) and marked so: a file column's
+  `.FileName`; dropdowns over a record collection with a `Value` column; `ParseJSON` with `Table()`
+  and `ForAll` inside `IfError`; grouped rows built with `Collect` inside `ForAll`; sorting by
+  `Value()` of dates; a DatePicker with no default meaning "no filter".
+- README "Limits of this version": `ship-canvas.py` has now run real ships.
+
 ## [0.5.0] - 2026-10-02
 
 From a second round of feedback on a real app: lists people could not filter, messages that could

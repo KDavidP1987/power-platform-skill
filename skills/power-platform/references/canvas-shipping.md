@@ -167,6 +167,21 @@ pac solution import --path import-me.zip --publish-changes
 
 (`--name` takes the app id here, not a name - section 1.)
 
+**The live baseline is the PUBLISHED app.** The manifest the build starts from - including each
+data source's cached column list - is the published version's, not the last save. After a schema
+change, refresh the changed data sources in Studio, save **and publish**, then build. Measured on
+one build: four tables refreshed and saved but not published; the build refused with eleven
+"column exists live but not in the app's cached column list" findings; after a publish of the same
+refreshed (otherwise unchanged) app, the rebuild had 0 drift. `ship-canvas.py` prints that remedy
+when it refuses on this finding. Do not pass `--accept-drift` for it: the player cannot bind a
+column its cache lacks.
+
+**The exported solution carries everything in it, flows included.** The build swaps the app into a
+solution exported from the environment at build time, and the import applies every component in
+it (section 6) - so a package built BEFORE a flow deployment re-imports the old flows over the new
+ones. Order the release: deploy flows first, then build and import the canvas package. Delete any
+package built earlier rather than import it later.
+
 ### The build stamp
 
 Write a unique id into the PACKED copy of `App.pa.yaml` only - never the repo copy, which would
@@ -289,6 +304,11 @@ preconditions change.
   publish reloads Studio, Studio joins a NEW session while the agent keeps pushing into the old
   one: 0 errors, a "successful" push into a room nobody is in, and a saved app with a clean cut at
   the last pre-reload change. **Re-connect after any reload, data-source change or publish.**
+  Observed again on a later build: four data sources refreshed, then compile and hold reported
+  "PUSHED CLEAN" twice, while Studio's tree view still lacked both new screens and every new
+  control; the save that followed saved the old app. Step 3 (read a marker control in the tree)
+  is what caught it. When a change needs a data-source refresh, prefer Path A: refresh, save and
+  publish in Studio, then ship by import.
 - **Never import a solution while a push is held.** An import republishes every customisation and
   kills the session holding the push.
 - **The hold has a timer, and expiry discards the push.** A 60-minute default expired while waiting

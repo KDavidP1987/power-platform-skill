@@ -375,7 +375,9 @@ Data-pane badge, the network log, then the formula.
 
 **The Add-data picker:**
 
-- lists tables by **singular** display name;
+- lists tables by display name - observed both ways: by the **singular** name in one build, and
+  in a later one (2026-10) by the **plural** (collection) name only, where a search for "Order
+  Line" found nothing and "Order" found "Order Lines". Search a stem of the name;
 - **hides tables the app already binds**, so searching for one you have can surface a legacy table
   with the same display name;
 - adding a second source whose name is taken creates `Orders_1`. Treat `_1` as the tell, confirm

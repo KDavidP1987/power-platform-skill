@@ -713,6 +713,23 @@ Prefer: odata.include-annotations="*",odata.maxpagesize=5000
   them early, but diagnose from run history before buying, and re-measure an old negative finding
   before acting on it.
 
+**From the command line: the flow management API.** For runs, the actions inside them and trigger
+payloads, use `https://api.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/<env>`
+with an Az token for `https://service.flow.microsoft.com/` and `api-version=2016-11-01`:
+
+- `.../flows/<id>/runs` (page with `nextLink`) and `.../runs/<run>/actions` - each action's status,
+  `inputsLink` and `outputsLink` (pre-signed URLs; fetch them without the bearer token). The flow
+  id is the workflow's `resourceid` for a solution flow (fall back to `workflowid`).
+- **Actions inside a loop** appear once in `/actions`; read every iteration from
+  `.../actions/<name>/repetitions`. A recipient audit that read only `/actions` reported "0 sends"
+  over runs that had sent - give such an audit a floor (runs exist, sends read > 0).
+- A **Compose**'s `outputsLink` returns the raw JSON value (a quoted string), not `{body: ...}`.
+- A send-with-options action still waiting for the click has no inputs yet; read the recipient from
+  the `Safe_to_` Compose that fed it.
+- `.../triggers/<name>/histories` shows every trigger evaluation (fired or not) with its payload via
+  `outputsLink` - this is how a lost Dataverse event is told apart from a skipped condition.
+- `POST .../triggers/<name>/run` runs a Recurrence trigger now, for a test.
+
 ## 15. A checklist for every flow
 
 - [ ] It lives in the solution; one trigger; one root action.
@@ -822,4 +839,12 @@ fields read through the Web API) is **base64 text**. Passed as an Outlook attach
 file is corrupt"). Pass binary: `base64ToBinary(item()?['documentbody'])`, or the body of the
 Dataverse "Download a file or an image" action for a file column, which is already binary. The run
 history looks perfect either way - the attachment is there, with the right name and a plausible
-size - so **verify by opening the received file**, not by reading the run.
+size - so **verify by opening the received file**, not by reading the run. Confirmed on a real
+build (2026-10-02): before the fix the attachment arrived at about 4/3 of the file's size (the base64
+length - a quick tell); after it, the received file was byte-identical to the original.
+
+**Uploading a file column from a canvas app**: `Patch` cannot write a Dataverse file column. Use an
+Edit form with the file column's card, or open the record in the model-driven editor
+(`<org>/main.aspx?etn=<table>&id=<guid>&pagetype=entityrecord`) in a new tab. Reading the stored
+name works in a formula: `ThisRecord.'<File Column>'.FileName` (confirmed in a compile and a
+publish, 2026-10-02).

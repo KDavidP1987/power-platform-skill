@@ -634,6 +634,14 @@ works only on what is already loaded.
 `SortByColumns(...)` with a header label shown when the category differs from the previous row is
 lighter.
 
+**Confirmed in a real build (compile 0 errors, published, 2026-10-02):** a single gallery over a
+collection built with `Clear(col); ForAll(categories, With({g: Filter(...)}, If(CountRows(g) > 0,
+Collect(col, {header row}); Collect(col, ForAll(g, {item row})))))`, each row carrying an `H`
+(header) flag, renders category headers with their items; the build re-runs on every filter change.
+Not delegable, so use it for reference data of a few hundred rows. A classic dropdown whose `Items`
+is a collection of records with a `Value` column, and whose `Default` is one of those records (a
+literal "All categories" first), also compiled and ran.
+
 **Remember the filter.** Keep the selection in a variable or the control's state when the user opens
 a record and comes back; a list that forgets its filter after every visit is filtered once and then
 abandoned.
@@ -676,6 +684,9 @@ must teach the template format on the same screen:
 - **The token list, from data**: read the placeholder list from the one settings row the flow also
   reads (`ParseJSON(LookUp(Settings, Key = "TemplatePlaceholders").Value)`), and show each token, its
   meaning and the value used when it is blank. A hard-coded list in the app drifts from the flow.
+  Confirmed shape (compile and publish, 2026-10-02): `IfError(ForAll(Table(ParseJSON(...)) As r,
+  {Token: Text(r.Value.token), Meaning: Text(r.Value.meaning), IfBlank: Text(r.Value.ifBlank)}),
+  <fallback table>)` - the fallback keeps the guide usable when the setting is missing or malformed.
 - **The rules**, in plain words: tokens are written `{Name}`, case-sensitive; an unknown token is left
   exactly as typed (so a typo is visible in the preview); a blank value becomes the stated
   replacement; which formatting is allowed (for HTML templates: paragraphs, bold, italic, lists,

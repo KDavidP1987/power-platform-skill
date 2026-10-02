@@ -119,6 +119,18 @@ Order matters:
    Check the target exists before each one.
 7. **Publish**: `PublishXml` for the touched entities, or `PublishAllXml`.
 
+**Notes (annotations) need `HasNotes` on the table first.** A `POST annotations` with
+`objectid_<table>@odata.bind` on a table created without notes fails with "undeclared property
+objectid_<table>". Set it at creation (`HasNotes: true` on the `EntityMetadata`), or afterwards with
+a full `PUT EntityDefinitions(LogicalName='<table>')` carrying `HasNotes: true` and the header
+`MSCRM.MergeLabels: true` (so labels are not wiped), then `PublishXml` for the table. Keep the flag in
+the manifest so a rebuild keeps it.
+
+**URL-encode string values in `$filter`.** An unencoded `+` in a query string is read as a space:
+`$filter=app_name eq 'Plan +2 - Day 3'` matched nothing, and an idempotent "find, else
+create" seed would have created duplicates. Encode the literal (`[uri]::EscapeDataString(...)`,
+`urllib.parse.quote`) after doubling any apostrophe.
+
 Rules for every step:
 
 - **Send `MSCRM.SolutionUniqueName: <solution>` on every metadata create**, naming the solution that

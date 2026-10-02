@@ -244,6 +244,27 @@ admin's access to test as a non-admin. The pattern that kept work moving:
    **shipped but unproven** until the verification is done. On an irreversible call, stop with the
    options and a recommendation.
 
+**The automation boundary, by category.** Three kinds of action were refused on every attempt in
+one build, and each was finished by the person running one prepared command:
+
+| Refused | Why the guard refuses it | What to prepare |
+|---|---|---|
+| Creating a connection (Approvals, Word Online, any connector) | it persists a credential | Prefer **reusing an existing connection** (below); otherwise the person creates it in the maker portal and you bind it |
+| Creating or changing a security role, assigning one | it grants permissions | an idempotent role script with `-Report` (prints the matrix, writes nothing) and a live subset verification |
+| `pac solution import` into a Production-type environment | it is a production deploy | a deploy script that exports a rollback first, gates the import on the checks (lint, recipient audit, marker inspection), and reads back what landed |
+
+Validate each one read-only first (`-Report`, `-WhatIf`, a dry run of the gate on the actual package)
+and hand over ONE command. Never look for a second route to the same effect; the refusal is the
+answer for that action.
+
+**Reuse existing connections instead of creating them.** List the connections the person already
+has: `GET https://api.powerapps.com/providers/Microsoft.PowerApps/apis/<connector>/connections?api-version=2016-11-01&$filter=environment eq '<env id>'`
+with an Az token for `https://service.powerapps.com/`. Put each connection's `name` (the id) into the
+deployment-settings file (`ConnectionReferences[].ConnectionId`) and import with
+`pac solution import --settings-file <file>`: the solution's connection references bind to them and
+nothing is created. Check the connection's `statuses` is Connected before binding, and read the
+binding back from `connectionreferences` after the import.
+
 Expect the schema half and the canvas half of a change to ship on different days when the person
 runs one of them. **Design staged changes to be correct in both states**: a new permission element
 whose rule inherits its parent's answer until the new choice member exists is safe before and after

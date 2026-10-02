@@ -599,6 +599,10 @@ rarely points at the responsible line. The bundled hook catches the first four a
   lists every input and output property with its enum values, from the same source the compiler
   reads - that is how `TriggerOutput` was found, and how `DatePicker`/`ComboBoxDataField` (not
   `DatePickerCanvas`/`ComboBoxField`) were confirmed.
+- **Date filters and sorts confirmed in a real build (2026-10-02):** a DatePicker with no `Default`
+  reads `SelectedDate` as blank, so `IsBlank(dpFrom.SelectedDate) || 'Sent At' >= dpFrom.SelectedDate`
+  treats "no date picked" as no filter; and sorting by `Value()` of a date or date-time column
+  orders correctly.
 - **Prove an unproven property on ONE control before adding it to many.** Adding a property not
   proven valid on a control type to 108 controls at once is how a whole navigation layer stops
   binding.
