@@ -43,6 +43,16 @@ actually shipped.
 - **Use the skill on a new app from nothing** (started in 0.7.1): a work tracker with a Dataverse
   app, a SharePoint-only viewer and three mirror flows. The flows found two `lint-flows` false
   positives (fixed). Feed what the canvas build finds back here.
+- **A SharePoint data-source reference** (found by that build's standard-licence viewer): which
+  functions delegate to a SharePoint list and which do not (the default substring search and
+  `CountIf` advice are Dataverse-only); a row count and distinct-value filter options without a
+  delegable count or `Distinct`; the 5,000-item view threshold and which columns to index; field
+  types (person, Yes/No, ID, Created, the 255-character single-line limit); a text-fit schema from
+  list metadata; and what keeps an app on the standard licence (no premium connector, no flow call,
+  the multiplexing caveat for a mirror of premium data). Confirm each in a tenant before it ships.
+- **Small reference gaps from the same build**: whether `Errors(source)` is filled after an
+  `IsError(Patch(...))` test; a comment box whose Post button enables while typing (Keypress)
+  against the blur default; `check-canvas-format` finding the project's schema by itself on the CLI.
 - **Calibrate the long-text estimate** (`check-canvas-format.mjs`, 0.56 em per character) against
   rendered output, with Power Fx `measurefont` or screenshots of the published player, and publish
   the measured range per font.
