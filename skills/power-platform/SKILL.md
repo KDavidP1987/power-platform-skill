@@ -14,7 +14,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.7.0"
+  version: "0.7.1"
 ---
 
 # Power Platform development
@@ -93,7 +93,12 @@ user unproven.
    the tokens (`references/project-setup.md` section 3). Asked for after ten screens, the theme is
    a rebuild.
 3. **Build in source.** Edit `.pa.yaml`, solution XML, or flow JSON in the repo. Hooks check each
-   write for the compile-killers in `references/power-fx-and-pa-yaml.md`. **Every label bound to
+   write for the compile-killers in `references/power-fx-and-pa-yaml.md`. **When the hooks are not
+   wired in the project, run the checks yourself before you finish** - a YAML comment or an
+   unquoted `": "` in a formula fails the whole app's compile, and nothing else will say so:
+   `node scripts/hooks/check-pa-yaml.mjs <Src>`, `node scripts/check-canvas-format.mjs <Src>` and
+   `node scripts/check-canvas-overlap.mjs <Src>` over every folder you wrote to, and
+   `node scripts/lint-flows.mjs <flows>` over every flow. **Every label bound to
    data must fit the longest value it can show, or clamp with an ellipsis and a tooltip** -
    `scripts/check-canvas-format.mjs` checks it, with lengths from Dataverse metadata, and also
    fails literal colours once the theme exists (`references/canvas-layout.md` sections 8 and 9).

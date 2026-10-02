@@ -480,10 +480,27 @@ function checkSelfWrite(flow, t, add) {
     const op = a.inputs && a.inputs.host && a.inputs.host.operationId;
     const p = (a.inputs && a.inputs.parameters) || {};
     if (op === 'UpdateRecord' && sameTable(t.table, p.entityName)) {
-      writes.push({ n, cols: Object.keys(p).filter((k) => k.startsWith('item/')).map((k) => k.slice(5).toLowerCase()) });
+      writes.push({ n, cols: Object.keys(p).filter((k) => k.startsWith('item/')).map((k) => k.slice(5).toLowerCase().replace(/@odata\.bind$/, '')) });
     }
   });
+  const filterCols = t.filtering ? String(t.filtering).toLowerCase().split(',').map((s) => s.trim()).filter(Boolean) : null;
   for (const w of writes) {
+    // An update cannot start a trigger that does not fire on Update (Create-only, Delete-only) -
+    // unless the trigger's NAME says Update, when the message code is the likelier mistake
+    // (trigger-message-mismatch) and the write is checked as if it fired.
+    const namedUpdate = /updat|modif|chang|edit/.test(String(t.tname || '').toLowerCase());
+    if (!FIRES.update.has(Number(t.message)) && !namedUpdate) {
+      add('info', 'self-write-not-fired', `'${w.n}' updates the trigger table ${t.table}, but the trigger fires on ` +
+        `${MESSAGE[Number(t.message)] || 'message ' + t.message} only, so an update cannot start it.`);
+      continue;
+    }
+    // Dataverse starts a filtered Update trigger only when the update carries a listed column; a
+    // write of unlisted columns only (a processed-on stamp, a mirror id) cannot start it.
+    if (filterCols && !w.cols.some((c) => filterCols.includes(c))) {
+      add('info', 'self-write-outside-filter', `'${w.n}' updates the trigger table ${t.table} (${w.cols.join(', ') || 'no columns'}), ` +
+        `none of them in filteringattributes (${filterCols.join(', ')}), so the write cannot start this trigger. Keep those columns out of the list.`);
+      continue;
+    }
     const v = selfWriteVerdict(flow, t, w.n, ctx);
     const vals = [...v.written].map(([c, x]) => `${c} = ${show(x)}`).join(', ') || 'none';
     const note = v.unparsed.length ? ` (${v.unparsed.length} condition(s) could not be parsed and were treated as unknown: ${v.unparsed[0].from})` : '';
@@ -891,7 +908,7 @@ function fixture(bad) {
   };
 }
 // Guard shapes: a minimal update-triggered flow whose only self-write is wrapped as described.
-function guardFixture(name, { conditions = [], wrap, write = { 'item/app_locked': true }, before = {} }) {
+function guardFixture(name, { conditions = [], wrap, write = { 'item/app_locked': true }, before = {}, message = 3, filtering = null, tname = 'When_a_request_is_updated' }) {
   const host = (op) => ({ connectionName: 'shared_commondataserviceforapps', operationId: op });
   const Lock_it = { type: 'OpenApiConnection', runAfter: {}, inputs: { host: host('UpdateRecord'),
     parameters: { entityName: 'app_requests', recordId: "@triggerOutputs()?['body/app_requestid']", ...write } } };
@@ -899,8 +916,9 @@ function guardFixture(name, { conditions = [], wrap, write = { 'item/app_locked'
   const gate = wrap(Lock_it);
   gate.runAfter = lastBefore ? { [lastBefore]: ['Succeeded'] } : {};
   return { file: name + '.json', name, refs: {}, def: {
-    triggers: { When_a_request_is_updated: { type: 'OpenApiConnectionWebhook', conditions,
-      inputs: { host: host('SubscribeWebhookTrigger'), parameters: { 'subscriptionRequest/message': 3, 'subscriptionRequest/entityname': 'app_request', 'subscriptionRequest/scope': 4 } } } },
+    triggers: { [tname]: { type: 'OpenApiConnectionWebhook', conditions,
+      inputs: { host: host('SubscribeWebhookTrigger'), parameters: { 'subscriptionRequest/message': message, 'subscriptionRequest/entityname': 'app_request', 'subscriptionRequest/scope': 4,
+        ...(filtering ? { 'subscriptionRequest/filteringattributes': filtering } : {}) } } } },
     actions: { ...before, Gate: gate } } };
 }
 const ifYes = (expression) => (w) => ({ type: 'If', expression, actions: { Lock_it: w } });
@@ -920,6 +938,15 @@ const GUARD_CASES = [
   ['unguarded-stays-true', { wrap: ifYes({ not: { equals: ["@triggerOutputs()?['body/app_locked']", false] } }) }, 'self-trigger-loop'],
   ['unguarded-or-escape', { wrap: ifYes("@or(not(equals(triggerOutputs()?['body/app_locked'], true)), equals(triggerOutputs()?['body/app_status'], 2))") }, 'self-trigger-loop'],
   ['unguarded-name-only', { wrap: ifYes("@equals(string(triggerOutputs()?['body/app_locked']), toLower(string(triggerOutputs()?['body/app_locked'])))") }, 'self-trigger-loop'],
+  // Writes the trigger cannot see (found building a real mirror flow, 2026-10-02).
+  ['create-trigger-update-self-write', { message: 1, tname: 'When_a_request_is_created', wrap: (w) => ({ type: 'Scope', actions: { Lock_it: w } }) }, null],
+  ['filtered-write-outside-filter', { filtering: 'app_status,app_title', write: { 'item/app_mirroredon': '@{utcNow()}', 'item/app_mirrorid': "@body('Post')?['ID']" },
+    wrap: (w) => ({ type: 'Scope', actions: { Lock_it: w } }) }, null],
+  ['filtered-bind-outside-filter', { filtering: 'app_status', write: { 'item/app_owner@odata.bind': "app_people(@{body('Find')?['id']})" },
+    wrap: (w) => ({ type: 'Scope', actions: { Lock_it: w } }) }, null],
+  ['filtered-write-inside-filter', { filtering: 'app_status', write: { 'item/app_status': 2, 'item/app_mirroredon': '@{utcNow()}' },
+    wrap: (w) => ({ type: 'Scope', actions: { Lock_it: w } }) }, 'self-trigger-loop'],
+  ['create-or-update-trigger-still-checked', { message: 4, tname: 'When_a_request_is_added_or_updated', wrap: (w) => ({ type: 'Scope', actions: { Lock_it: w } }) }, 'self-trigger-loop'],
   ['assumes-nonblank-dynamic', { write: { 'item/app_rate': "@outputs('Find_rate')?['body/amount']" }, wrap: ifYes({ equals: ["@coalesce(triggerOutputs()?['body/app_rate'], '')", ''] }) }, 'self-write-guard-assumes-value'],
 ];
 

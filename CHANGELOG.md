@@ -11,6 +11,40 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-02
+
+From the full 0.7.0 evaluation and the first build of a new app with the skill.
+
+### Added
+
+- `hooks/check-pa-yaml.mjs` runs directly on files or a `Src` folder
+  (`node check-pa-yaml.mjs <Src>`): exit 0 clean, 1 with findings, 2 when nothing was found (never
+  a silent pass). The hook mode is unchanged.
+
+### Changed
+
+- SKILL.md working loop, step 3: when the project's hooks are not wired, run `check-pa-yaml`,
+  `check-canvas-format` and `check-canvas-overlap` over every folder written, and `lint-flows` over
+  every flow, before finishing. On 0.7.0 the compile check failed in every evaluation run, with and
+  without the skill, because the evaluation installs the skill but not its hooks; on 0.7.1 it passes
+  in every run with the skill.
+
+### Fixed
+
+- `lint-flows.mjs` self-write check: a write to the trigger table no longer counts as a re-trigger
+  when the trigger cannot fire on it - a Create-only trigger and an update (`self-write-not-fired`),
+  or a filtered Update trigger and a write whose columns are all outside `filteringattributes`
+  (`self-write-outside-filter`). `@odata.bind` columns are compared by their column name. Both
+  cases are reported as info so the reasoning stays visible. Five new guard fixtures (18 in all).
+  Found as false positives on a three-flow mirror between Dataverse and SharePoint.
+- Evaluation harness: the grader finds a task's corrected flow in any folder of the run's output,
+  and the grader and `analyze.py` skip stray files in an iteration folder.
+
+### Evaluation
+
+- 0.7.0, three runs per configuration, ten tasks (two rewritten harder): 216/222 with the skill,
+  136/222 without. Canvas tasks re-run on 0.7.1: 217/222 overall. Table in the README.
+
 ## [0.7.0] - 2026-10-02
 
 Verification that reaches the database on every run, a check for the commonest layout defect in

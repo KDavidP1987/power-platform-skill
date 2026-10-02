@@ -1,0 +1,936 @@
+{
+  "evals": [
+    {
+      "id": 1,
+      "name": "diagnose-multi-change-dead-submit",
+      "n": 8,
+      "with_skill": {
+        "scores": [
+          8,
+          8,
+          8
+        ],
+        "mean": 1.0,
+        "spread": 0.0
+      },
+      "without_skill": {
+        "scores": [
+          3,
+          2,
+          2
+        ],
+        "mean": 0.292,
+        "spread": 0.125
+      },
+      "delta": 0.708
+    },
+    {
+      "id": 2,
+      "name": "flow-self-write-definition",
+      "n": 9,
+      "with_skill": {
+        "scores": [
+          9,
+          9,
+          9
+        ],
+        "mean": 1.0,
+        "spread": 0.0
+      },
+      "without_skill": {
+        "scores": [
+          8,
+          5,
+          8
+        ],
+        "mean": 0.778,
+        "spread": 0.333
+      },
+      "delta": 0.222
+    },
+    {
+      "id": 3,
+      "name": "playwright-verify-published-app",
+      "n": 8,
+      "with_skill": {
+        "scores": [
+          7,
+          8,
+          8
+        ],
+        "mean": 0.958,
+        "spread": 0.125
+      },
+      "without_skill": {
+        "scores": [
+          3,
+          4,
+          3
+        ],
+        "mean": 0.417,
+        "spread": 0.125
+      },
+      "delta": 0.541
+    },
+    {
+      "id": 4,
+      "name": "pa-yaml-search-and-vendor-picker",
+      "n": 9,
+      "with_skill": {
+        "scores": [
+          9,
+          9,
+          8
+        ],
+        "mean": 0.963,
+        "spread": 0.111
+      },
+      "without_skill": {
+        "scores": [
+          3,
+          2,
+          2
+        ],
+        "mean": 0.259,
+        "spread": 0.111
+      },
+      "delta": 0.704
+    },
+    {
+      "id": 5,
+      "name": "flow-cycle-three-of-five",
+      "n": 7,
+      "with_skill": {
+        "scores": [
+          6,
+          7,
+          7
+        ],
+        "mean": 0.952,
+        "spread": 0.143
+      },
+      "without_skill": {
+        "scores": [
+          5,
+          6,
+          6
+        ],
+        "mean": 0.81,
+        "spread": 0.143
+      },
+      "delta": 0.142
+    },
+    {
+      "id": 6,
+      "name": "recipient-leak-in-existing-flow",
+      "n": 6,
+      "with_skill": {
+        "scores": [
+          6,
+          6,
+          6
+        ],
+        "mean": 1.0,
+        "spread": 0.0
+      },
+      "without_skill": {
+        "scores": [
+          6,
+          4,
+          6
+        ],
+        "mean": 0.889,
+        "spread": 0.333
+      },
+      "delta": 0.111
+    },
+    {
+      "id": 7,
+      "name": "gallery-long-text-clipping",
+      "n": 6,
+      "with_skill": {
+        "scores": [
+          5,
+          5,
+          5
+        ],
+        "mean": 0.833,
+        "spread": 0.0
+      },
+      "without_skill": {
+        "scores": [
+          4,
+          4,
+          4
+        ],
+        "mean": 0.667,
+        "spread": 0.0
+      },
+      "delta": 0.166
+    },
+    {
+      "id": 8,
+      "name": "list-screen-filters-default",
+      "n": 7,
+      "with_skill": {
+        "scores": [
+          7,
+          7,
+          7
+        ],
+        "mean": 1.0,
+        "spread": 0.0
+      },
+      "without_skill": {
+        "scores": [
+          5,
+          5,
+          5
+        ],
+        "mean": 0.714,
+        "spread": 0.0
+      },
+      "delta": 0.286
+    },
+    {
+      "id": 9,
+      "name": "theme-intake-before-screens",
+      "n": 7,
+      "with_skill": {
+        "scores": [
+          7,
+          7,
+          7
+        ],
+        "mean": 1.0,
+        "spread": 0.0
+      },
+      "without_skill": {
+        "scores": [
+          5,
+          5,
+          5
+        ],
+        "mean": 0.714,
+        "spread": 0.0
+      },
+      "delta": 0.286
+    },
+    {
+      "id": 10,
+      "name": "documentation-set-handover",
+      "n": 7,
+      "with_skill": {
+        "scores": [
+          7,
+          7,
+          7
+        ],
+        "mean": 1.0,
+        "spread": 0.0
+      },
+      "without_skill": {
+        "scores": [
+          5,
+          5,
+          6
+        ],
+        "mean": 0.762,
+        "spread": 0.143
+      },
+      "delta": 0.238
+    }
+  ],
+  "assertions": [
+    {
+      "eval": 1,
+      "i": 1,
+      "text": "Names at least two distinct candidate causes among: stale cached column list, stale cached choice/option-set members, the imported app not running the new YAML (LoadFromYaml false / old build), a stale cached player build",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 1,
+      "i": 2,
+      "text": "Gives at least two read-only checks to run before changing anything, and for EACH check says which named cause it confirms or rules out (a check that only applies to an unnamed or different cause does not count)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 1,
+      "i": 3,
+      "text": "Explains that Studio Preview and the compile resolve against live metadata while the published app uses the cached copy in the app",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 1,
+      "i": 4,
+      "text": "Explains the silent no-op (a failing step abandons the rest of the formula without a message) and recommends surfacing errors (IfError/Notify/Errors())",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 1,
+      "i": 5,
+      "text": "Fix includes refreshing the data source in Studio (remove and re-add, or equivalent) followed by Save AND Publish from Studio, then re-shipping from git",
+      "with": 3,
+      "without": 1,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 1,
+      "i": 6,
+      "text": "States that a schema change and the canvas change depending on it should not ship in a single step",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 1,
+      "i": 7,
+      "text": "Prevention includes an automated pre-ship check comparing live columns and choice members with the app's cached metadata",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 1,
+      "i": 8,
+      "text": "Verification: perform the task in the published app on a fresh (uncached) player and confirm the written row in Dataverse",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 2,
+      "i": 1,
+      "text": "flow.json parses as JSON and has properties.definition with triggers and actions",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 2,
+      "i": 2,
+      "text": "Trigger is the Dataverse webhook on cr4f2_request with subscriptionRequest/message = 3 (Update)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 2,
+      "i": 3,
+      "text": "Every connection reference uses runtimeSource embedded (not invoker)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 2,
+      "i": 4,
+      "text": "The write of cr4f2_locked is guarded by a condition that reads cr4f2_locked (sentinel), so the self-write cannot loop",
+      "with": 3,
+      "without": 2,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 2,
+      "i": 5,
+      "text": "lint-flows.mjs reports no errors on flow.json",
+      "with": 3,
+      "without": 2,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 2,
+      "i": 6,
+      "text": "The row is re-read (GetItem/ListRecords) rather than relying only on the trigger payload",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 2,
+      "i": 7,
+      "text": "Email and Teams are not chained so that one runs after the other has Failed",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 2,
+      "i": 8,
+      "text": "notes.md covers the self-trigger loop risk and why the guard prevents it",
+      "with": 3,
+      "without": 2,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 2,
+      "i": 9,
+      "text": "notes.md covers deployment: connection references/consent and importing deactivated or turning on to validate",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 3,
+      "i": 1,
+      "text": "verify-approve.mjs passes node --check (syntactically valid)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 3,
+      "i": 2,
+      "text": "Uses a persistent browser profile / saved auth state kept outside the repo",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 3,
+      "i": 3,
+      "text": "Locates the app inside its iframe (frames / frameLocator) rather than only the top page",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 3,
+      "i": 4,
+      "text": "After filling the Comment box, blurs it (Tab) or otherwise commits the value before asserting/clicking",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 3,
+      "i": 5,
+      "text": "Handles the stale cached player (old-version banner, cache disabled, or build-stamp check)",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 3,
+      "i": 6,
+      "text": "Confirms the effect in Dataverse by DEFAULT: the script queries the row through the Web API on every run (not behind an optional flag or a commented-out block) and fails when the row was not updated",
+      "with": 2,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 3,
+      "i": 7,
+      "text": "README states that an admin/owner session does not prove restrictions (non-admin needed)",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 3,
+      "i": 8,
+      "text": "README or script addresses that the approval writes production data and how to restore/record it",
+      "with": 3,
+      "without": 1,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 4,
+      "i": 1,
+      "text": "Output .pa.yaml passes the bundled check-pa-yaml selftest rules (no colon-space in single-line values, no comments)",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 2,
+      "text": "The pre-existing 'Total open: ' colon-space defect in lblTotal is fixed",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 3,
+      "text": "Search box is a TextInput using Value/Placeholder (not Default/HintText) and is read as .Value",
+      "with": 2,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 4,
+      "i": 4,
+      "text": "ComboBox includes a ComboBoxDataField child naming the display field",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 5,
+      "text": "Vendor picker does not load all ~3,500 vendors into a collection or Items without addressing the row/search-page limit (it is server-side searched/filtered, or the limit is explicitly handled)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 6,
+      "text": "Gallery is filtered via a delegable query against the source rather than filtering a whole-table collection",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 7,
+      "text": "notes.md mentions delegation and the 500/2,000-row limit",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 8,
+      "text": "notes.md treats the Sum total as its own delegation point, separate from lookups: it states whether Sum over the source delegates for Dataverse (Microsoft documents it as delegable), that Studio may still warn, and the fallback; it does not present Sum over a row-limited collection as the table total",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 9,
+      "text": "notes.md says filtering on a lookup's related column (e.g. Vendor.'Vendor Name') is not delegable, and the fix filters on the lookup itself or the vendor id",
+      "with": 3,
+      "without": 1,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 5,
+      "i": 1,
+      "text": "review.md identifies a loop through THREE flows - TaskChanged-RollupRequest, RequestChanged-RescheduleAssignments and AssignmentChanged-PushToTask - naming all three and the column each write sets",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 5,
+      "i": 2,
+      "text": "review.md explains why the filtered triggers and inner conditions do not stop it (each write sets a column in the next trigger's filteringattributes, and/or the inner If runs inside an already-started run)",
+      "with": 3,
+      "without": 2,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 5,
+      "i": 3,
+      "text": "review.md notices that the one-day buffer in AssignmentChanged-PushToTask moves the due date on every pass, so the loop never settles (a guard that only skips unchanged values would not stop it)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 5,
+      "i": 4,
+      "text": "review.md does not report RequestSubmitted-CreateTasks or Daily-OverdueDigest as part of a loop",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 5,
+      "i": 5,
+      "text": "The fix breaks the cycle at a trigger (condition or filteringattributes) or by no longer writing the column that starts the next flow - not only with an inner If",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 5,
+      "i": 6,
+      "text": "lint-flows.mjs run over all five fixed flows together reports no errors (no trigger-cycle)",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 5,
+      "i": 7,
+      "text": "The fixed flows keep their purposes (percent complete and next due date still rolled up, assignments still rescheduled, a task's due date still follows its assignment) and parse as solution JSON with properties.definition",
+      "with": 2,
+      "without": 3,
+      "kind": "favours-baseline",
+      "flaky": true
+    },
+    {
+      "eval": 6,
+      "i": 1,
+      "text": "new/DueSoon-RemindAssignee.json parses as solution JSON with a daily Recurrence trigger and lists open tasks due within two days",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 6,
+      "i": 2,
+      "text": "In the new flow every To and Cc resolves only from the allowlist unless the explicit live mode is on, and an empty allowlist sends nothing",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 6,
+      "i": 3,
+      "text": "notes.md (or the final answer) reports, without being asked, that RequestDecided-NotifyRequester's failure scope (Tell_the_requester_to_retry) emails the requester directly and bypasses the allowlist",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 6,
+      "i": 4,
+      "text": "A corrected RequestDecided-NotifyRequester is saved (in any folder of the run's output) whose failure-path email goes through the safe recipient pattern, or is removed with the reason given",
+      "with": 3,
+      "without": 2,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 6,
+      "i": 5,
+      "text": "lint-flows.mjs --require-safe-recipients over the new flow, the corrected RequestDecided-NotifyRequester and RequestSubmitted-NotifyApprover reports no errors",
+      "with": 3,
+      "without": 2,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 6,
+      "i": 6,
+      "text": "notes.md says how to prove nobody else was emailed from evidence (the run history's actual recipients, or a recipients log), not only from reading the source",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 1,
+      "text": "The output .pa.yaml passes the bundled check-pa-yaml rules (no colon-space in single-line values, no comments)",
+      "with": 0,
+      "without": 0,
+      "kind": "always-fail",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 2,
+      "text": "check-canvas-format.mjs with the provided column lengths reports no text-overflow error on the output",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 3,
+      "text": "The full description remains reachable (tooltip, detail view or a flexible-height row), not just truncated",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 4,
+      "text": "Clamped values show a visible truncation marker (e.g. an ellipsis) rather than a silent cut",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 5,
+      "text": "No label inside the gallery row relies on Overflow.Scroll",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 6,
+      "text": "notes.md explains the approach chosen for long text and its trade-off",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 1,
+      "text": "The gallery can be narrowed by Category (a dropdown or similar control feeding Items)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 2,
+      "text": "The gallery can be narrowed by Status",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 3,
+      "text": "There is a search on Name feeding the gallery's Items",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 4,
+      "text": "The filters offer an 'all' state (blank or an explicit All) so the unfiltered list is reachable",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 5,
+      "text": "The Items query stays delegable for ~1,800 rows (Filter on the source, no whole-table collection), or the limit is explicitly handled",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 6,
+      "text": "The output passes the bundled check-pa-yaml rules",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 7,
+      "text": "notes.md states which filters/sort were chosen as defaults and invites changes (or asks which ones are wanted)",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 9,
+      "i": 1,
+      "text": "plan.md asks for the brand/theme inputs (at least three of: palette, colours to avoid, fonts, logo or imagery, iconography or symbols, light/dark) before any screen is built",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 9,
+      "i": 2,
+      "text": "The build order puts theme definition before the first screen",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 9,
+      "i": 3,
+      "text": "Colours and fonts are defined once (theme tokens, named formulas or variables) and referenced by screens, not literal per control",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 9,
+      "i": 4,
+      "text": "plan.md asks what the landing page should show per role or audience",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 9,
+      "i": 5,
+      "text": "plan.md asks which filters, search or grouping the room list needs (or states a default)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 9,
+      "i": 6,
+      "text": "The build order creates the Dataverse schema before the screens that bind it",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 9,
+      "i": 7,
+      "text": "plan.md includes verifying in the published app, not only in Studio",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 10,
+      "i": 1,
+      "text": "Proposes separate documents per audience: at least the submitting user, the approver/manager, the administrator, and a developer/platform guide",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 10,
+      "i": 2,
+      "text": "The developer/platform guide outline covers environment/solution, Dataverse tables, security roles, connections or connection references, and each flow (trigger and what it writes/sends)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 10,
+      "i": 3,
+      "text": "Screenshots are taken per role in the published app",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 10,
+      "i": 4,
+      "text": "Screenshots use test data, not real people's data (or the guides are kept out of public git for that reason)",
+      "with": 3,
+      "without": 2,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 10,
+      "i": 5,
+      "text": "States that statements must come from the app source or the live environment (button names as the controls say), not memory",
+      "with": 3,
+      "without": 2,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 10,
+      "i": 6,
+      "text": "Documents carry a version and issue date (or are tied to a release/build)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 10,
+      "i": 7,
+      "text": "Includes a check that every screen and role is covered (an inventory or checklist)",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    }
+  ],
+  "totals": {
+    "with_skill": {
+      "passed": 216,
+      "checks": 222,
+      "rate": 0.973,
+      "runs": 30,
+      "mean_tokens": 541399,
+      "mean_output_tokens": 14910,
+      "mean_secs": 158.0,
+      "mean_cost": 0.85,
+      "skill_used_runs": 30
+    },
+    "without_skill": {
+      "passed": 136,
+      "checks": 222,
+      "rate": 0.613,
+      "runs": 30,
+      "mean_tokens": 212427,
+      "mean_output_tokens": 11014,
+      "mean_secs": 115.8,
+      "mean_cost": 0.468,
+      "skill_used_runs": 0
+    }
+  }
+}

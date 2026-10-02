@@ -36,8 +36,13 @@ actually shipped.
 
 ## 0.7.x and 0.8.x: confirm what is still assumed
 
-- **Re-run the full evaluation** with three runs per configuration, as the 1.0 criteria require, on
-  the 0.7.0 task set.
+- **Re-run the full evaluation** (done in 0.7.1): three runs per configuration on the 0.7.0 task
+  set, 216/222 with the skill and 136/222 without; it found the agent skipping the canvas checks
+  when hooks are not installed, fixed in 0.7.1 (217/222). Still to do: publish the 0.7.x results
+  on the evaluation page, which shows 0.5.1.
+- **Use the skill on a new app from nothing** (started in 0.7.1): a work tracker with a Dataverse
+  app, a SharePoint-only viewer and three mirror flows. The flows found two `lint-flows` false
+  positives (fixed). Feed what the canvas build finds back here.
 - **Calibrate the long-text estimate** (`check-canvas-format.mjs`, 0.56 em per character) against
   rendered output, with Power Fx `measurefont` or screenshots of the published player, and publish
   the measured range per font.

@@ -1,0 +1,300 @@
+{
+  "evals": [
+    {
+      "id": 4,
+      "name": "pa-yaml-search-and-vendor-picker",
+      "n": 9,
+      "with_skill": {
+        "scores": [
+          9,
+          9,
+          7
+        ],
+        "mean": 0.926,
+        "spread": 0.222
+      },
+      "without_skill": {
+        "scores": [
+          2,
+          3,
+          2
+        ],
+        "mean": 0.259,
+        "spread": 0.111
+      },
+      "delta": 0.667
+    },
+    {
+      "id": 7,
+      "name": "gallery-long-text-clipping",
+      "n": 6,
+      "with_skill": {
+        "scores": [
+          5,
+          6,
+          6
+        ],
+        "mean": 0.944,
+        "spread": 0.167
+      },
+      "without_skill": {
+        "scores": [
+          4,
+          3,
+          4
+        ],
+        "mean": 0.611,
+        "spread": 0.167
+      },
+      "delta": 0.333
+    },
+    {
+      "id": 8,
+      "name": "list-screen-filters-default",
+      "n": 7,
+      "with_skill": {
+        "scores": [
+          7,
+          7,
+          7
+        ],
+        "mean": 1.0,
+        "spread": 0.0
+      },
+      "without_skill": {
+        "scores": [
+          5,
+          6,
+          5
+        ],
+        "mean": 0.762,
+        "spread": 0.143
+      },
+      "delta": 0.238
+    }
+  ],
+  "assertions": [
+    {
+      "eval": 4,
+      "i": 1,
+      "text": "Output .pa.yaml passes the bundled check-pa-yaml selftest rules (no colon-space in single-line values, no comments)",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 2,
+      "text": "The pre-existing 'Total open: ' colon-space defect in lblTotal is fixed",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 3,
+      "text": "Search box is a TextInput using Value/Placeholder (not Default/HintText) and is read as .Value",
+      "with": 2,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 4,
+      "i": 4,
+      "text": "ComboBox includes a ComboBoxDataField child naming the display field",
+      "with": 2,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 4,
+      "i": 5,
+      "text": "Vendor picker does not load all ~3,500 vendors into a collection or Items without addressing the row/search-page limit (it is server-side searched/filtered, or the limit is explicitly handled)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 6,
+      "text": "Gallery is filtered via a delegable query against the source rather than filtering a whole-table collection",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 7,
+      "text": "notes.md mentions delegation and the 500/2,000-row limit",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 8,
+      "text": "notes.md treats the Sum total as its own delegation point, separate from lookups: it states whether Sum over the source delegates for Dataverse (Microsoft documents it as delegable), that Studio may still warn, and the fallback; it does not present Sum over a row-limited collection as the table total",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 4,
+      "i": 9,
+      "text": "notes.md says filtering on a lookup's related column (e.g. Vendor.'Vendor Name') is not delegable, and the fix filters on the lookup itself or the vendor id",
+      "with": 3,
+      "without": 1,
+      "kind": "favours-skill",
+      "flaky": true
+    },
+    {
+      "eval": 7,
+      "i": 1,
+      "text": "The output .pa.yaml passes the bundled check-pa-yaml rules (no colon-space in single-line values, no comments)",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 2,
+      "text": "check-canvas-format.mjs with the provided column lengths reports no text-overflow error on the output",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 3,
+      "text": "The full description remains reachable (tooltip, detail view or a flexible-height row), not just truncated",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 4,
+      "text": "Clamped values show a visible truncation marker (e.g. an ellipsis) rather than a silent cut",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 5,
+      "text": "No label inside the gallery row relies on Overflow.Scroll",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 7,
+      "i": 6,
+      "text": "notes.md explains the approach chosen for long text and its trade-off",
+      "with": 2,
+      "without": 2,
+      "kind": "split-equal",
+      "flaky": true
+    },
+    {
+      "eval": 8,
+      "i": 1,
+      "text": "The gallery can be narrowed by Category (a dropdown or similar control feeding Items)",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 2,
+      "text": "The gallery can be narrowed by Status",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 3,
+      "text": "There is a search on Name feeding the gallery's Items",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 4,
+      "text": "The filters offer an 'all' state (blank or an explicit All) so the unfiltered list is reachable",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 5,
+      "text": "The Items query stays delegable for ~1,800 rows (Filter on the source, no whole-table collection), or the limit is explicitly handled",
+      "with": 3,
+      "without": 3,
+      "kind": "always-pass",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 6,
+      "text": "The output passes the bundled check-pa-yaml rules",
+      "with": 3,
+      "without": 0,
+      "kind": "favours-skill",
+      "flaky": false
+    },
+    {
+      "eval": 8,
+      "i": 7,
+      "text": "notes.md states which filters/sort were chosen as defaults and invites changes (or asks which ones are wanted)",
+      "with": 3,
+      "without": 1,
+      "kind": "favours-skill",
+      "flaky": true
+    }
+  ],
+  "totals": {
+    "with_skill": {
+      "passed": 63,
+      "checks": 66,
+      "rate": 0.955,
+      "runs": 9,
+      "mean_tokens": 569083,
+      "mean_output_tokens": 14842,
+      "mean_secs": 154.2,
+      "mean_cost": 0.901,
+      "skill_used_runs": 9
+    },
+    "without_skill": {
+      "passed": 34,
+      "checks": 66,
+      "rate": 0.515,
+      "runs": 9,
+      "mean_tokens": 138432,
+      "mean_output_tokens": 7125,
+      "mean_secs": 68.8,
+      "mean_cost": 0.338,
+      "skill_used_runs": 0
+    }
+  }
+}

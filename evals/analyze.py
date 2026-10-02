@@ -6,7 +6,7 @@ root = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 ARMS = ("with_skill", "without_skill")
 evals, data = [], {}
-for ed in sorted(glob.glob(os.path.join(root, "eval-*")), key=lambda p: int(os.path.basename(p).split("-")[1])):
+for ed in sorted((d for d in glob.glob(os.path.join(root, "eval-*")) if os.path.isdir(d)), key=lambda p: int(os.path.basename(p).split("-")[1])):
     meta = json.load(open(os.path.join(ed, "eval_metadata.json"), encoding="utf-8"))
     e = {"id": meta["eval_id"], "name": meta["eval_name"], "assertions": meta["assertions"], "runs": {}}
     for arm in ARMS:

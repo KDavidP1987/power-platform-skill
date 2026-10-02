@@ -99,7 +99,9 @@ def script_checks(eid, out):
         c["new_flow"] = parse_json(f) if os.path.exists(f) else {"parses": False, "error": "new/DueSoon-RemindAssignee.json missing"}
         shipped = [f] if os.path.exists(f) else []
         for name in ("RequestSubmitted-NotifyApprover.json", "RequestDecided-NotifyRequester.json"):
-            mine = [x for x in (os.path.join(out, "fixed", name), os.path.join(out, "new", name)) if os.path.exists(x)]
+            # The prompt does not say where a corrected copy goes (fixed/, fixes/, proposed-fixes/, new/...):
+            # take the run's own copy wherever it saved one, else the file as handed over.
+            mine = sorted(glob.glob(os.path.join(out, "**", name), recursive=True), key=len)
             shipped.append(mine[0] if mine else os.path.join(HERE, "inputs", "flows-notify", name))
         c["shipped_set"] = [os.path.relpath(x, out) if x.startswith(out) else "original " + os.path.basename(x) for x in shipped]
         c["lint_flows_require_safe_recipients"] = lint_strict(shipped)
@@ -199,6 +201,8 @@ def main():
     only = {int(x) for x in a.only.split(",") if x}
     jobs = []
     for ed in sorted(glob.glob(os.path.join(a.root, "eval-*"))):
+        if not os.path.isdir(ed):   # analyze.py writes eval-data.json beside the task folders
+            continue
         meta = json.load(open(os.path.join(ed, "eval_metadata.json"), encoding="utf-8"))
         if only and meta["eval_id"] not in only:
             continue

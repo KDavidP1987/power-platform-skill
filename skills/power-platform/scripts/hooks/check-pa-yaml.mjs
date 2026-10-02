@@ -8,6 +8,9 @@
 // Deliberately narrow: only things KNOWN to break, never style. A hook that fires on style
 // gets ignored, and then it is not there when it matters.
 //
+// Hook:       PostToolUse, file path from the stdin JSON (exit 2 with findings on stderr).
+// Direct:     node check-pa-yaml.mjs <file.pa.yaml | Src folder>...   - for a project without the
+//             hooks wired: exit 0 clean, 1 findings, 2 no .pa.yaml found (not a pass).
 // Self-test:  node check-pa-yaml.mjs --selftest
 import path from 'node:path';
 import fs from 'node:fs';
@@ -131,7 +134,30 @@ function selftest() {
   process.exit(ok ? 0 : 1);
 }
 
+function direct(paths) {
+  const files = [];
+  const visit = (p) => {
+    let st; try { st = fs.statSync(p); } catch { return; }
+    if (st.isDirectory()) { for (const f of fs.readdirSync(p)) visit(path.join(p, f)); return; }
+    if (p.endsWith('.pa.yaml') && !/(^|[\\/])_EditorState\.pa\.yaml$/.test(p)) files.push(p);
+  };
+  paths.forEach(visit);
+  if (!files.length) { console.error('No .pa.yaml files found under: ' + paths.join(', ') + ' - this is NOT a pass.'); process.exit(2); }
+  const cfg = loadConfig();
+  let bad = 0;
+  for (const f of files) {
+    const dir = path.dirname(f);
+    const fileCount = path.basename(dir) === 'Src' ? fs.readdirSync(dir).filter((x) => x.endsWith('.pa.yaml')).length : null;
+    const problems = checkPaYaml(readFileSafe(f) || '', { fileCount, ceiling: cfg.canvasFileCeiling, warnAt: cfg.canvasFileWarnAt });
+    if (problems.length) { bad++; console.log(`FAIL  ${f}\n  ` + problems.join('\n  ')); }
+  }
+  console.log(`${files.length} .pa.yaml file(s) checked, ${bad} with faults that break a compile.`);
+  process.exit(bad ? 1 : 0);
+}
+
+const pathArgs = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 if (process.argv.includes('--selftest')) selftest();
+else if (pathArgs.length) direct(pathArgs);
 else {
   const file = hookFilePath(readStdinJson());
   if (!file || !file.endsWith('.pa.yaml')) process.exit(0);

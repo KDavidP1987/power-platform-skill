@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.7.0](https://img.shields.io/badge/plugin-0.7.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.7.1](https://img.shields.io/badge/plugin-0.7.1-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.7.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.7.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -489,29 +489,32 @@ Configure them with `.claude/hooks/standards.config.json` (example in `assets/`)
 
 ## Evaluation
 
-Measured on version 0.5.1. The same model and prompt ran twice with the skill and twice without, in
-fresh sessions, graded against checks fixed before the runs: by the bundled checkers where they apply,
-otherwise by a grader that did not know which configuration it was reading.
+Measured on version 0.7.0 with three runs per configuration; the three canvas tasks (search and
+picker, long text, list filters) were re-run on 0.7.1. The same model and prompt ran with the skill
+and without it, in fresh sessions, graded against checks fixed before the runs: by the bundled
+checkers where they apply, otherwise by a grader that did not know which configuration it was reading.
 
 | Test | With the skill | Without |
 |---|---|---|
-| A Submit button that does nothing after a three-part release | **8/8, 8/8** | 3/8, 3/8 |
-| A cloud flow that writes to its own trigger table | **9/9, 9/9** | 8/9, 8/9 |
-| A Playwright check of an approval in the published app | **7/8, 7/8** | 3/8, 4/8 |
-| Search and a 3,500-row picker in a `.pa.yaml` screen | **4/9, 6/9** | 2/9, 2/9 |
-| Two cloud flows that start each other | 6/6, 6/6 | 6/6, 6/6 |
-| Notifications that may reach only a tester allowlist | **7/7, 7/7** | 6/7, 6/7 |
-| Long text clipped in a gallery | **5/6, 6/6** | 4/6, 4/6 |
-| A list screen nobody asked to filter | 5/7, 6/7 | 6/7, 5/7 |
-| Theme intake before the first screen | **7/7, 6/7** | 5/7, 5/7 |
-| The documentation set for a handover | **7/7, 7/7** | 6/7, 6/7 |
-| **Total** | **133/148 (90%)** | **98/148 (66%)** |
+| A Submit button that does nothing after a three-part release | **8/8, 8/8, 8/8** | 3/8, 2/8, 2/8 |
+| A cloud flow that writes to its own trigger table | **9/9, 9/9, 9/9** | 8/9, 5/9, 8/9 |
+| A Playwright check of an approval, confirmed in Dataverse | **7/8, 8/8, 8/8** | 3/8, 4/8, 3/8 |
+| Search and a 3,500-row picker in a `.pa.yaml` screen | **9/9, 9/9, 7/9** | 2/9, 3/9, 2/9 |
+| Three of five cloud flows that start each other | **6/7, 7/7, 7/7** | 5/7, 6/7, 6/7 |
+| A recipient leak in an existing flow | **6/6, 6/6, 6/6** | 6/6, 4/6, 6/6 |
+| Long text clipped in a gallery | **5/6, 6/6, 6/6** | 4/6, 3/6, 4/6 |
+| A list screen nobody asked to filter | **7/7, 7/7, 7/7** | 5/7, 6/7, 5/7 |
+| Theme intake before the first screen | **7/7, 7/7, 7/7** | 5/7, 5/7, 5/7 |
+| The documentation set for a handover | **7/7, 7/7, 7/7** | 5/7, 5/7, 6/7 |
+| **Total** | **217/222 (98%)** | **136/222 (61%)** |
 
-On 0.1.0 the first four tests scored 32/32 against 14/32, with one run each. The six newer tests separate
-the two less: the unaided model already catches an explicit two-flow loop and adds list filters by
-itself. Four checks still fail with the skill: the Playwright script makes its Dataverse confirmation
-optional, and the `.pa.yaml` answer keeps filtering a whole-table collection without explaining which
-aggregates and lookup filters do not delegate. The second is a regression from 0.1.0.
+The loop and recipient tasks were rewritten for 0.7.0 to be harder: a cycle hidden among five flows
+with a one-day drift, and a leak inside one branch of an existing flow. On 0.7.0 one check failed in
+every run of both configurations: the agent wrote `.pa.yaml` that does not compile (a YAML comment, an
+unquoted colon-space), because the evaluation installs the skill but not its hooks. 0.7.1 tells the
+agent to run the checks itself when the hooks are not wired; that check now passes in every run with
+the skill and still fails in every run without it. The remaining misses with the skill are two flaky
+control-shape checks in the picker task and one note that does not state its trade-off.
 
 Triggering was tested on 20 requests for 0.1.0, half of them near misses such as Power BI DAX,
 Dynamics 365 C# plug-ins, Power Automate Desktop and Logic Apps. The description has not changed since:
