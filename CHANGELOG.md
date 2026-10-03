@@ -11,6 +11,29 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-03
+
+### Added
+
+- `references/power-pages.md`, from the first Power Pages build: choosing canvas, Pages or
+  model-driven by audience and licence (split by audience; no SharePoint mirror to avoid licences);
+  the site in git with `pac pages download/upload` and hand-written enhanced-model records (pages,
+  table permissions, site settings, web links); two guards on every write (table permissions for
+  rows, `Webapi/<table>/fields` for columns); Append AND Append To on both tables of a lookup set
+  through the Web API (the documented rule returned 403); process columns kept out of the client;
+  identity derived in Liquid; the Private-site gate is not a site sign-in; first-sign-in consent;
+  the blank contact and claims mapping (recorded as unverified); Liquid `fetchxml` reads and Web API
+  writes with the anti-forgery token; no `for ... else` in Power Pages Liquid (a parse error blanks
+  the page); clearing config after an upload; verifying signed out, as the submitter, in Dataverse,
+  the refusals, and at phone width.
+- `SKILL.md` routes Power Pages tasks to the new reference and names them in the description.
+
+### Changed
+
+- `deploy-tables.py` waits out the org-wide customization lock (429 `0x80071151`) with its own
+  budget (20 s x 13): a Power Pages site still provisioning held it for minutes, longer than the
+  ordinary 429 backoff. `dataverse-web-api.md` section 6 lists the signature.
+
 ## [0.10.1] - 2026-10-03
 
 ### Added

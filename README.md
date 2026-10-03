@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.10.1](https://img.shields.io/badge/plugin-0.10.1-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.11.0](https://img.shields.io/badge/plugin-0.11.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.10.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.11.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -481,6 +481,7 @@ touches it, it points there rather than repeating it.
 | | [`canvas-controls-and-patterns`](skills/power-platform/references/canvas-controls-and-patterns.md) | TextInput, ComboBox, DropDown, gallery and timer behaviour; one picker for "All", "None" and real records; read models; save handlers, concurrency and partial failure |
 | | [`canvas-layout`](skills/power-platform/references/canvas-layout.md) | Measured text width, wrap and clipping, galleries, z-order, unclickable controls, geometry audits |
 | | [`browser-verification`](skills/power-platform/references/browser-verification.md) | Playwright against Studio and the player, the stale player cache, proving a save or publish, scenario design, negative tests |
+| Power Pages | [`power-pages`](skills/power-platform/references/power-pages.md) | Choosing the app type by audience and licence; a site in git with hand-written records; table permissions plus the Web API column allow-list; Append and Append To on both sides of a lookup; Private-site sign-in, consent and claims; Liquid reads and Web API writes; the site cache; proving the refusals |
 | Dataverse | [`dataverse`](skills/power-platform/references/dataverse.md) | Solution shape, asserting on the artifact, schema hygiene, attribute types and table shapes (a team of one, membership with allocation), connection references, safe data writes |
 | | [`dataverse-web-api`](skills/power-platform/references/dataverse-web-api.md) | Tokens, names, idempotent provisioning, eventual consistency, choice members, alternate keys, dependency checks, paging |
 | | [`security-and-access`](skills/power-platform/references/security-and-access.md) | Roles kept out of the solution, roles as code, impersonation, sharing, column security, onboarding |
@@ -560,7 +561,11 @@ inputs and harness are in [`evals/`](evals/).
 - **Browser selectors track today's player and Studio.** Microsoft changes both. The driver fails
   loudly, with a screenshot and an accessibility snapshot, rather than passing when a selector
   stops matching.
-- **Model-driven apps, Power Pages, Copilot Studio and Power BI authoring** are outside the method,
+- **Power Pages coverage comes from one site** (submit, list, detail with a conversation, on the
+  enhanced data model). Basic forms, lists, file uploads, external identity providers and
+  production licensing are not yet covered. Claims mapping for the contact's name is recorded as
+  unverified.
+- **Model-driven apps, Copilot Studio and Power BI authoring** are outside the method,
   apart from model-driven forms edited by script and Power BI as an app's reporting layer
   (`reporting.md`: a medallion, the model, embedding). Report and DAX authoring in depth is planned
   as a separate skill (ROADMAP).

@@ -190,6 +190,7 @@ these was observed and cleared on retry:
 | "IsGlobal is not specified" | Binding a choice column before its global set has committed |
 | "NavigationPropertyName ... is not unique" | Recreating a relationship just deleted |
 | Read-back says the attribute does not exist; a renamed label reads old | Verifying immediately (labels change only after publish) |
+| 429 `0x80071151` "Cannot start another [EntityCustomization]" | Another customization holds the org-wide lock: a solution import, or a new Power Pages site still provisioning. It lasts minutes - give it its own budget (20 s x 13 in `deploy-tables.py`), not the few seconds an ordinary 429 gets |
 
 Retry **only** these, with bounded backoff and a publish between attempts, and rethrow everything
 else. Treat "already exists" as success: an idempotent migration that cannot be re-run part-way is

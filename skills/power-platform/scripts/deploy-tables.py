@@ -458,7 +458,7 @@ class WebApi:
         short = path.replace(self.base, "")
         metadata_post = method == "POST" and short.startswith(self.METADATA_POSTS)
         last = None
-        for attempt in range(1, 5):
+        for attempt in range(1, 15):
             self.calls.append((method, short))
             req = urllib.request.Request(url, data=data, method=method, headers=headers)
             try:
@@ -483,6 +483,13 @@ class WebApi:
                 transient = e.code in (429, 502, 503, 504) or (
                     metadata_post and (e.code == 400 or "0x80040216" in text))
                 last = "HTTP %d - %s" % (e.code, detail[:500])
+                # 0x80071151: another customization holds the org-wide lock (a solution import, or
+                # a Power Pages site still provisioning). It lasts minutes, so it gets its own budget.
+                if "0x80071151" in text and attempt < 14:
+                    print("  customization lock held elsewhere; waiting 20 s (attempt %d of 13)" % attempt,
+                          file=sys.stderr)
+                    SLEEP(20)
+                    continue
                 if transient and attempt < 4:
                     SLEEP(float(e.headers.get("Retry-After") or 3 * attempt))
                     continue

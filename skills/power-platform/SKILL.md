@@ -3,7 +3,8 @@ name: power-platform
 description: >-
   Builds, ships and verifies Microsoft Power Platform work the way software is built: canvas apps
   as .pa.yaml in git, Dataverse tables, choices, roles and solutions, Power Automate cloud flows,
-  pac pack and import, and reporting from app history. Use it for any hands-on Power Platform task,
+  pac pack and import, reporting from app history, and Power Pages sites (pages in git, table
+  permissions, Liquid and the Pages Web API). Use it for any hands-on Power Platform task,
   even a quick question and even if the skill isn't named: writing or fixing Power Fx (Filter,
   Patch, collections, delegation warnings, tables cut off at 500/2,000 rows), canvas screens,
   galleries and pickers, Dataverse columns and security, flows that loop or fail on activation,
@@ -14,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.10.1"
+  version: "0.11.0"
 ---
 
 # Power Platform development
@@ -155,6 +156,8 @@ points there.
 | Building or debugging a screen: TextInput/NumberInput/CheckBox/ComboBox/DropDown/Gallery/Timer quirks, OnChange firing on render, Default/Reset, "All"/"None" picker rows, edit screens and concurrency, permission gates, overlays, read-model tables, honest UX, list filters/search/grouping, communication history and resend, template guides with live preview | `references/canvas-controls-and-patterns.md` |
 | Layout: text width and clipping, long data-bound text (the fit rule and its four remedies), gallery row slicing, scrollbars, z-order, unclickable controls, geometry audits, theme tokens | `references/canvas-layout.md` |
 | Driving Studio or the published app with Playwright: scenarios, iframes, committing input, dropdowns, stale player cache (IndexedDB), save/publish proof, MCP startup timeouts, scenario design and negative tests, dead-click and clip sweeps, OData trace instead of Monitor | `references/browser-verification.md` |
+| **Power Pages** | |
+| Choosing canvas, Power Pages or model-driven by audience and licence; a site in git (`pac pages download/upload`, hand-written records); table permissions and the Web API column allow-list; Append and Append To on both sides of a lookup; Private-site sign-in vs site session; Entra consent and claims; Liquid `fetchxml` and Web API writes; Liquid traps; clearing the site cache; proving refusals | `references/power-pages.md` |
 | **Dataverse** | |
 | Solutions and schema: pack/unpack, asserting on the artifact, imports that never remove, what cannot change after creation, solution membership and shared tables, retiring components, column types and table shapes (a team of one, many-to-many membership), schema hygiene, delete behaviour, effective dating | `references/dataverse.md` |
 | Scripting the Web API: idempotent provisioning, payload ordering, which errors to retry, metadata PUTs, choice members, alternate keys, solution components, dependencies, paging and counts, `systemuser`, PowerShell 5.1 traps | `references/dataverse-web-api.md` |

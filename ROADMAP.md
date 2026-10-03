@@ -110,6 +110,16 @@ actually shipped.
   dataflows and lakehouses, deployment pipelines, custom visuals (`pbiviz`), usable on its own;
   this skill's reporting reference then points to it.
 
+## 0.11.x and 0.12: more kinds of app
+
+- **Power Pages** (started in 0.11.0 from one real site): confirm the claims mapping after a site
+  restart; cover basic forms and lists against the Liquid-plus-Web-API pattern, file uploads, an
+  external identity provider, and anonymous pages; a scenario format for `canvas-browser.mjs walk`
+  (or a sibling) that drives a site and proves the refusals.
+- **A responsive canvas app** (one app for desktop, tablet and phone): containers and breakpoints,
+  measured at each form factor, with the overlap and format checks extended to every breakpoint.
+- **Approvals in Teams and Outlook** from cloud flows, with the recipient pin kept.
+
 ## 0.9: stabilise
 
 - Freeze the script interfaces: options, exit codes (0 clean, 1 findings, 2 nothing examined) and
