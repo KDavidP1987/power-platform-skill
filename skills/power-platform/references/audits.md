@@ -265,6 +265,13 @@ questions**.
   set to their defaults and re-serialises the rest, so a text diff reports hundreds of differences
   that mean nothing; the semantic compare of a clean ship reports zero, and anything else it reports
   is a real difference to explain.
+- **Compare the control order too.** Declaration order is z-order, and the property compare cannot
+  see it. A ship where every property matched published a card on top of its gallery: the push had
+  inserted new controls before existing ones, and Studio's sync kept its own order for the controls
+  it already had. Per container, list the children present on both sides in repo order and in
+  published order; any difference is a draw-order bug (the earlier-in-repo control now draws on top).
+  The page looks empty while the DOM holds the gallery's text, so a text-reading browser check
+  passes too - look at a screenshot.
 - **Check the published app before anything irreversible.** A column-retirement gate must search
   the app users are running (downloaded fresh), not the repo, which already said what *will* ship.
 

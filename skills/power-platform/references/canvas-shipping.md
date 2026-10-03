@@ -315,6 +315,11 @@ preconditions change.
 - **Publish can be inert in a tab that carried a push.** With real clicks, Publish failed three
   times (dialog opened, confirm clicked, `lastpublishtime` unmoved) although the Save had landed; it
   published first try after a page reload. Hence step 5.
+- **The push does not reorder controls Studio already has.** New controls inserted before existing
+  ones, and an existing card and gallery that moved, published in a different order from the repo,
+  with the card drawn over the gallery. Append new controls after the existing ones; when existing
+  controls must change order, rename them so the push creates them fresh in repo order; then run the
+  order check in `audits.md` section 7 on the downloaded app.
 - **The compile does not report what it pushed.** It answers "do these formulas bind". One round
   touched three screens, reported `PASSED, 29 files`, and two of the three never reached the
   server. `sync_canvas` into a scratch directory (never into `Src`) and compare **semantic

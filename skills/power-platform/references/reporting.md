@@ -100,6 +100,13 @@ and why". Add a change-log table beside the events, one row per changed FIELD:
 | Priority, team | Reprioritised, Team Change | during an active period |
 | Blocked | Blocked, Unblocked | blocked |
 
+- **Carry work into the next period by two separate moves, not one.** Closing a period returns its
+  unfinished items to the backlog (one Carry-over each); planning them into the next period is a
+  later, separate step (no period -> future period = Planned). Moving items straight from the closing
+  period into the next is classified as Scope Removed from an active period - unplanned - and two
+  writes to the same row seconds apart can race the history writer, which reads the previous state.
+  Offer the planning step as one action ("add the items carried from the last period") driven by
+  the change log's Carry-over rows.
 - **Plan against actual needs the plan kept.** Store "original" columns (original points, original
   estimate hours, original due date) set ONCE, the first time the value is set, and never overwritten
   by the app; store actuals beside them (actual hours, started on, resolved on). A time box keeps its

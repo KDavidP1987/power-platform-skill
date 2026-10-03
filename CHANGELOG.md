@@ -11,6 +11,19 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-03
+
+### Added
+
+- `audits.md` section 7: compare the published control order with the repo, per container. Every
+  property matched while a card published on top of its gallery; the page looked empty and the DOM
+  still held the gallery's text.
+- `canvas-shipping.md` Path B: the push does not reorder controls Studio already has - append new
+  controls, rename controls that must move, then run the order check.
+- `reporting.md` 1b: carry unfinished work into the next period by two separate moves (back to the
+  backlog, then planned into the next period), driven by the change log's Carry-over rows; one direct
+  move is classified as unplanned scope removal and can race the history writer.
+
 ## [0.10.0] - 2026-10-03
 
 ### Added
