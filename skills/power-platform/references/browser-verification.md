@@ -414,6 +414,10 @@ negative. Use it for "is my code right?" and the player for "what do users get?"
   the typed text went nowhere (it could as easily have gone into a control). Click the formula
   editor's `.view-lines` element, then check that `textarea[aria-label="Power fx formula edit field."]`
   is `document.activeElement` before any keystroke, and read the property name and value back after.
+- **Studio's tree search changes what a coordinate click selects.** With the tree filtered, a
+  click meant for App landed on a screen, and the no-op edit typed into that screen's `Fill`. Select
+  by name, read the property dropdown and the selected-control name before typing, and restore from
+  source if it slips.
 - **Locate toolbar buttons by the `aria-label` attribute.** `getByRole('button', {name: 'Publish'})`
   did not match `<button aria-label="Publish (Ctrl+Shift+P)">` (the label carries the shortcut);
   `button[aria-label^="Publish"]` did. The same for Save.

@@ -101,6 +101,10 @@ in Preview, against the same data, before theorising (`browser-verification.md` 
   OnStart globals into OnStart after its last input, and let OnVisible recompute under a guard
   (`If(!IsBlank(gblX), Set(...))`). The test for any snapshot: *would this be wrong if every global
   were Blank?* Only a **cold load of the published player** shows it.
+  The same race hits lookup tables: a start screen whose load joined rows to a stage table built in
+  `OnStart` showed every record at the first stage on a cold load, while a screen opened later was
+  right. Build such tables as named formulas where accepted, or **end `OnStart` by running the start
+  screen's load again**, so whichever finishes last leaves the right result.
 - **Headline numbers belong in bindings, not variables.** A `CountRows` in `OnVisible` can evaluate
   while the source is still loading and never re-evaluate: one Home screen read 0 pending while
   another screen read 4 from the identical query.
@@ -209,6 +213,14 @@ in Preview, against the same data, before theorising (`browser-verification.md` 
   meant - OData `ne false` returns the nulls and still delegates. Measure with `$count` for eq true /
   eq false / eq null. Backfilling instead moves `modifiedon` on every row and wakes every update flow
   on the table (`power-automate.md`).
+- **A Yes/No column can fail to read in the player with "Invalid data from the network"** - on some
+  rows and some column selections only. Reading one flag alone in a `ForAll` failed on app-created
+  rows while the same read beside other columns, and `Text()` in Studio, worked; the Web API showed
+  a plain `false`. Do not let a decision depend on such a read: write the flag, but derive the
+  decision from a column the writer must set (a message is from the customer when it has no staff
+  author name). **A flag an external client cannot be trusted to set should be derived anyway**: a
+  portal whose Web API allow-list rightly excluded the flag sent every row with it false, and the app
+  labelled customer messages as staff ones. The derived rule was both correct and spoof-proof.
 - **A Dataverse write of `""` stores null.** A seeded empty string came back blank, so
   `("|" & x & "|") in gblSetting` silently never matched until wrapped as
   `Coalesce(gblSetting, "")`.

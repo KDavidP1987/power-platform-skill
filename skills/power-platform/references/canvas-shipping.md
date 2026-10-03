@@ -308,6 +308,24 @@ preconditions change.
   control; the save that followed saved the old app. Step 3 (read a marker control in the tree)
   is what caught it. When a change needs a data-source refresh, prefer Path A: refresh, save and
   publish in Studio, then ship by import.
+- **A clean push may not mark Studio dirty.** After a push that Studio did apply, Save stayed
+  disabled; Ctrl+S saved nothing and Publish republished the previous version, reporting success.
+  Make a **no-op edit** (change a property and change it back) so Studio has something to save,
+  then Save and Publish. `sync_canvas` into a scratch folder separates the two failures: the
+  session held the new build while the saved app held the old one.
+- **Choose the no-op edit's property with care, and check the whole saved app.** A StartScreen
+  toggle (screen B, then back to A) saved with only the first change applied: the published app
+  opened on the wrong screen while the build stamp was correct. After publishing, download the app
+  and compare `App.pa.yaml` with the source (Studio reorders properties and adds `Theme`; anything
+  else is drift), or make the no-op on a property whose half-applied state is harmless.
+- **A push that deletes controls can crash Studio.** Replacing a placeholder screen removed two
+  controls from the screen whose tree Studio had open; three pushes in a row left a white canvas,
+  the console error "An error occured while selecting the store state: Cannot read properties of
+  undefined (reading 'get')" and a Save that did nothing. Each recovery was close the tab, wait
+  about 150 seconds for the session to drop, reopen. Pushes that kept the old names (hidden) went
+  through: **replace in one push, keep the removed controls hidden, save, and delete them in a later
+  push.** Attach `pageerror` listeners to the Studio page before pushing so the crash is visible
+  rather than inferred from a blank screen.
 - **Never import a solution while a push is held.** An import republishes every customisation and
   kills the session holding the push.
 - **The hold has a timer, and expiry discards the push.** A 60-minute default expired while waiting

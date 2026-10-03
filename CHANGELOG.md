@@ -11,6 +11,25 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-03
+
+### Added
+
+From building a multi-screen evaluation and change-board canvas app over Dataverse:
+
+- `canvas-shipping.md` section 4: a clean push may not mark Studio dirty (no-op edit, then save);
+  choose the no-op property with care and compare the downloaded `App.pa.yaml` with the source; a
+  push that deletes controls can crash Studio (keep removed controls hidden for one push, watch
+  `pageerror`).
+- `power-fx-and-pa-yaml.md`: lookup tables built in `OnStart` race the start screen's load (end
+  `OnStart` by re-running it); a Yes/No column can fail to read in the player, so derive decisions,
+  and derive any flag an external client cannot be trusted to set.
+- `canvas-controls-and-patterns.md`: `App.OnError` naming the failing control; a result toast that
+  never covers navigation; use the control type Studio writes (`ModernDatePicker`); a
+  create-and-select fallback when the new row's id is not returned usefully.
+- `browser-verification.md` section 11: Studio's tree search changes what a coordinate click
+  selects.
+
 ## [0.12.0] - 2026-10-03
 
 ### Added

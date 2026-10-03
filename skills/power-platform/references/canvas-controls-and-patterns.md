@@ -243,6 +243,13 @@ copying a working control from the same app.
 - **A DatePicker cannot exclude days.** Where a value must be, say, a week start, offer a dropdown of
   valid dates ("Week beginning 6 Oct 2025") rather than a DatePicker that can only be corrected after
   the fact.
+- **Use the control type Studio itself writes.** The authoring server accepted and compiled both
+  `DatePicker` and `ModernDatePicker`; Studio's Insert > Date picker serialises as
+  `ModernDatePicker` (input `DefaultDate`, output `SelectedDate`, enums `Appearance.Outline`,
+  `DatePickerFormat.Short`). Before generating a control type the app has never contained, insert
+  one by hand, `sync_canvas` into a scratch folder and copy its name and properties. Use the short
+  format in narrow cells - the long format truncated on a phone. In the player the calendar's days
+  are buttons named like "15, October, 2026", which is how automation picks one.
 - **A canvas DropDown renders as a `<select>` with no accessible name**; automation addresses it by
   index (`browser-verification.md`).
 
@@ -285,6 +292,10 @@ copying a working control from the same app.
 
 ## 10. Screens, navigation and overlays
 
+- **A result message must not cover navigation.** A full-width toast under the masthead sat over
+  the Back link, so the next action after any save was blocked until it was dismissed. Right-align
+  it at a bounded width (`Min(contentWidth, 560)`), let a long message wrap to two lines, dismiss it
+  on select, and **clear it in every `Navigate`** so a stale result never greets the next screen.
 - **Navigate by key, and let the target screen look the record up.** Every entry point sets a key
   (`Set(gblOrderKey, ThisItem.Order)`) and the destination's `OnVisible` does one delegable `LookUp`
   on the source. Passing a record taken from a collection breaks the day that collection is narrowed
@@ -368,6 +379,11 @@ copying a working control from the same app.
 
 ## 12. Saving: write handlers, concurrency, partial failure
 
+- **Create-and-select needs a fallback.** `Set(rec, Patch(T, Defaults(T), {...}));
+  Set(gblSelId, rec.'Primary Key')` left one newly created row unselected, while the identical
+  pattern worked on two other tables in the same app. Reload the list, then select
+  `Coalesce(LookUp(colList, Id = rec.'Primary Key').Id, First(Sort(colList, CreatedOn, SortOrder.Descending)).Id)`,
+  and test creation on every table that uses it.
 - **Every save handler refreshes the table it patched.** A sweep found 24 save-and-return handlers
   across 17 editors and none called `Refresh`; the reported screen was just the one someone hit.
   Refresh at the write, not in the list's `OnVisible`, so every destination - including reopening the
@@ -494,6 +510,11 @@ relying on `DisplayMode`.
 
 ## 14. Errors and diagnostics users can see
 
+- **Set `App.OnError` from the first build.** The player's own banner ("Invalid operation:
+  division by zero") names no control. `Set(gblToast, "Something went wrong in " &
+  FirstError.Source & "." & FirstError.Observed & ": " & FirstError.Message)` turns it into a
+  located error a tester can screenshot - and Monitor may be unavailable (it was greyed out in Studio
+  while an authoring session was held).
 - **The failure reaches the screen.** Wrap reads that feed gates with a sentinel
   (`power-fx-and-pa-yaml.md`, section 1) and render the flag: degraded is acceptable, haunted is not.
 - **A negative-membership test is also true when the list failed to load.**
