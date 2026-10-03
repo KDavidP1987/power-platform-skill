@@ -14,7 +14,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.7.1"
+  version: "0.8.0"
 ---
 
 # Power Platform development
@@ -161,6 +161,8 @@ Read only the reference the task needs. Each one is self-contained.
 | Writing live data: migrations, backfills, spreadsheet loads, crosswalks, agreement audits, purges, rollup rebuilds, cutover | `references/data-migration.md` |
 | **Power Automate** | |
 | Cloud flows: definition shape, triggers and message codes, `runtimeSource`, loops and sentinels, activation-only defects, dates and nulls, imports changing flow on/off state, run-as identity, notifications and safety caps, bulk writes, FetchXML, run history, the communication log and resend, documents and templates (link, stored file, generated), attachment encoding | `references/power-automate.md` |
+| **Reporting** | |
+| Reports for an app: the append-only history table every trend chart needs (start it first), baseline and labelled demo history, commitment fields, in-app charts from galleries (burn-down, burn-up, velocity, throughput, cycle time, aging, mix) and their compile traps, metric definitions, Power BI over a Fabric medallion (bronze, silver daily snapshot, gold facts, Direct Lake model), viewer licensing | `references/reporting.md` |
 | **Process and environment** | |
 | Writing or trusting an audit; stale inputs; vacuous passes; reusable tool designs | `references/audits.md` |
 | Starting from nothing: what the person needs, the machine, pac, a self-renewing token, a browser that signs in by itself, Studio and the authoring server, the app config, what the agent hands back, and the smoke test to run before the first change | `references/first-run.md` |

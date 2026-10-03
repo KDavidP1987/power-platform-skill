@@ -11,6 +11,16 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-03
+
+### Added
+
+- `references/reporting.md`: reporting for an app. History first (an append-only event table written
+  by a flow from the trigger body, text ids, baseline, labelled demo history, commitment fields on time
+  boxes); in-app charts built from galleries of rectangles and the traps that broke a real build;
+  metric definitions; Power BI over a Fabric medallion (bronze, silver daily snapshot, gold facts,
+  Direct Lake model) and viewer licensing. Routed from SKILL.md.
+
 ### Changed
 
 - A step the person must run is handed over as ONE `!`-prefixed line to run in the agent session,

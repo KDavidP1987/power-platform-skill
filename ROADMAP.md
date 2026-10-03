@@ -75,9 +75,11 @@ actually shipped.
   - `pac canvas download` returns the PUBLISHED version, not the last save: a save cannot be
     verified by download, only a publish can;
   - a push into a co-authoring session left Save disabled (Studio saw no change), so Ctrl+S saved
-    nothing. What worked: open a NEW Studio tab while the session is held, confirm a changed
+    nothing. What worked, three times: push with a Studio tab ALREADY open on the app; that tab goes
+    white (do not reload it); open a NEW tab on the edit URL, which shows the push; confirm a changed
     property there, make a real edit and revert it with a second edit (Undo does not count, and Undo
-    was unavailable), Save, Publish, then download;
+    was unavailable), Save, Publish, then download. A push made with no Studio tab open did not reach
+    a tab opened afterwards. Fold this into `canvas-shipping.md` section 4;
   - the formula bar edits whichever property is showing, not the one last picked in the property
     list; read the property name before typing;
   - the player caches the previous build: after publishing, a reload can still show "You're using
@@ -100,6 +102,13 @@ actually shipped.
   build stamp) rather than a fixed settle.
 - **Run the long-text and list checks over more apps**, and turn any recurring false positive into a
   rule or an exclusion with a self-test case.
+
+- **Reporting** (started 0.7.x, `references/reporting.md`): confirm the Power BI section against the
+  first medallion build that follows it (dataflow shapes, the Direct Lake model deployment by API),
+  and add a check that flags `If(cond, Table(), ForAll(...))` in a `ClearCollect`.
+- **A separate Power BI and Fabric skill** (later): reports (PBIR), semantic models (TMDL), DAX,
+  dataflows and lakehouses, deployment pipelines, custom visuals (`pbiviz`), usable on its own;
+  this skill's reporting reference then points to it.
 
 ## 0.9: stabilise
 
