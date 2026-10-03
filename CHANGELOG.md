@@ -13,6 +13,12 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ### Added
 
+- `references/project-setup.md` section 12: offer version control on GitHub when a project starts
+  (optional): what git and GitHub are and why they matter for Power Platform, choosing a personal or
+  an organisation account (Enterprise Cloud, Enterprise Server, managed users, single sign-on),
+  set-up commands, private by default, what never goes in, a per-repository commit identity, what
+  the agent may do, and tagged releases. Offered from the SKILL.md pre-flight and `first-run.md`.
+
 - `scripts/deploy-tables.py`: Dataverse schema from a JSON manifest in one command - publisher,
   solution, tables, columns (text, memo, whole number, decimal, currency, yes/no, date, date and
   time, choice, autonumber, file), lookups and publish, then every shared table a lookup pulled into

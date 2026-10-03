@@ -84,7 +84,9 @@ Every non-trivial change moves through the same cycle. Skipping a step is how a 
 user unproven.
 
 1. **Pre-flight.** Correct branch, clean tree, `pac org who` names the right environment. Read
-   the project's state file (`docs/STATE.md` or equivalent) before touching anything.
+   the project's state file (`docs/STATE.md` or equivalent) before touching anything. **On a new
+   project, offer version control on GitHub** (optional; personal or organisation account) before
+   the first change: `references/project-setup.md` section 12.
 2. **Specify.** A written spec for anything non-trivial - an issue, or a backlog entry. Include
    who uses it, what proves it works, and what it touches (consult the dependency register).
    **For a new app, take the theme first**: the organisation's palette and restrictions, fonts,
@@ -162,7 +164,7 @@ Read only the reference the task needs. Each one is self-contained.
 | **Process and environment** | |
 | Writing or trusting an audit; stale inputs; vacuous passes; reusable tool designs | `references/audits.md` |
 | Starting from nothing: what the person needs, the machine, pac, a self-renewing token, a browser that signs in by itself, Studio and the authoring server, the app config, what the agent hands back, and the smoke test to run before the first change | `references/first-run.md` |
-| Starting a repo or a new app: theme intake (palette, fonts, logo, imagery, symbolism, landing page) before the first screen, layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights | `references/project-setup.md` |
+| Starting a repo or a new app: theme intake (palette, fonts, logo, imagery, symbolism, landing page) before the first screen, layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights, offering GitHub version control (what it is, personal against organisation accounts, commit identity, releases) | `references/project-setup.md` |
 | CI/CD: service-principal pac auth, export/unpack on a branch, pack + Solution Checker, managed vs unmanaged and upgrade, deployment settings for connection references and environment variables, importing flows off then activating, powerplatform-actions / Build Tools, the skill's tools as pipeline gates | `references/alm-pipelines.md` |
 | Several apps sharing one environment or a shared reference solution | `references/shared-environments.md` |
 | pac, tokens, the TDS endpoint, MCP servers, Windows/OneDrive/PowerShell failures, and production actions Claude Code must hand to a person | `references/tooling-and-auth.md` |

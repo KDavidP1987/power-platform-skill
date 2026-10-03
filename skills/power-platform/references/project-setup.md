@@ -13,6 +13,7 @@
 9. Shipping without pipeline rights, and going live
 10. Several apps sharing one environment
 11. Keeping the method current
+12. Version control on GitHub: offer it at the start
 
 ## 1. Layout
 
@@ -76,6 +77,9 @@ different GUID, and `pac canvas download` given it downloads nothing with an err
 say why.
 
 ## 2. Bootstrapping
+
+Before the first command, offer version control on GitHub (section 12): what it is, why it matters
+here, and personal against organisation accounts. A local repository comes first either way.
 
 ```
 git init -b main
@@ -414,3 +418,71 @@ pay for the same canvas traps twice.
   reviews.
 - **Correct a standard in the same change that makes it false**; a standards file is only worth
   reading if it is true.
+
+## 12. Version control on GitHub: offer it at the start
+
+**Offer this once, when a project starts, and let the person choose.** Many Power Platform makers
+have never used source control; the platform does not require it. Explain it in plain words, give
+the options below, and record the answer in the project's state file. If they decline, keep a local
+git repository anyway (`git init` costs nothing, and the hooks and evidence trail rely on it) and
+offer the remote again at the next release.
+
+### What to tell them
+
+- **Git** records every change to the project's files - what changed, who changed it, when and
+  why - and can bring back any earlier state. **GitHub** keeps that history on a server rather than
+  on one laptop, and adds sharing, reviews, issue tracking, release pages and automated checks.
+- **Why it matters for Power Platform in particular:**
+  - Studio's own version history covers one canvas app, and only in that environment. A flow, a
+    table, a role or a setting has no history at all. In git, the whole app has one history.
+  - A bad import or a broken formula can be rolled back to a known build, and the difference
+    between the two is readable line by line.
+  - The agent's work becomes reviewable. Every change it makes is a commit a person can read,
+    question or revert, and the commit message carries the evidence of what was verified.
+  - If the laptop is lost, the project survives. One team here had dozens of commits that existed
+    on a single machine.
+  - It is what "the repo is the source of truth" (core rule 1) stands on.
+
+### Which account: personal or the organisation's
+
+| Situation | Use | Notes |
+|---|---|---|
+| Work for an employer | **The organisation's GitHub** (GitHub Enterprise Cloud, Enterprise Server, or an organisation on github.com) | The work belongs to the employer. Ask who administers it, and request a repository or the right to create one. |
+| Enterprise Managed Users (accounts named like `name_company`) | The managed account only | It cannot create public repositories or push outside the enterprise. Sign the CLI in with that account. |
+| The organisation uses Azure DevOps Repos or GitLab | That | Everything here applies except the `gh` commands. |
+| Personal or learning projects, or a public, anonymised tool | A personal github.com account | Never put an employer's app, data, tenant details or people's names in a public repository. |
+
+Organisation repositories usually sit behind single sign-on: after `gh auth login` the CLI may
+need to be authorised for that organisation (the CLI prints the link). Enterprise Server has its own
+host name: `gh auth login --hostname github.<company>.com`.
+
+### Setting it up
+
+```text
+winget install --id Git.Git -e          # macOS: brew install git gh
+winget install --id GitHub.cli -e
+gh auth login                           # choose GitHub.com or the Enterprise host; sign in in the browser
+git config user.name  "<Name>"          # REPO-LOCAL, before the first commit (see below)
+git config user.email "<address the account uses>"
+gh repo create <owner>/<name> --private --source . --push
+```
+
+- **Private by default.** Make a repository public only on purpose, and only after checking it holds
+  nothing from the organisation.
+- **Never commit secrets** (tokens, client secrets, connection values) or exported rows of real
+  data. Environment URLs and ids are acceptable in a private repository and never in a public one.
+  The `.gitignore` from the bootstrap excludes `out/`, browser profiles and token caches.
+- **Set the commit identity per repository.** A machine's global git identity is usually the work
+  address. A personal or public repository then publishes the work address in every commit, and
+  removing it later means rewriting history and force-pushing, which is the person's decision. Set
+  `user.name` and `user.email` in the repository before the first commit, and check
+  `git log -1 --format=%ae` after it.
+- **What the agent may do.** Allow by rule `git status`, `git diff`, `git log` and committing.
+  Pushing to a private repository can be allowed per project. A force push or a history rewrite is
+  always the person's step.
+
+### Versions and releases
+
+Tag each delivery to match the solution version (`git tag v1.4.0`) and keep a `CHANGELOG.md`.
+`gh release create v1.4.0 --title 1.4.0 --notes-file <notes>` publishes a release page, and the
+built solution zip can be attached to it, so "what is in production" has one answer.

@@ -68,7 +68,11 @@ characters, and a synced documents folder adds length (`tooling-and-auth.md` sec
 3. **Wire the hooks** from `assets/settings.snippet.json` into `.claude/settings.json`: the
    pre-flight at session start, the `.pa.yaml` compile-killer check, the text-fit and overlap checks
    on every write, and the end-of-turn audit.
-4. **Allow the read-only commands** the agent runs constantly (`pac org who`, `git status`, the
+4. **Offer version control on GitHub** if the folder is not already a repository with a remote:
+   explain what it is and why it matters, and help choose a personal or an organisation account
+   (`project-setup.md` section 12). Set the commit identity in the repository before the first
+   commit.
+5. **Allow the read-only commands** the agent runs constantly (`pac org who`, `git status`, the
    bundled checkers), so each one is not a permission prompt. Do not allow imports or role
    changes by rule: those should stay a deliberate step.
 
