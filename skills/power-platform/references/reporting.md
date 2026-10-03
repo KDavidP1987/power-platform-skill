@@ -218,6 +218,21 @@ repo's design doc. Keep the Demo source filterable end to end.
   `Table.FromRecords(rows, type table [...], MissingField.UseNull)` with a non-nullable column type
   failed the dataflow with "failed without detail"; the query-execution API returned the real M
   error. Make every column type in such a table nullable.
+- **A combined table keeps its types only if every part has them.** Appending a hand-built row
+  (`Table.FromRecords({[...]})`, untyped) to a typed table turned the shared columns into type `any`,
+  and the lakehouse destination silently dropped every `any` column: the name and key columns vanished
+  from gold, and the model refresh then failed with "column not found in delta table". Build the extra
+  row with the base table's type: `Table.FromRecords({[...]}, Value.Type(Base), MissingField.UseNull)`.
+- **Give "none" a named member in gold; keep the null in silver.** Records that legitimately have no
+  parent (work without a project) should map to one "None" row of the dimension in gold (an id such as
+  `"none"`, a readable key and name), so users can select them. Silver keeps the honest null. Recompute
+  checks in SQL with the same mapping: `ISNULL(parent_id, 'none')`, because a null never joins and a
+  check that groups by it reports false mismatches.
+- **Direct Lake lists "(Blank)" on a dimension even when nothing is orphaned.** `VALUES(Dim[key])` had
+  one more row than `COUNTROWS(Dim)` while no fact failed `RELATED(...)` and SQL found no orphans or
+  nulls. Prove the data clean with those two queries, then hide the member on every slicer with a
+  visual-level filter (`NOT IN (null)`); otherwise a slicer offers it and an unfiltered single-select
+  slicer can land on it and blank every visual.
 - **Do not relate two sibling dimensions to each other.** With both a team and a project dimension,
   relating team to project gave some facts two paths to the same filter. Keep one path per fact:
   period facts reach team through the period, record facts through the record, aggregates directly.

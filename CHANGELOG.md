@@ -25,6 +25,11 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 - `dataverse.md` section 10: who sprints - a team of one rather than a second owner type, a
   membership table with allocation and dates, project optional on work items, keys that fall back
   to the team and resolve by a global number.
+- `reporting.md` section 4, three medallion rules: an untyped row appended to a typed table makes the
+  shared columns type `any`, which the lakehouse destination drops (build the row with
+  `Value.Type(Base)`); give records with no parent a named "None" member in gold and recompute checks
+  with the same mapping; Direct Lake lists "(Blank)" on dimensions with no orphans, so prove the data
+  clean in DAX and SQL and hide the member on slicers.
 - `audits.md` section 7: compare the published app with the repo as YAML (control/property pairs,
   properties present on both sides, control sets), because Studio drops default-valued properties.
 - `browser-verification.md`: reload the player with a cache-busting query string and answer any new
