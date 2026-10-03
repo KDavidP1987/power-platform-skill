@@ -467,6 +467,15 @@ git config user.email "<address the account uses>"
 gh repo create <owner>/<name> --private --source . --push
 ```
 
+- **No administrator rights?** The `winget` package is an installer that needs elevation; on a
+  locked-down work machine it fails with "You cancelled the installation" (1602). The CLI also ships
+  as a zip: download `gh_<version>_windows_amd64.zip` from the cli/cli releases page, extract it
+  under `%LOCALAPPDATA%\Programs\gh`, and add its `bin` folder to the user PATH. No elevation needed.
+- **Sign-in from inside an agent session**: `gh auth login --web` prints a one-time code and waits
+  for the browser. Run in the foreground through a command prefix, it is moved to the background
+  after the time limit and the code is never seen, so the wait times out. Have the agent start it
+  as a background command, read the code from its output, and give the person the code and
+  https://github.com/login/device.
 - **Private by default.** Make a repository public only on purpose, and only after checking it holds
   nothing from the organisation.
 - **Never commit secrets** (tokens, client secrets, connection values) or exported rows of real
