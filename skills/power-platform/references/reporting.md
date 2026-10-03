@@ -2,10 +2,11 @@
 
 Reports for a Power Platform app come in two places, and both stand on the same foundation:
 
-1. **History in Dataverse** - the past states that every trend chart needs (section 1).
+1. **History in Dataverse** - the past states that every trend chart needs (section 1), and the
+   change log that explains variance, planned against unplanned (section 1b).
 2. **In-app reports** - a canvas screen for the people doing the work, no extra licence (section 2).
 3. **Power BI over a medallion** - cross-project views, leadership KPIs, volumes past the app's row
-   limit (section 3).
+   limit (section 4), embedded in the app or linked from it (section 5).
 
 Offer reporting when an app manages work, money, cases or requests over time. Ask who reads each
 report and what decision it serves before building charts: a team lead deciding what to pull into
@@ -54,6 +55,53 @@ backlog. Otherwise "committed versus completed" is unrecoverable the moment item
 from that one rule: scope added mid-sprint appears as scope, an item carried back to the backlog
 leaves the sprint on the day it left, and a status that moved back and forth counts where it ended
 the day.
+
+**Inserting a past event means rewriting the events after it too.** A demo seed inserted "blocked
+on day 3" and set the earlier events to not-blocked, but left a later backfilled event that still
+said not-blocked. The derived change log then recorded a false "unblocked" at the backfill time, the
+report showed two blocked periods, and the live flow (which diffs against the LAST event) would have
+logged a false "blocked" on the item's next edit. When a script inserts a change at time t, set the
+column on every event after t as well, then re-derive anything built from the events.
+
+## 1b. Change log and variance: plan against actual, planned against unplanned
+
+The event table answers "what was the state". Leaders also ask "what changed, when, was it planned,
+and why". Add a change-log table beside the events, one row per changed FIELD:
+
+- Columns: record lookup (plus text ids for the reporting joins), field (a choice), old and new value
+  as display text (labels and names, not ids), numeric delta where it means something, the **stage**
+  (the status before the change), a **kind**, an **Unplanned** flag, an **in-active-period** flag,
+  who, when, a **Reason** that people fill in afterwards, and Source (Flow, Baseline, Demo).
+- Written by the history flow, in the same run as the event: read the record's LAST event
+  (`$orderby=changedon desc,createdon desc&$top=1`), compare it with the trigger body field by field,
+  write one change row per difference, then append the new event. Set the trigger's **concurrency to
+  1** so two quick edits diff in order; otherwise both compare with the same old event. Resolve labels
+  for ids in one query per related table (an `or` filter over the ids involved, with the all-zero GUID
+  as a harmless fallback when one is empty) rather than one lookup per field.
+- Classify in the flow, from the old and new values and the stage, with rules written in the design
+  doc and repeated exactly in any backfill script. A set that held up for sprint work:
+
+| Field | Kinds | Unplanned when |
+|---|---|---|
+| Period (sprint) | Scope Added, Scope Removed, Carry-over, else Planned | added to or removed from an active period |
+| Size or estimate | Planned (first value), Re-estimate | re-estimated during an active period |
+| Due date | Planned (first value), Slip, Pull-in | slipped |
+| Status | Rework (moved back from review or done), else Planned | rework |
+| Owner | Planned (first), Reassignment | reassigned mid-work |
+| Priority, team | Reprioritised, Team Change | during an active period |
+| Blocked | Blocked, Unblocked | blocked |
+
+- **Plan against actual needs the plan kept.** Store "original" columns (original points, original
+  estimate hours, original due date) set ONCE, the first time the value is set, and never overwritten
+  by the app; store actuals beside them (actual hours, started on, resolved on). A time box keeps its
+  capacity and its committed figure at start. Variance is then a subtraction, and the change log
+  explains it.
+- Report it as a waterfall per period (capacity, committed, added, removed, re-estimates, scope now,
+  done, carried), on-time against the ORIGINAL due date, effort variance, unplanned changes by kind
+  over time, and the change log with reasons.
+- Give the change table Read for every role and Write for the Reason only by convention; no Create
+  or Delete in the app. A label that needs to change goes through the app, never a new choice option
+  on a column the canvas app already binds (manifest-caches.md: the app never sees it).
 
 ## 2. In-app reports (canvas)
 
@@ -157,12 +205,28 @@ repo's design doc. Keep the Demo source filterable end to end.
 - **Verify by recomputation, not by status.** A script recomputes each silver and gold table in SQL
   from the layer below and compares counts and sums, then runs a handful of the model's measures in
   DAX and checks they equal the SQL answer.
+- **`MissingField.UseNull` fails the whole refresh when a column type is not nullable.**
+  `Table.FromRecords(rows, type table [...], MissingField.UseNull)` with a non-nullable column type
+  failed the dataflow with "failed without detail"; the query-execution API returned the real M
+  error. Make every column type in such a table nullable.
+- **Do not relate two sibling dimensions to each other.** With both a team and a project dimension,
+  relating team to project gave some facts two paths to the same filter. Keep one path per fact:
+  period facts reach team through the period, record facts through the record, aggregates directly.
+  Check each fact for a second route before deploying the model.
+- **Start an SLA clock where the policy says it started.** Measuring from the row's creation gave
+  negative durations for imported and backfilled records ("raised" before the row existed). Use the
+  record's stated start, or the target minus the policy hours for its priority, and record which one
+  was used in a column.
+- **Keep the workspace tidy as code.** Create a folder per app (the Fabric folders API) and deploy
+  every item into it; keep the report as PBIR in the repo; refresh the semantic model from a small
+  notebook (semantic-link) as the last pipeline activity, so data and model refresh in one run.
 - **Name the refresh identity.** A dataflow on one person's Dataverse connection stops when that
   account does. Record it as an open decision until a service account or workspace identity owns it.
 
 **Licensing, before promising a report to leaders:** viewing a Power BI report needs a Pro (or
-Premium Per User) licence for each viewer unless the workspace sits on a Fabric capacity of F64 or
-larger. Confirm which applies with whoever owns Microsoft licensing, in writing, alongside any
+Premium Per User) licence for each viewer unless the workspace sits on a capacity of F64 / P1 or
+larger, where free-licence viewers can open what is SHARED with them (share the report or an app,
+not a workspace role, when the model carries sensitive figures such as rates). Confirm which applies with whoever owns Microsoft licensing, in writing, alongside any
 standard-licence or mirroring caveats the app already carries.
 
 **Do not wire new gold tables into production reports** until the owner confirms the first live
@@ -170,3 +234,23 @@ period reconciles; build, verify, and hand over the model and the reconciliation
 
 A dedicated Power BI and Fabric skill (reports, semantic models, DAX, custom visuals) is planned;
 until it exists, this section is the pattern to follow.
+
+## 5. Power BI inside the app: embed it, and always offer the link
+
+- **Embed** with the canvas Power BI tile control: `AllowNewAPI: true`, `TileUrl` = the report's
+  `reportEmbed?reportId=...&groupId=...&autoAuth=true&ctid=<tenant>` link, plus a URL filter;
+  `LoadPowerBIContent` true only while its tab is visible. Keep both URLs (report and embed) in a
+  settings table, not in formulas.
+- **Filter by URL:** `&filter=TABLE/column eq 'value'` (table and column names are case-sensitive,
+  the value quoted, the whole thing URL-encoded; `EncodeUrl()` the value). A filter on a column the
+  deployed model does not have is ignored with only a warning icon in the filter pane - the report
+  shows everything. Verify the filter pane reads "column is value", and test a value that matches
+  nothing (every visual blank).
+- **What users will see the first time:** the app asks once for consent to Power BI, and the tile
+  shows "Sign in to view this report" until they select Sign in (a pop-up that closes itself).
+  Neither is an error; say so in the guide. The tile does not render in the Power Apps mobile player.
+- **Always add "Open in Power BI"** (`Launch()` with the same filter on the report URL). It works in
+  every player, opens the full report with its pages and filter pane, and is the fallback when the
+  tile cannot render.
+- Viewers need access to the report itself (section 4, licensing); the app grants nothing.
+

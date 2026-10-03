@@ -99,6 +99,16 @@ copying a working control from the same app.
   `power-fx-and-pa-yaml.md` section 8). Write `UpdateContext(...)` as a plain statement, seed the
   control in the same `UpdateContext` that makes it visible, and `Reset()` last. Binding a small
   editor to a one-row collection was a working alternative.
+- **After Save, a MODERN input can show the value from before the edit, and `Reset()` last does not
+  fix it.** A NumberInput bound to `locPoints`, edited 1 -> 2 and saved: the row held 2, the variable
+  held 2, the box showed 1, and saving the screen again would have written 1 back. The control keeps
+  a snapshot of `Value` and refreshes it only when `Value` changes to something other than what it
+  displays; the reload set the variable to exactly what the box already showed, so the snapshot stayed
+  stale and the reload's `Reset()` restored it. Moving the `Reset()` before the `UpdateContext` in the
+  reload did not help either. What worked: `Reset()` every input in the SAVE formula, before the
+  queued `Select(btnLoad)` - the boxes drop back to the old values, and the reload's change is then a
+  real change they apply. Opening a different record first hides the bug, so test it by saving a
+  change and reading the box, in both directions.
 - **`Reset()` cannot reach a control that is not rendered**, and a control hidden at load never
   applies its Default (section 4).
 - **An input fires `OnChange` when its bound value RESOLVES, not only when a person types.** A

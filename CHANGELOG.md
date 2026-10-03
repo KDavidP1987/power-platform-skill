@@ -11,6 +11,32 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-03
+
+### Added
+
+- `references/reporting.md` section 1b: the change log beside the event table - one row per changed
+  field, diffed against the last event by the history flow (trigger concurrency 1), with stage, kind,
+  Unplanned, reason and a classification table; "original" columns set once so plan against actual
+  is a subtraction; the variance waterfall. Section 5: Power BI inside a canvas app (tile control with
+  `AllowNewAPI` and a URL filter, the first-use consent and sign-in, no mobile rendering) and the
+  "Open in Power BI" link that always works. Section 4: `MissingField.UseNull` with non-nullable types,
+  no relationship between sibling dimensions, where an SLA clock starts, workspace folders, PBIR and a
+  notebook model refresh; licensing on F64 / P1 by sharing.
+- `canvas-controls-and-patterns.md` section 3: after Save a modern input can show the pre-edit value,
+  and `Reset()` last does not fix it; reset the inputs in the save formula before the reload.
+- `dataverse.md`: a custom table must not share a display name with a system table (Team / Teams).
+- `power-automate.md`: branch-safe expression forms (clamped index, `take()`, `ticks(if(empty()))`).
+- `browser-verification.md`: assert formula-bar focus before typing in Studio; parallel agents
+  sharing one browser must hold their own tab.
+- `audits.md`: a pipe reports the last command's exit code, not the audit's.
+
+### Changed
+
+- `tooling-and-auth.md`: the case-insensitive variable row now carries two measured collisions and
+  says to avoid single-letter names.
+- `reporting.md` and the `SKILL.md` router name the change log, variance and embedding.
+
 ## [0.8.1] - 2026-10-03
 
 ### Added

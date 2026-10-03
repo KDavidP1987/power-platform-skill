@@ -403,7 +403,10 @@ These pass activation. Some fail every run; the worst succeed and do the wrong t
   'yyyy-MM-dd'))` still runs `formatDateTime(null)` and fails - on every row without an end date,
   which is the ordinary case. Guard inside the branch (`formatDateTime(coalesce(enddate, '1900-01-01'), ...)`)
   or compute in a separate Compose behind a condition, and **test with a fixture that has neither
-  optional date**.
+  optional date**. Branch-safe forms that held up in a change-log flow: index an array with a clamped
+  index (`variables('labels')[min(max(sub(v, 100000000), 0), 5)]`), cut dates with
+  `take(string(d), 10)` rather than `substring` (which throws on a short or empty string), and
+  `ticks(if(empty(d), '1900-01-01', d))` so a missing date compares instead of failing.
 
 ## 8. An import applies the repo's on/off state
 

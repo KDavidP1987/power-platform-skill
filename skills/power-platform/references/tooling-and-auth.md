@@ -207,7 +207,7 @@ command must also work as `powershell -File`):
 | empty `HashSet` returned from a function | arrives as `$null`; `-contains` misbehaves | return a plain array |
 | `$row[$col]` on an `Import-Csv` row | silently yields nothing (0 rows created) | `$row.$col` |
 | `$pid` as a variable name | read-only automatic variable; throws at use | pick another name |
-| variable names are case-insensitive | `$appendix` and `$APPENDIX` are the same variable | never rely on case |
+| variable names are case-insensitive | `$appendix` and `$APPENDIX` are the same variable; a patch body `$b` overwrote the option-value base `$B` ("Hashtable does not contain op_Subtraction"), and result rows `$s`/`$b` overwrote lakehouse names `$S`/`$B` | never rely on case; no single-letter names in scripts |
 | `Invoke-WebRequest` non-interactively | null reference, sometimes after the POST succeeded | `-UseBasicParsing` |
 | error body in a `catch` | the response stream is already consumed; reading it returns "" | `($_.ErrorDetails.Message \| ConvertFrom-Json).error.message` |
 | TLS defaults | older hosts negotiate below TLS 1.2 | `[Net.ServicePointManager]::SecurityProtocol = 'Tls12'` |

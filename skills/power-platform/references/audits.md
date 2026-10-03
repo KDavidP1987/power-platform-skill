@@ -212,6 +212,9 @@ Runner rules, each paid for once:
 - **Honour the exit code.** A runner that counted only lines beginning `!!` printed "ok,
   findings: 0" while a geometry audit exited 1 on a real overlap. Any non-zero exit is at least one
   finding.
+- **A pipe reports the last command's exit.** `node check.mjs ... | tail -6; echo $?` printed 0
+  over ten findings: the 0 was `tail`'s. Capture the audit's own code (`node check.mjs ... > out.txt;
+  echo $?`, or `set -o pipefail`) and count the finding lines from the file.
 - **Check the special codes before the generic rule.** Test 2 and 3 first, or SKIPPED and STALE
   become phantom findings.
 - **Banner lines are not findings.** A run of `!` characters used as a heading inflated counts;

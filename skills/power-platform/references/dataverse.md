@@ -300,6 +300,11 @@ required. Use one global choice per concept, treat blank as **unknown**, and aud
 copies. Give a global choice a display name **no column already uses** - Power Fx names members
 through it (`'Discount Applies To'.Everyone`), and a collision makes the enum ambiguous.
 
+**A custom table must not share a display name with a system table.** A table displayed as "Team"
+or "Teams" collides with the system Teams table once both are in a canvas app: the data source gets
+a suffixed name and formulas bind to the wrong one. Qualify the name ("Tracker Team", "Work Team")
+before the first app binds to it; renaming afterwards touches every formula that reads it.
+
 **Value sets that carry metadata are tables.** A set with sort order, a kind, or an active flag
 (scenario, geography) is better as a table with a lookup: it can be retired by flag and ordered by
 column, and it avoids the two option-set caches in `manifest-caches.md` (that last benefit is

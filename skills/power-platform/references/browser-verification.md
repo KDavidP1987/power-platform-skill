@@ -81,6 +81,12 @@ process exposing `goto`, `snapshot`, `screenshot`, `click`, `fill`, `press`, `ev
 back to the last live tab when one closes, and records `$batch` request and response bodies. The
 bundled driver gets the same persistence from `studio` plus CDP reattachment (section 11).
 
+**Parallel agents sharing one browser drive whichever tab is current.** A background agent's bare
+`navigate` landed on a Studio tab mid-publish and raised a `beforeunload` prompt; the main session's
+next keystrokes went to the other agent's tab. Give each agent its own tab, address tabs by a held
+page handle or by URL (never by index, which shifts as tabs open), and re-select before every
+action. Brief a background agent on this when it is spawned, not after the first collision.
+
 ## 3. Sign-in and the persistent profile
 
 Use a **persistent browser profile** so the tenant sign-in (with MFA) happens once and is reused.
@@ -401,6 +407,11 @@ negative. Use it for "is my code right?" and the player for "what do users get?"
   or published across three attempts; the identical sequence with Playwright's own click (a trusted
   event after actionability checks) worked first time. Keyboard Ctrl+S works only when the editor
   iframe has focus - a person who has just clicked in the editor - so automation must click Save.
+- **Assert focus before typing a formula.** A click at a fixed position meant for the formula bar
+  landed on the canvas in a larger window; Ctrl+A then selected all 30 controls on the screen and
+  the typed text went nowhere (it could as easily have gone into a control). Click the formula
+  editor's `.view-lines` element, then check that `textarea[aria-label="Power fx formula edit field."]`
+  is `document.activeElement` before any keystroke, and read the property name and value back after.
 - **Locate toolbar buttons by the `aria-label` attribute.** `getByRole('button', {name: 'Publish'})`
   did not match `<button aria-label="Publish (Ctrl+Shift+P)">` (the label carries the shortcut);
   `button[aria-label^="Publish"]` did. The same for Save.
