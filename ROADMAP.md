@@ -112,8 +112,8 @@ actually shipped.
 
 ## 0.11.x and 0.12: more kinds of app
 
-- **Power Pages** (started in 0.11.0 from one real site): confirm the claims mapping after a site
-  restart; cover basic forms and lists against the Liquid-plus-Web-API pattern, file uploads, an
+- **Power Pages** (started in 0.11.0 from one real site): fill the contact's name through an explicitly
+  configured Entra provider (the built-in one ignored claims mapping, even after a restart); cover basic forms and lists against the Liquid-plus-Web-API pattern, file uploads, an
   external identity provider, and anonymous pages; a scenario format for `canvas-browser.mjs walk`
   (or a sibling) that drives a site and proves the refusals.
 - **A responsive canvas app** (one app for desktop, tablet and phone): containers and breakpoints,

@@ -11,6 +11,15 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-03
+
+### Changed
+
+- `power-pages.md` section 4: claims mapping on the built-in Entra provider did not fill the
+  contact even after a site restart; identify the person by `adx_identity_username` (the Entra
+  object id) and resolve name and email in the back-office app. Turn off the profile redirect on a
+  site without a profile form (every sign-in otherwise lands on an empty `/profile/`).
+
 ## [0.11.0] - 2026-10-03
 
 ### Added

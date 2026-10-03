@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.11.0](https://img.shields.io/badge/plugin-0.11.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.11.1](https://img.shields.io/badge/plugin-0.11.1-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.11.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.11.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -563,8 +563,8 @@ inputs and harness are in [`evals/`](evals/).
   stops matching.
 - **Power Pages coverage comes from one site** (submit, list, detail with a conversation, on the
   enhanced data model). Basic forms, lists, file uploads, external identity providers and
-  production licensing are not yet covered. Claims mapping for the contact's name is recorded as
-  unverified.
+  production licensing are not yet covered. Claims mapping on the built-in Entra provider did not fill the
+  contact; the reference gives the identity-by-object-id approach instead.
 - **Model-driven apps, Copilot Studio and Power BI authoring** are outside the method,
   apart from model-driven forms edited by script and Power BI as an app's reporting layer
   (`reporting.md`: a medallion, the model, embedding). Report and DAX authoring in depth is planned

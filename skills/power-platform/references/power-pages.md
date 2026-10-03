@@ -88,14 +88,21 @@ conversion is their licensing decision, not a build step.
 - **The first sign-in asks each person for consent** to the site's own app registration
   ("Portals-<site name>": sign in and read your profile). Plan it as a human step in a verification
   run; if the consent page waits too long the sign-in times out - start again from the site URL.
-- **The built-in Entra provider creates the contact with no name or email**, so every page that
-  shows "who" shows a blank. Do not build on the contact's name until it is proved filled. The
-  documented fix is claims mappings as site settings with the short claim names
-  (`Authentication/OpenIdConnect/AzureAD/RegistrationClaimsMapping` and `.../LoginClaimsMapping` =
-  `firstname=given_name,lastname=family_name,emailaddress1=upn`). Observed: with both settings
-  stored, config cleared, and a fresh sign-out and sign-in, the contact stayed blank - authentication
-  settings can need a site restart from the admin centre. Check the contact row, not the header,
-  and record the mapping as unverified until the row changes.
+- **The built-in Entra provider creates the contact with no name or email**, so every page and
+  every back-office view that shows "who" shows a blank. Observed: claims mappings set as site
+  settings (`Authentication/OpenIdConnect/AzureAD/RegistrationClaimsMapping` and
+  `.../LoginClaimsMapping` = `firstname=given_name,lastname=family_name,emailaddress1=upn`, the
+  documented short claim names), config cleared, the site restarted from the admin centre, and a
+  fresh sign-out and sign-in: the contact row did not change. The built-in provider appears to
+  ignore them; the documentation describes them for a provider you configure yourself.
+  **Best approach: identify the person by the contact's `adx_identity_username`** (the Entra object
+  id the platform writes; it cannot be typed in by the visitor) and resolve the name and email
+  where they are needed - in the back-office app, from the user directory or `systemuser`
+  (`azureactivedirectoryobjectid`). Do not ask the visitor to type their own email as identity.
+  Check the contact row, never the header, before relying on any mapping.
+- **Turn off the profile redirect** (`Authentication/Registration/ProfileRedirectEnabled = false`)
+  unless the site has a working profile form: by default every sign-in lands on `/profile/`, which on
+  a blank-template site is an empty page, instead of the page the visitor asked for.
 
 ## 5. Pages that read and write: Liquid plus the Web API
 
