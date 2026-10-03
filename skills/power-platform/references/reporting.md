@@ -12,6 +12,15 @@ Offer reporting when an app manages work, money, cases or requests over time. As
 report and what decision it serves before building charts: a team lead deciding what to pull into
 the next sprint needs a different view from a director comparing teams.
 
+## Contents
+
+1. History first - start it before anyone asks for a chart
+1b. Change log and variance: plan against actual, planned against unplanned
+2. In-app reports (canvas)
+3. Metrics: definitions that survive scrutiny
+4. Power BI over a medallion (Fabric)
+5. Power BI inside the app: embed it, and always offer the link
+
 ## 1. History first - start it before anyone asks for a chart
 
 A row holds the CURRENT state. Burn-down, burn-up, velocity, cumulative flow, cycle time and aging

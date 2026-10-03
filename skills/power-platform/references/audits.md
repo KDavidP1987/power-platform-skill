@@ -258,6 +258,13 @@ questions**.
 - **Never hard-code the list an audit compares against.** A fixed list of 31 data sources against
   an app with 35 produced "missing" findings indistinguishable from the real fault. Keep such lists
   as data, print their verification date every run, and put them under the freshness guard.
+- **Compare the published app with the repo semantically, not as text.** After a ship, download the
+  published app (`pac canvas download`), unpack it, and compare it with `Src` as YAML: flatten each
+  screen to `(control, property) -> formula`, normalise whitespace, and compare the formulas for
+  properties present on **both** sides, plus the two sets of control names. Studio drops properties
+  set to their defaults and re-serialises the rest, so a text diff reports hundreds of differences
+  that mean nothing; the semantic compare of a clean ship reports zero, and anything else it reports
+  is a real difference to explain.
 - **Check the published app before anything irreversible.** A column-retirement gate must search
   the app users are running (downloaded fresh), not the repo, which already said what *will* ship.
 

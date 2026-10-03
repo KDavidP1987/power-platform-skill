@@ -137,7 +137,7 @@ sign-in, and a "tools fetch failed" from a non-interactive health check before t
 may need two admin actions a maker cannot do: enabling the environment's Model Context Protocol
 (preview) setting, and tenant consent for the Dataverse CLI client application. Find out whether you
 are a tenant admin before planning around it (an environment with a delegated admin user set is a
-hint you are not). Package name and switches are as of the time of writing; it is a preview feature.
+hint you are not). It is a preview feature: confirm the package name and switches with `--help` before use.
 
 **GitHub hosted MCP.** The hosted endpoint rejected OAuth ("does not support dynamic client
 registration") and worked with a personal access token in an `Authorization: Bearer` header. Use a
@@ -203,7 +203,7 @@ command must also work as `powershell -File`):
 |---|---|---|
 | native exit codes do not throw | success printed over a failed `pac` | check `$LASTEXITCODE` after every call |
 | unordered hashtable in `ConvertTo-Json` | `@odata.type` emitted after the properties it types; bare `0x80040216` | `[ordered]@{ ... }` for every metadata body |
-| one-element array returned from a function | unrolled; `.Count` empty; a destructive preview printed "leaving -1" | `@( ... )` at the assignment |
+| one result from a query or function | unrolled to a single object: `.Count` empty, a destructive preview printed "leaving -1", and `$list += $row` on it threw "does not contain a method named op_Addition" | `@( ... )` at every assignment of a query result |
 | empty `HashSet` returned from a function | arrives as `$null`; `-contains` misbehaves | return a plain array |
 | `$row[$col]` on an `Import-Csv` row | silently yields nothing (0 rows created) | `$row.$col` |
 | `$pid` as a variable name | read-only automatic variable; throws at use | pick another name |
@@ -277,6 +277,12 @@ Expect the schema half and the canvas half of a change to ship on different days
 runs one of them. **Design staged changes to be correct in both states**: a new permission element
 whose rule inherits its parent's answer until the new choice member exists is safe before and after
 the schema lands, where a default-allow would have silently undone a restriction in the gap.
+
+**A tool that reads stdin hangs the agent's shell.** A checker run without file arguments (or one
+written as a hook, which reads its payload on stdin) waits forever on a shell whose stdin is open
+and never closed, and the turn stalls with no output. Give every such command `< /dev/null` (or
+`$null |` in PowerShell), and never pipe its output through `tail` or `head` when its exit code is
+the result - the pipe reports the last command's status (`audits.md` section 5).
 
 **Loops.** When each iteration needs a live designer session (the co-authoring server and an open
 Studio), a cloud cron job cannot do the work; an in-session loop on a short self-scheduled cadence

@@ -331,6 +331,9 @@ evidence. Design each one so the broken version gives a different answer.
 - **Click the control, not its caption.** A Button's caption is also a text node; `getByText` can
   hit a spot that is not the hit surface. Prefer role `button`, then the
   `div[data-control-name]` containing the text, then raw text.
+- **Choosing the option a ComboBox already holds can leave its list open**, and the open list
+  swallows the next click (a row's Open button did nothing, then timed out). Press `Escape` after
+  choosing, or check the list closed, before clicking anything else on the screen.
 - **`nth` is 0-based, and a gallery keeps every row in the DOM.** After a search narrows a gallery
   to one row, `nth: 1` resolves to a row that exists, is not painted, and swallows the click. After
   a filter, address the row as `nth: 0`.
@@ -342,6 +345,9 @@ evidence. Design each one so the broken version gives a different answer.
 - The player serves a **cached build** and may show a small *"You're using an old version of this
   app"* banner - **late**, seconds after load. Re-check before every assertion; when it appears,
   click its own Refresh, wait for the frame again, and let `OnStart` rerun.
+- **Reload with a cache-busting query string** (`...&cb=<timestamp>`) rather than a plain reload, then
+  press the banner's own Refresh if it still appears. The new build can also raise a fresh consent or
+  sign-in prompt for any connector or embedded report it adds - answer it before asserting.
 - **The banner does not always appear, and the cache is in IndexedDB.** The player keeps the app
   package in an IndexedDB database named `PowerApps`, and the persistent profile keeps it across
   browser restarts. Disabling the network cache (CDP `Network.setCacheDisabled`) does not touch it;
@@ -358,17 +364,13 @@ for (const d of await indexedDB.databases()) indexedDB.deleteDatabase(d.name);  
 
   Clearing storage re-triggers the connection consent prompt ("This app will be able to: ...").
   Click Allow, or the app loads half-initialised (the driver accepts it and says so).
-- **Publish propagation is slow and variable.** Measured: a build stamp absent 4 minutes after an
-  import and present at 6; the previous build still running 7 minutes after release; a test at 12
-  minutes, judged "long enough", still on the old build; after a full storage clear, the old build at
-  2 minutes and the new one at ~9, while on a later publish ten minutes was still not enough. A
-  first run can show the old behaviour with a success toast and nothing written, and a second
-  identical run later writes. **A negative result inside the first ten-plus minutes proves nothing.**
+- **Publish propagation is slow and variable** - measured from 4 to more than 10 minutes, with a
+  success toast and nothing written in between (`canvas-shipping.md`, "The player serves the previous
+  build"). **A negative result inside the first ten-plus minutes proves nothing.**
 - **The decisive check is the build stamp**: the ship writes a unique id into the packed app; an
   admin-only label renders it; the scenario `expect`s it (top-level `"build"`). Then "the browser is
   on the build I just shipped" is a fact, not a hope. Elapsed time is not evidence; only the stamp
-  is. Three "the fix does not work" results in one day were all the old build. **Reload and repeat
-  before debugging a formula.**
+  is. **Reload and repeat before debugging a formula.**
 - **A browser session can stick to one back-end node.** Retries kept failing in one session while a
   fresh session succeeded, and one user was always broken while another was always fine; per-session
   schema divergence was the leading explanation (mechanism unverified). Before concluding, retry in a

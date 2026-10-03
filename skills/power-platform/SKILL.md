@@ -1,20 +1,20 @@
 ---
 name: power-platform
 description: >-
-  Use this skill for any hands-on Microsoft Power Platform work, even a quick question and even if
-  the skill isn't named: writing or fixing Power Fx formulas (Filter, Patch, collections, delegation
-  warnings, large tables cut off at 500/2,000 rows), building or editing canvas app screens,
-  galleries and controls in .pa.yaml files kept in git, Dataverse tables, columns, choices and
-  solutions, Power Automate cloud flows, and pac pack/import. Also use it to debug "the button does
-  nothing", "works in Studio but not in the published app", columns the app can't see, flows that
-  loop or fail on activation, risky bulk writes, and to prove a change works by driving the
-  published app with Playwright. It brings repo-first habits and checks of what each ship step
-  actually proves. Not for Power BI/DAX, Dynamics C# plugins, desktop (RPA) flows, or custom web
+  Builds, ships and verifies Microsoft Power Platform work the way software is built: canvas apps
+  as .pa.yaml in git, Dataverse tables, choices, roles and solutions, Power Automate cloud flows,
+  pac pack and import, and reporting from app history. Use it for any hands-on Power Platform task,
+  even a quick question and even if the skill isn't named: writing or fixing Power Fx (Filter,
+  Patch, collections, delegation warnings, tables cut off at 500/2,000 rows), canvas screens,
+  galleries and pickers, Dataverse columns and security, flows that loop or fail on activation,
+  risky bulk writes, "the button does nothing", "works in Studio but not in the published app",
+  columns the app can't see, and proving a change by driving the published app with Playwright.
+  Not for DAX or Power BI report authoring, Dynamics C# plugins, desktop (RPA) flows, or custom web
   apps calling the Dataverse API.
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.9.0"
+  version: "0.10.0"
 ---
 
 # Power Platform development
@@ -142,7 +142,8 @@ are in `references/canvas-shipping.md`. Read it before the first ship in a sessi
 
 ## Where to look
 
-Read only the reference the task needs. Each one is self-contained.
+Read only the reference the task needs. Each topic has one home; another reference that touches it
+points there.
 
 | If the task involves | Read |
 |---|---|
@@ -150,12 +151,12 @@ Read only the reference the task needs. Each one is self-contained.
 | Shipping a canvas change and proving it landed: the two ship paths, building on the live manifest, build stamps, `LoadFromYaml`, Save vs Publish proof, player caching, imports that remove nothing, rollback, the screen-file ceiling | `references/canvas-shipping.md` |
 | Studio opens read-only, `connect` returns 422, a compile shows thousands of "isn't recognized", a restore says "locked by user", the authoring MCP misleads (`isError`, contract drift) | `references/authoring-sessions.md` |
 | "Works in Studio, fails in the published app"; a new column/choice/table the app cannot see; option-set members, column types, entity set names, data sources the player never initialises, the Data pane | `references/manifest-caches.md` |
-| Writing or debugging Power Fx or `.pa.yaml`: silent no-op buttons, `App.OnStart`, collections, types, lookups in queries, delegation and the row limit, chunked large-table reads, identity, compile output | `references/power-fx-and-pa-yaml.md` |
-| Building or debugging a screen: TextInput/NumberInput/CheckBox/ComboBox/DropDown/Gallery/Timer quirks, OnChange firing on render, Default/Reset, edit screens and concurrency, permission gates, overlays, read-model tables, honest UX, list filters/search/grouping, communication history and resend, template guides with live preview | `references/canvas-controls-and-patterns.md` |
+| Writing or debugging Power Fx or `.pa.yaml`: silent no-op buttons, `App.OnStart`, collections, types, lookups in queries, "no parent" (blank-lookup) filters, delegation and the row limit, chunked large-table reads, identity, compile output | `references/power-fx-and-pa-yaml.md` |
+| Building or debugging a screen: TextInput/NumberInput/CheckBox/ComboBox/DropDown/Gallery/Timer quirks, OnChange firing on render, Default/Reset, "All"/"None" picker rows, edit screens and concurrency, permission gates, overlays, read-model tables, honest UX, list filters/search/grouping, communication history and resend, template guides with live preview | `references/canvas-controls-and-patterns.md` |
 | Layout: text width and clipping, long data-bound text (the fit rule and its four remedies), gallery row slicing, scrollbars, z-order, unclickable controls, geometry audits, theme tokens | `references/canvas-layout.md` |
 | Driving Studio or the published app with Playwright: scenarios, iframes, committing input, dropdowns, stale player cache (IndexedDB), save/publish proof, MCP startup timeouts, scenario design and negative tests, dead-click and clip sweeps, OData trace instead of Monitor | `references/browser-verification.md` |
 | **Dataverse** | |
-| Solutions and schema: pack/unpack, asserting on the artifact, imports that never remove, what cannot change after creation, solution membership and shared tables, retiring components, column types, schema hygiene, delete behaviour, effective dating | `references/dataverse.md` |
+| Solutions and schema: pack/unpack, asserting on the artifact, imports that never remove, what cannot change after creation, solution membership and shared tables, retiring components, column types and table shapes (a team of one, many-to-many membership), schema hygiene, delete behaviour, effective dating | `references/dataverse.md` |
 | Scripting the Web API: idempotent provisioning, payload ordering, which errors to retry, metadata PUTs, choice members, alternate keys, solution components, dependencies, paging and counts, `systemuser`, PowerShell 5.1 traps | `references/dataverse-web-api.md` |
 | Who can read or write: roles kept out of solutions, `ReplacePrivilegesRole`, depth and record sharing, Append/AppendTo, impersonation, column security, SharePoint virtual tables, onboarding users | `references/security-and-access.md` |
 | Writing live data: migrations, backfills, spreadsheet loads, crosswalks, agreement audits, purges, rollup rebuilds, cutover | `references/data-migration.md` |
@@ -164,7 +165,7 @@ Read only the reference the task needs. Each one is self-contained.
 | **Reporting** | |
 | Reports for an app: the append-only history table every trend chart needs (start it first), baseline and labelled demo history, commitment fields, the change log and plan-vs-actual variance (planned vs unplanned), in-app charts from galleries (burn-down, burn-up, velocity, throughput, cycle time, aging, mix) and their compile traps, metric definitions, Power BI over a Fabric medallion (bronze, silver daily snapshot, gold facts, Direct Lake model), Power BI embedded in a canvas app or linked with a URL filter, viewer licensing | `references/reporting.md` |
 | **Process and environment** | |
-| Writing or trusting an audit; stale inputs; vacuous passes; reusable tool designs | `references/audits.md` |
+| Writing or trusting an audit; stale inputs; vacuous passes; comparing the published app with the repo; reusable tool designs | `references/audits.md` |
 | Starting from nothing: what the person needs, the machine, pac, a self-renewing token, a browser that signs in by itself, Studio and the authoring server, the app config, what the agent hands back, and the smoke test to run before the first change | `references/first-run.md` |
 | Starting a repo or a new app: theme intake (palette, fonts, logo, imagery, symbolism, landing page) before the first screen, layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights, offering GitHub version control (what it is, personal against organisation accounts, commit identity, releases) | `references/project-setup.md` |
 | CI/CD: service-principal pac auth, export/unpack on a branch, pack + Solution Checker, managed vs unmanaged and upgrade, deployment settings for connection references and environment variables, importing flows off then activating, powerplatform-actions / Build Tools, the skill's tools as pipeline gates | `references/alm-pipelines.md` |

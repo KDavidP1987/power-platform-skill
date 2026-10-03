@@ -155,15 +155,11 @@ delete is refused for a dangling dependency, then import.
 
 ## 5. Security roles: out of the solution (summary)
 
-**A solution carrying security roles resets live access control on import.** One import of four
-role components reset them to definitions a month old: 64 missing privileges, no non-administrator
-able to open the app. Build roles in the target environment, keep them out of the solution, and
-prove every table the app binds is granted by some role - by impersonation, not by reading the role.
-As a System Administrator you can never see the gap yourself.
-
-The full treatment - removing role components permanently, roles as code with
-`ReplacePrivilegesRole`, depth in a single business unit, record sharing, column security, virtual
-tables - is in **`security-and-access.md`**.
+**A solution carrying security roles resets live access control on import** (one import left no
+non-administrator able to open the app). Build roles in the target environment, keep them out of the
+solution, and prove every table the app binds is granted by some role, by impersonation. Removing role
+components permanently, roles as code with `ReplacePrivilegesRole`, depth, sharing, column security
+and virtual tables are in **`security-and-access.md`** section 1 onward.
 
 ## 6. Connection references
 
@@ -384,6 +380,20 @@ current Power Fx and is more robust - unverified in these projects.
 and other clients leave no trace. A Dataverse-triggered flow sees every writer; native Dataverse
 auditing may be enough. Keep owner, actor and "on behalf of" as separate lookups with name snapshots
 beside them, and use `createdon` - which no app can write - as the event time.
+
+**Who sprints: a team of one rather than a second owner type.** A tracker where sprints belong to
+teams, people sprint alone too, and one person works in several teams used three decisions:
+
+- **Every sprint has a team; an individual is a team of one** (a Team Type choice: Team or
+  Individual). Boards, capacity, velocity and reports then have one owner shape, where a sprint owned
+  by "team or person" would split every query and chart in two.
+- **Membership is its own table** (team, person, role, allocation %, from and until dates, active),
+  so one person can be 60% in one team and 40% in their individual team, and history survives a move.
+  The app enforces what the schema cannot: one active membership per person per team, exactly one
+  member in an individual team (section 13).
+- **Project is optional on work items.** Durable teams work across many projects or none (run work).
+  A display key falls back to the team's key when there is no project (`TEAM-1015`); with a global
+  autonumber the number alone identifies the item, so a link typed with either prefix resolves.
 
 ## 11. Schema hygiene that only bites in the app
 

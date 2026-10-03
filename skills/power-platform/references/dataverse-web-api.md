@@ -351,23 +351,8 @@ systemusers?$select=fullname,firstname,lastname,internalemailaddress,domainname,
 ## 15. Windows PowerShell 5.1 traps
 
 Windows PowerShell 5.1 is often the only shell on a managed machine (`pwsh` may not exist - write
-`powershell -File`). Each of these broke a Dataverse script:
+`powershell -File`). The traps that broke Dataverse scripts - non-ASCII POST bodies, TLS 1.2,
+`-UseBasicParsing`, native exit codes, collections that unroll (wrap in `@()`), `Import-Csv` indexing,
+case-insensitive variable names, `[string[]]` parameters and the dot-source guard - are one table in
+`tooling-and-auth.md` section 5, each with its consequence and fix.
 
-- **Non-ASCII in POST bodies is corrupted** by `Invoke-RestMethod` unless sent as UTF-8 bytes; a
-  mangled en-dash broke primary-name idempotency and created a duplicate row. Send
-  `[Text.Encoding]::UTF8.GetBytes($json)` with `charset=utf-8`, or normalise seed text to ASCII.
-- Force TLS 1.2 (`[Net.ServicePointManager]::SecurityProtocol = 'Tls12'`).
-- `Invoke-WebRequest` needs `-UseBasicParsing` non-interactively, or it throws a null reference -
-  after the POST has already succeeded.
-- **Native exit codes do not throw** - check `$LASTEXITCODE` after every `pac` call (`dataverse.md`,
-  section 2).
-- **Collections unroll.** A one-element array returned from a function arrives as a scalar with no
-  `.Count`; an empty HashSet arrives as `$null`. Wrap with `@()` at the assignment. One destructive
-  script's preview printed "leaving -1" because of it.
-- `$row[$col]` silently yields nothing on an `Import-Csv` row; use `$row.$col`. (0 rows created.)
-- `$pid` is a read-only automatic variable, and **variable names are case-insensitive**:
-  `$appendix` and `$APPENDIX` are one variable.
-- A `[string[]]` parameter given `"a,b"` through `powershell -File` arrives as one string; use two
-  parameters. `$PSScriptRoot` can be empty inside `param()` defaults in some hosts.
-- A dot-source guard (`if ($MyInvocation.InvocationName -eq '.') { return }`) lets one script be both
-  a runnable provisioner and a helper library.

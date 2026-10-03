@@ -454,14 +454,11 @@ the front end was still serving the pre-retirement schema. Consequences:
   delete.
 - Publish All Customizations does not clear it.
 
-**Husk relationships can claim a live lookup's name.** After one retirement, 15 relationships across
-10 tables still pointed at the dead table and 7 relationship schema names were claimed twice (bound
-to the live target and to the dead one). Creating a row that set two such lookups failed with
-`Sql error ... Sql Number: 208` every time while either lookup alone worked - with every audit
-green, because the fault is below the metadata layer. It surfaced earlier as dismissible OData
-banners on app load naming the retired table; **load errors like that are findings, not noise**.
-The detailed detection query and clean-up belong to `dataverse.md`; re-measure over a period
-before deleting, since in one case part of it was propagation that cleared on its own.
+**Husk relationships can claim a live lookup's name** after a table is retired: an insert setting
+two such lookups fails with `Sql error ... Sql Number: 208` while every audit is green, and app loads
+show dismissible OData banners naming the retired table - **load errors like that are findings, not
+noise**. Detection and clean-up are in `dataverse.md` section 9; re-measure over a
+period before deleting, since in one case part of it was propagation that cleared on its own.
 
 **What users see:** intermittently, and only from `OnVisible`, a screen opens with nothing selected,
 every control disabled and a generic fallback message, because the variable holding the reason was

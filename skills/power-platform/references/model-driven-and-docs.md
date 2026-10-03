@@ -331,12 +331,8 @@ and ship the admin screen so the business finishes the mapping.
 
 **Loading**
 
-- **A review workbook before a production load**: an issues tab with ids, "question for" and
-  severity (decision / follow-up / fix at source / cleaned / info), hyperlinks between each issue and
-  its row, the original values kept beside correction columns, a load yes/no column, the exact cell
-  tinted, and a reconciliation tab against control totals to the cent. The loader reads the reviewed
-  copy, then: dry run, trial load, read-back reconciliation. The mechanics of loading and reconciling
-  are in `data-migration.md`.
+- **A review workbook before a production load**, then dry run, trial load and read-back
+  reconciliation. Its layout and the loading mechanics are in `data-migration.md`.
 - **Splits must add back exactly.** Spreading a line total evenly across twelve periods left up to a
   few dollars of drift per line ($9 across one portfolio) - invisible in the UI, wrong in a financial
   tool. Put each line's remainder on one period and re-audit that line totals equal period sums to

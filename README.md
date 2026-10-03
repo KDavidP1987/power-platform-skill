@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.9.0](https://img.shields.io/badge/plugin-0.9.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.10.0](https://img.shields.io/badge/plugin-0.10.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.9.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.10.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -469,25 +469,26 @@ Configure them with `.claude/hooks/standards.config.json` (example in `assets/`)
 
 ## Reference library
 
-`SKILL.md` routes each task to one reference. Each is self-contained.
+`SKILL.md` routes each task to one reference. Each topic has one home; where another reference
+touches it, it points there rather than repeating it.
 
 | Area | Reference | Covers |
 |---|---|---|
 | Canvas | [`canvas-shipping`](skills/power-platform/references/canvas-shipping.md) | The ship loop and what each step proves; solution import vs co-authoring push; build stamps; `LoadFromYaml`; Save vs Publish |
 | | [`authoring-sessions`](skills/power-platform/references/authoring-sessions.md) | Studio edit locks, the authoring MCP server, what a live session can and cannot prove |
 | | [`manifest-caches`](skills/power-platform/references/manifest-caches.md) | Why the published app disagrees with Dataverse: cached choice members, column types, entity set names, column lists |
-| | [`power-fx-and-pa-yaml`](skills/power-platform/references/power-fx-and-pa-yaml.md) | Silent formula abandonment, `App.OnStart` races, choice and Yes/No types, delegation and the row limit, `.pa.yaml` syntax that fails the compile |
-| | [`canvas-controls-and-patterns`](skills/power-platform/references/canvas-controls-and-patterns.md) | TextInput, ComboBox, DropDown, gallery and timer behaviour; read models; save handlers, concurrency and partial failure |
+| | [`power-fx-and-pa-yaml`](skills/power-platform/references/power-fx-and-pa-yaml.md) | Silent formula abandonment, `App.OnStart` races, choice and Yes/No types, delegation and the row limit, "no parent" (blank-lookup) filters that stay delegable, `.pa.yaml` syntax that fails the compile |
+| | [`canvas-controls-and-patterns`](skills/power-platform/references/canvas-controls-and-patterns.md) | TextInput, ComboBox, DropDown, gallery and timer behaviour; one picker for "All", "None" and real records; read models; save handlers, concurrency and partial failure |
 | | [`canvas-layout`](skills/power-platform/references/canvas-layout.md) | Measured text width, wrap and clipping, galleries, z-order, unclickable controls, geometry audits |
 | | [`browser-verification`](skills/power-platform/references/browser-verification.md) | Playwright against Studio and the player, the stale player cache, proving a save or publish, scenario design, negative tests |
-| Dataverse | [`dataverse`](skills/power-platform/references/dataverse.md) | Solution shape, asserting on the artifact, schema hygiene, attribute types, connection references, safe data writes |
+| Dataverse | [`dataverse`](skills/power-platform/references/dataverse.md) | Solution shape, asserting on the artifact, schema hygiene, attribute types and table shapes (a team of one, membership with allocation), connection references, safe data writes |
 | | [`dataverse-web-api`](skills/power-platform/references/dataverse-web-api.md) | Tokens, names, idempotent provisioning, eventual consistency, choice members, alternate keys, dependency checks, paging |
 | | [`security-and-access`](skills/power-platform/references/security-and-access.md) | Roles kept out of the solution, roles as code, impersonation, sharing, column security, onboarding |
 | | [`data-migration`](skills/power-platform/references/data-migration.md) | Profiling, crosswalk keys, spreadsheet loads, backfills on watched tables, read models, cut-over |
 | | [`model-driven-and-docs`](skills/power-platform/references/model-driven-and-docs.md) | Model-driven forms by script, guides generated from the running product, licensing as a dependency |
 | Power Automate | [`power-automate`](skills/power-platform/references/power-automate.md) | Solution flow JSON, `runtimeSource`, SDK message codes, trigger loops and sentinel guards, activation as the only compile, notification safety |
 | Reporting | [`reporting`](skills/power-platform/references/reporting.md) | History first (an append-only event table, baseline, labelled demo history, commitment fields); a change log for plan-vs-actual variance, planned against unplanned; in-app charts from galleries and their compile traps; metric definitions (burn-down, burn-up, velocity, say/do, throughput, cycle time, aging, flow, mix); Power BI over a Fabric medallion, embedded in the app or linked with a filter; viewer licensing |
-| Process | [`audits`](skills/power-platform/references/audits.md) | Proving a check can fail, floors against vacuous passes, stale-input detection, the audits worth having |
+| Process | [`audits`](skills/power-platform/references/audits.md) | Proving a check can fail, floors against vacuous passes, stale-input detection, comparing the published app with the repo, the audits worth having |
 | | [`project-setup`](skills/power-platform/references/project-setup.md) | Repository layout, bootstrapping with `pac`, hooks, continuity documents |
 | | [`shared-environments`](skills/power-platform/references/shared-environments.md) | Several apps in one environment: ownership, shared tables, change protocol |
 | | [`alm-pipelines`](skills/power-platform/references/alm-pipelines.md) | CI/CD with `pac` in GitHub Actions and Azure DevOps: service principals, Solution Checker, managed vs unmanaged, deployment settings, activating flows, the skill's tools as gates. Each statement marked documented, observed or untested |

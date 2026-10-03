@@ -244,10 +244,9 @@ The canvas twin of the "unexpected children" skip in `dataverse.md`:
   "Following root components are not defined in customizations" - and **exits 0** with a zip that
   declares an app it does not contain.
 
-Assert declared vs present per type after every pack: canvas apps (`type="300"` vs
-`CanvasApps/*.msapp`), flows (`type="29"` vs `Workflows/*.json` and vs `<Workflow WorkflowId=`
-elements in the zip's own `customizations.xml`). In one project this guard fired twice during the
-work that introduced it.
+Assert declared against present per component type after every pack (the checks are in
+`dataverse.md` section 2; `inspect-artifact.py` runs them). In one project this
+guard fired twice during the work that introduced it.
 
 ## 4. Path B: co-authoring push (fast, more moving parts)
 
@@ -492,24 +491,9 @@ from three projects:
 Three "the fix does not work" results in one day were all the old build. **Elapsed time is not
 evidence; only the stamp is.** Reload and repeat before looking for a bug in your formula.
 
-- **The package is cached in IndexedDB, database `PowerApps`.** Unregistering the service worker
-  and clearing Cache Storage did not force the new build; deleting that database did, with no
-  "old version" banner shown:
-
-  ```js
-  for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
-  for (const k of await caches.keys()) await caches.delete(k);
-  for (const d of await indexedDB.databases()) indexedDB.deleteDatabase(d.name);
-  // then navigate to the app again and allow ~50 s to load
-  ```
-
-  Clearing storage re-triggers the connection consent prompt ("This app will be able to: ...") -
-  click Allow, or the app loads half-initialised.
-- **Studio Preview answers "is my code right?"; the player answers "what do users get?"** Preview
-  runs the saved app against live data and live metadata with no CDN, so it cannot give a
-  stale-build false negative, and it shows runtime error banners the player swallows. But it
-  cannot detect a publish that never landed (check `lastpublishtime`), and because it reads live
-  metadata it **hides** manifest-cache faults (`manifest-caches.md`). Use both.
+How to force the new build (the package lives in IndexedDB, not the HTTP cache), the consent prompt
+that clearing storage re-triggers, and when to use Studio Preview instead of the player are in
+`browser-verification.md` section 10.
 
 ## 8. Rolling back: version restore and broken-import recovery
 

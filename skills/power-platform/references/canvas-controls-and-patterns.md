@@ -205,6 +205,21 @@ copying a working control from the same app.
   screens need an explicit Clear that resets every filter.
 - **`DefaultSelectedItems` fed from a lookup read off a row is a partial record**
   (`power-fx-and-pa-yaml.md`, section 5): blank second columns, or a GUID.
+- **One picker for "All", "None" and real records: sentinel ids.** A filter that needs "All work",
+  "No project" and each project builds one collection with two fixed rows ahead of the records, so
+  the selection is always an id and every formula compares ids:
+
+  ```
+  Set(gblAll,  GUID("00000000-0000-0000-0000-000000000000"));
+  Set(gblNone, GUID("00000000-0000-0000-0000-000000000001"));
+  ClearCollect(colProjPick, {Id: gblAll, L: "All work"}, {Id: gblNone, L: "No project"});
+  Collect(colProjPick, ForAll(colProjects As p, {Id: p.Id, L: p.Name}))
+  ```
+
+  On save, write `If(sel <> gblAll && sel <> gblNone, LookUp(Projects, Project = sel))` - blank for
+  both sentinels. On a form whose field is optional, a "None" row is clearer than a picker the user
+  cannot clear (above). The query side, where "None" is a blank lookup, is in
+  `power-fx-and-pa-yaml.md` section 5.
 - **A picker that fills slowly reads as broken.** One that filled only after several queries showed
   an empty box for tens of seconds; its placeholder now says "Still loading..." and then the count.
 
@@ -233,11 +248,9 @@ copying a working control from the same app.
 
 ## 7. Gallery
 
-- **Gallery-level `OnSelect` may not fire on a row click in the player.** In two apps the detail
-  screen behind it was unreachable. Use a per-row button: a visible "Open" button, or a full-row,
-  text-free button with a real (even subtle) fill declared after the row's other children
-  (`Width: =Parent.TemplateWidth`). A fully transparent button had no hit surface in two apps
-  (`canvas-layout.md`).
+- **Gallery-level `OnSelect` may not fire on a row click in the player.** Give each row a visible
+  "Open" button; the overlay alternative and why transparent buttons fail are in `canvas-layout.md`
+  section 3.
 - **Use `AllItemsCount`** for counts and empty states (`power-fx-and-pa-yaml.md`, section 9).
 - **Guards built on a control's state die with the control.** A duplicate check counting
   `Grid.AllItems` could never fire while the grid was broken (empty AllItems), so it silently allowed

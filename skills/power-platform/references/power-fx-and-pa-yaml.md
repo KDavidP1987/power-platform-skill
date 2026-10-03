@@ -80,9 +80,8 @@ A project hook can block the `IfError(Patch(` shape at write time.
 `LookUp(..., IsBlank(col))` rendered with no caption - no error, just an empty button (observed once;
 low contrast was a rival explanation). Compute such values once into a variable and bind to that.
 
-**Studio Preview shows runtime error text the published player swallows.** "The requested operation
-is invalid." appeared only in Preview and turned a week-old mystery into a ten-minute diagnosis. Run
-the failing screen in Preview, against the same data, before theorising.
+**Studio Preview shows runtime error text the published player can swallow.** Run the failing screen
+in Preview, against the same data, before theorising (`browser-verification.md` section 10).
 
 ## 2. App.OnStart, named formulas and the start screen
 
@@ -297,6 +296,28 @@ the failing screen in Preview, against the same data, before theorising.
 - **Narrow, then finish in memory.** Delegate the selective predicate (this person, this period)
   and apply the awkward test (an open-ended `Effective To`, "blank means everyone") to a result that
   cannot reach the row limit.
+- **"Has no parent" (a blank lookup) is the awkward test.** A filter offering "No project" wrote it
+  as `IsBlank(Project)` inside the delegated `Filter`: it compiled and failed at run time with "Could
+  not find a property named 'project' on type 'project'". Rewritten as `IsBlank(Project.Project)` it
+  compiled with one delegation warning - which makes the **whole** `Filter` local, so every choice
+  of the picker, not only "No project", silently read the first 500 rows and lost server paging.
+  Keep the delegated `Filter` free of the blank test and narrow only on the branch that needs it:
+
+  ```
+  Items: =Sort(
+           If(gblProjId = gblNone,
+              Filter(Filter('Work Items', Team.Team = gblTeamId, Status <> gblDone),
+                     IsBlank(Project.Project)),
+              Filter('Work Items', Team.Team = gblTeamId, Status <> gblDone,
+                     gblProjId = gblAll || Project.Project = gblProjId)),
+           Rank, SortOrder.Ascending)
+  ```
+
+  The inner `Filter` still delegates; only the "No project" branch finishes in memory, over one
+  team's open rows. Then **read the delegation warnings per control**: afterwards the only warnings
+  should name the narrowing branch, and a warning on the gallery's `Items` for the whole expression
+  means every branch lost paging. To confirm the data server-side, the Web API form
+  `$filter=_project_value eq null` is valid.
 - **Never traverse a one-to-many relationship off a VARIABLE.** `Set(gblRec, ThisItem)` then
   `gblRec.'Order Lines'` compiled and returned nothing in the published player; Preview showed "The
   requested operation is invalid."; `Filter(Lines, Order = gblRec)` failed to compile; re-hydrating

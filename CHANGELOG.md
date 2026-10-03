@@ -11,6 +11,41 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-03
+
+### Added
+
+- `power-fx-and-pa-yaml.md` section 5: a "no parent" (blank-lookup) filter. `IsBlank(Lookup)` inside a
+  delegated `Filter` compiled and failed at run time; `IsBlank(Lookup.Id)` compiled with one
+  delegation warning that made the whole `Filter` local, so every picker choice read only the first
+  500 rows. The pattern that keeps it delegable (narrow only the branch that needs it), reading
+  delegation warnings per control, and `_lookup_value eq null` to confirm server-side.
+- `canvas-controls-and-patterns.md` section 5: one picker for "All", "None" and real records with
+  sentinel ids, and writing blank for both sentinels on save.
+- `dataverse.md` section 10: who sprints - a team of one rather than a second owner type, a
+  membership table with allocation and dates, project optional on work items, keys that fall back
+  to the team and resolve by a global number.
+- `audits.md` section 7: compare the published app with the repo as YAML (control/property pairs,
+  properties present on both sides, control sets), because Studio drops default-valued properties.
+- `browser-verification.md`: reload the player with a cache-busting query string and answer any new
+  consent prompt; choosing the option a ComboBox already holds can leave its list open and swallow
+  the next click - press Escape.
+- `tooling-and-auth.md`: a tool that reads stdin hangs the agent's shell (`< /dev/null`); a single
+  query result unrolls, and `+=` on it throws `op_Addition` (wrap in `@()`).
+- `reporting.md`: a contents list, like every other reference over 100 lines.
+
+### Changed
+
+- The skill description is in the third person and says what the skill does before when to use it.
+- Duplicated guidance consolidated, each topic in one home with pointers from the others (9
+  passages): player cache and Studio Preview (`browser-verification.md` section 10), publish
+  propagation measurements and declared-versus-present checks (`canvas-shipping.md`,
+  `dataverse.md` section 2), Preview error banners, the review workbook and cut-over
+  (`data-migration.md`), relationship husks (`dataverse.md` section 9), the security-role summary
+  (`security-and-access.md`), gallery row clicks (`canvas-layout.md` section 3), and the PowerShell
+  5.1 traps (`tooling-and-auth.md` section 5, one table instead of a table and a list).
+- A preview-tool note no longer says "as of the time of writing"; it says to check `--help`.
+
 ## [0.9.0] - 2026-10-03
 
 ### Added

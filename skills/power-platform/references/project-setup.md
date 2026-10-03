@@ -387,10 +387,8 @@ or hand the zip to IT for higher environments. Worth stating early, because it d
 design for most departmental makers. Bump `<Version>` in `Solution.xml` per release and record it in
 the changelog.
 
-**Cut over at a period boundary; never run two apps on one database.** A replacement app in the same
-environment as the one it replaces is not an isolated parallel run - people enter data in the wrong
-one and neither total is right. Decide in advance whether the old app goes read-only or is retired
-and who tells users, and empty the new period of test data first (backup taken, senders parked).
+**Cut over at a period boundary; never run two apps on one database** as a parallel run
+(`data-migration.md` section 9).
 
 Licences are a deployment dependency with lead time - see `model-driven-and-docs.md`.
 
