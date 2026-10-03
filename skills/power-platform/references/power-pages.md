@@ -173,3 +173,46 @@ content. Authentication settings can need a site restart from the admin centre.
    (for example, no second contact exists yet).
 5. **Phone width**: at 390 px, `document.documentElement.scrollWidth` must equal `clientWidth` on
    every page, and the forms must stack.
+
+## 8. Designing the site: the organisation's identity, not the platform's
+
+The default site is a grey Bootstrap portal with a placeholder header and "Company name". A site
+staff will trust looks like the organisation. What produced a quality result, in order:
+
+1. **Take the brand from the brand pack, not from memory.** Read the palette out of the official
+   presentation template's theme and cross-check it against the logo's pixels; use the documented
+   fallback typeface when the brand face is not licensed for the web. Keep display-only colours
+   (a bright cyan that fails contrast on white) for graphics and dark grounds, never for text.
+2. **Own the frame.** Replace the Header and Footer web templates with your own markup (keep the
+   sign-in and sign-out substitutions: `website.sign_in_url_substitution`,
+   `website.sign_out_url_substitution`), and put every style in one CSS web file. Draw a brand
+   graphic (an angled band, a mark) as inline SVG in the header so it needs no asset.
+3. **The platform theme fights you on bare elements.** The theme stylesheet sets every unclassed
+   `p` (20 px, black) and every heading (weight 400). Class selectors already beat it; for bare
+   paragraphs and headings inside your containers use class-scoped rules
+   (`.wrap p:not([class])`). Measure computed sizes in the browser - the stylesheet looks right.
+4. **A CSS web file under Home is linked into every page automatically**, with a version stamp;
+   adding your own `<link>` loads it twice. The stamp changes only when the site cache is cleared,
+   so after an upload the browser keeps the old stylesheet: clear the browser cache (CDP
+   `Network.clearBrowserCache` in Playwright) before judging a CSS change.
+5. **Brand artwork the owner keeps out of git** needs a prepare script that writes each web file
+   and its record with fixed ids before every upload, a `.gitignore` for both, and a designed
+   fallback (`onerror` to a text wordmark; a solid brand colour behind a photo). Screenshots of the
+   site show the artwork too - keep review captures out of git as well.
+6. **Forms that work on phones and desktops.** Required fields first and few; optional sections
+   as one `<details>` each with an "Added" badge and a running count; radio groups drawn as 44 px
+   pill buttons instead of selects; money as number inputs with a currency prefix and
+   `inputmode="decimal"`; the submit bar sticky at the bottom on phones. On a phone the first field
+   must be on the first screen - move or drop side panels that push it down.
+7. **Echo the person's own words.** Dataverse choice labels are the back office's vocabulary
+   ("Enhancement"); the form may say "Improve something we have". Show answers back in the form's
+   words: a Liquid lookup list indexed by `value | minus: <option base>` over a `split` string.
+   Never show a number the person did not type: format money in JavaScript with
+   `toLocaleString`, keeping cents when there are cents (Liquid has no thousands separator).
+8. **Show the real state as a track.** Map the stage choice to a few milestones and draw where the
+   item stands; a blank stage shows as the first one.
+9. **Get an independent review of the rendered pages.** A fresh reviewer with the screenshots, the
+   brief and the source (no shared conversation) found six defects the build's own two screenshot
+   rounds passed: answers echoed in the wrong words, rounded money, headings closer to the text
+   above than their own, chips under the wrong heading, a phone order that hid the first field,
+   and the brand shape stopping at the home page. Budget two rounds of fixes, then stop.

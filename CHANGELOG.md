@@ -11,6 +11,20 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-03
+
+### Added
+
+- `power-pages.md` section 8, from redesigning a real site in its organisation's identity: take
+  the brand from the brand pack; own the Header and Footer templates and one CSS web file; the
+  platform theme's rules on bare paragraphs and headings and how to beat them; CSS web files under
+  Home are linked automatically with a version stamp (a second link loads it twice; clear the
+  browser cache to judge a change); artwork kept out of git with a prepare script and a designed
+  fallback (review screenshots too); phone-first forms (pills, optional sections with a count,
+  money inputs, first field on the first screen); echoing answers in the form's own words via a
+  Liquid lookup and keeping typed cents; the stage as a track; an independent review of the
+  rendered pages, which found six defects two self-review rounds missed.
+
 ## [0.11.1] - 2026-10-03
 
 ### Changed
