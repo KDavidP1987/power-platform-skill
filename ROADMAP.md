@@ -65,6 +65,25 @@ actually shipped.
   - when a collection behind a people picker is acceptable under core rule 10;
   - patterns for a fixed-height card whose title wraps to two lines, and a new-record form whose
     inputs start hidden.
+- **Found shipping that app's fixes to an existing app** (write into `canvas-shipping.md` and the
+  Dataverse reference):
+  - a bare lookup-free field in a `ForAll` record (`{Id: s.Sprint, L: s.Name}`) was left out of the
+    Dataverse `$select`, so every row arrived with a blank label and a picker looked empty; the same
+    field inside an expression (`s.Name & ...`) was selected. Seen in the player's `$batch` response.
+    A check could flag a bare `x.Field` value in a collected record, and the guidance could say to
+    read the batch response before theorising (an `<>` filter was blamed first, wrongly);
+  - `pac canvas download` returns the PUBLISHED version, not the last save: a save cannot be
+    verified by download, only a publish can;
+  - a push into a co-authoring session left Save disabled (Studio saw no change), so Ctrl+S saved
+    nothing. What worked: open a NEW Studio tab while the session is held, confirm a changed
+    property there, make a real edit and revert it with a second edit (Undo does not count, and Undo
+    was unavailable), Save, Publish, then download;
+  - the formula bar edits whichever property is showing, not the one last picked in the property
+    list; read the property name before typing;
+  - the player caches the previous build: after publishing, a reload can still show "You're using
+    an old version"; select Refresh before verifying.
+- **`check-canvas-format` missed a literal label that clipped** (a two-line hint at height 24):
+  confirm the wrap estimate is applied to literal `Text`, not only to bound text.
 - **Calibrate the long-text estimate** (`check-canvas-format.mjs`, 0.56 em per character) against
   rendered output, with Power Fx `measurefont` or screenshots of the published player, and publish
   the measured range per font.
