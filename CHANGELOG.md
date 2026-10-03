@@ -11,6 +11,17 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-03
+
+### Added
+
+- `references/reporting.md` section 4: the rules a real medallion build over an event history needed -
+  lower-case text ids (the SQL endpoint returns upper-case GUIDs), one day convention, the record-day
+  snapshot in silver with dimension copies in gold for Direct Lake, one relationship path per table,
+  zero periods from the date dimension, the model refresh after every data run, retrying a new
+  dataflow's first refresh and reading real M errors through query execution, verification by SQL and
+  DAX recomputation, and naming the refresh identity.
+
 ## [0.8.0] - 2026-10-03
 
 ### Added

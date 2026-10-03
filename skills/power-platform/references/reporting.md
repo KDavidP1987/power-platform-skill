@@ -134,6 +134,32 @@ Build, deploy, run and verify each layer in order, and verify against Dataverse 
 in the cycle-time fact) - not just "the dataflow succeeded". Record each gold table's grain in the
 repo's design doc. Keep the Demo source filterable end to end.
 
+**Rules that a real build needed** (each one cost a failed run or a wrong number):
+
+- **Normalise ids to lower-case text in silver.** The Dataverse SQL endpoint returns upper-case GUIDs;
+  a flow writing ids as text writes lower-case. Joins between them silently match nothing. Turn the
+  all-zero GUID an app uses for "none" into null in the same function.
+- **Fix the day convention once.** Use UTC calendar days unless a local day is required, and define a
+  record's state on day d as its last event at or before the end of d. Write it in the design doc.
+- **Put the record-day snapshot in silver, facts in gold.** Every chart groups over the snapshot, so
+  gold stays plain group-bys. Gold carries its own copies of the dimensions, because a Direct Lake
+  model reads one lakehouse.
+- **One relationship path per table.** Facts with a record relate through the record dimension, box
+  facts through the box dimension; only facts with no record relate to the project directly. Two
+  paths to the project make every project filter ambiguous.
+- **Facts hold only rows with output** (a week with nothing finished has no throughput row). Use the
+  date dimension for zero periods rather than inventing rows.
+- **Run order is bronze, silver, gold, then a model refresh.** Without the refresh, Direct Lake keeps
+  serving the old frame and the report shows stale numbers after a successful data run.
+- **A new dataflow's first refresh can fail with no detail; retry once.** When a run fails with a
+  real cause, the job API hides the Power Query error: evaluate the failing query through the
+  dataflow's query-execution API to read the actual M error.
+- **Verify by recomputation, not by status.** A script recomputes each silver and gold table in SQL
+  from the layer below and compares counts and sums, then runs a handful of the model's measures in
+  DAX and checks they equal the SQL answer.
+- **Name the refresh identity.** A dataflow on one person's Dataverse connection stops when that
+  account does. Record it as an open decision until a service account or workspace identity owns it.
+
 **Licensing, before promising a report to leaders:** viewing a Power BI report needs a Pro (or
 Premium Per User) licence for each viewer unless the workspace sits on a Fabric capacity of F64 or
 larger. Confirm which applies with whoever owns Microsoft licensing, in writing, alongside any
