@@ -11,6 +11,13 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+### Changed
+
+- A step the person must run is handed over as ONE `!`-prefixed line to run in the agent session,
+  not commands for a separate PowerShell window: offline steps run by the agent first, absolute
+  quoted paths, a form that runs from bash or PowerShell. Now in SKILL.md "How to behave" and
+  `references/tooling-and-auth.md`.
+
 ### Added
 
 - `references/project-setup.md` section 12: offer version control on GitHub when a project starts

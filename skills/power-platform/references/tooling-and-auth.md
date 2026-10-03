@@ -234,8 +234,15 @@ record to test a rule; triggering a submit that would email a real manager; remo
 admin's access to test as a non-admin. The pattern that kept work moving:
 
 1. Make the change an **idempotent, dry-run-first script** - never prose instructions.
-2. Hand the person **one command** to run in the session (so the output comes back), for example
-   `! powershell -File scripts/migrate/014-build-roles.ps1 -Apply`, with: why it is safe to re-run
+2. Hand the person **one command to run in this agent session** - prefixed with `!` where the
+   client supports it, so the output comes back to you - never "open a PowerShell window and run
+   these". That is the default; a separate terminal only when the step needs an interactive prompt
+   the session cannot show (a device-code or browser sign-in that blocks). Make the line run as-is:
+   absolute, quoted paths (the session's working directory may not be the project), a shell-neutral
+   form that works from bash or PowerShell (`powershell -NoProfile -ExecutionPolicy Bypass -File
+   "<abs path>" -Apply`), and every offline step (generate, pack, gate) already run by you so the
+   command does only the guarded action. For example
+   `! powershell -NoProfile -ExecutionPolicy Bypass -File "C:/.../scripts/migrate/014-build-roles.ps1" -Apply`, with: why it is safe to re-run
    (idempotent, checks live drift first, exactly what it adds or removes), what it unblocks, and the
    **verification with its expected result** ("the security audit's section E goes from 2 findings
    to 0").

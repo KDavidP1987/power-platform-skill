@@ -221,6 +221,12 @@ A monthly upkeep workflow re-runs every self-test and flags new Playwright versi
   the most expensive thing you can give a Power Platform developer.
 - **Every write is production data** unless proven otherwise. Dry-run first, print the rows, fill
   blanks rather than overwrite disagreements, read back after writing, make it idempotent.
+- **When a step is the person's, hand them one line to run in this session**, not a list of
+  commands for a separate PowerShell window. Run every offline step yourself first, then give a
+  single `!`-prefixed command with absolute quoted paths that runs as-is from bash or PowerShell, say
+  what it does and what result to expect, and verify the effect yourself once its output comes back.
+  A separate terminal only when an interactive prompt cannot appear in the session.
+  `references/tooling-and-auth.md`, "The safety layer refuses some production actions".
 - **Read the first diagnostic, not the loudest.** One broken `ClearCollect` in `App.OnStart`
   produces hundreds of errors on screens nobody touched.
 - **Never reload Studio while a co-authoring push is held, never import while one is held, and
