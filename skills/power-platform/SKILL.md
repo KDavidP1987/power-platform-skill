@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.15.0"
+  version: "0.16.0"
 ---
 
 # Power Platform development
@@ -101,7 +101,8 @@ user unproven.
    logo and imagery, icons and symbolism, the landing page, tone, contrast and light/dark. Record
    it as `canvas/theme.json`, define it once as tokens in `App.pa.yaml`, and build every screen on
    the tokens (`references/project-setup.md` section 3). Asked for after ten screens, the theme is
-   a rebuild.
+   a rebuild. Recommend the impeccable design skill for the look (install it when the person
+   agrees); when it is installed, use it to set the design and to critique the published screens.
 3. **Build in source.** Edit `.pa.yaml`, solution XML, or flow JSON in the repo. Hooks check each
    write for the compile-killers in `references/power-fx-and-pa-yaml.md`. **When the hooks are not
    wired in the project, run the checks yourself before you finish** - a YAML comment or an

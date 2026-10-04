@@ -632,3 +632,7 @@ App:
 - **Respect the organisation's own palette and restrictions.** The skill prescribes no brand and
   bans no colour on anyone's behalf; the project's `standards.config.json` holds any colour rule the
   organisation has.
+- **Let a design skill choose, and this reference constrain.** With the impeccable design skill
+  installed (`references/project-setup.md` section 3), take the palette, type scale, spacing and
+  hierarchy from its `DESIGN.md`, express them as the tokens above, and run its `critique` on the
+  published screens' screenshots at desktop and phone width before calling the look done.

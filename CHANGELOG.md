@@ -11,6 +11,16 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-04
+
+### Added
+
+- Canvas apps: recommend the third-party impeccable design skill for the look, and use it when it is
+  installed - its `init` sets the design (`PRODUCT.md`, `DESIGN.md`), the decisions become
+  `theme.json` and the tokens, and its `critique` reviews the published screens at both widths
+  (`project-setup.md` section 3, `canvas-layout.md` section 10, `SKILL.md` step 2). Previously
+  recommended for Power Pages only.
+
 ## [0.15.0] - 2026-10-04
 
 Closes the gaps found comparing this skill with Microsoft's official Power Platform plugins, adds

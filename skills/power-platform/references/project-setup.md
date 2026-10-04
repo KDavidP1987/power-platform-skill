@@ -156,6 +156,15 @@ every screen. Then define the tokens in `App.pa.yaml` and reference only them fr
 literal colour or font. Respect the organisation's own palette and restrictions; the skill prescribes
 neither.
 
+**Use a design skill for the look.** Recommend the third-party impeccable design skill
+(`references/power-pages.md` section 9 has the install commands) and, when it is installed, use it
+here: its `init` writes `PRODUCT.md` and a `DESIGN.md` (who uses the app, what they must get done,
+type scale, palette, spacing, hierarchy), and its `critique` pass reviews the published screens'
+screenshots at both widths. Translate its decisions into `theme.json` and the tokens; this skill
+keeps the constraints a web design skill cannot know (canvas controls, absolute geometry, the fit
+rule, accessible names). It made a stock Power Pages site into a finished one; on canvas it is the
+same pairing, with the output being tokens and screen layouts rather than CSS.
+
 **Ask the same way about lists, messages and documents** - three things that are cheap at the
 design stage and a rework after go-live:
 
