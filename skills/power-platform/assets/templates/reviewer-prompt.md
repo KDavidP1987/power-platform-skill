@@ -34,9 +34,12 @@ does. You return findings; you fix nothing.
 - Look for what the contract does not say but a user would hit: an action offered in a state that
   forbids it, a duplicate request, a typed value refused with the wrong message, a build stamp or
   diagnostic visible to users, a placeholder date, text cut with an ellipsis where the full value
-  matters, a report figure that differs from a direct Dataverse count.
+  matters, a report figure that differs from a direct Dataverse count, two date formats on one
+  screen, an empty state or message that uses another product's nouns, a blank gap above a form, a
+  list that scrolls inside a short box on a phone, a report not refreshed since the last change.
 - Close every browser tab you open. Capture email, if at all, as the single open message's reading
-  pane only, never the mailbox.
+  pane only, never the mailbox. Capture a report as its canvas only, never the Power BI header (a
+  person's photo, the organisation's logo) or the workspace rail.
 
 ## Output
 

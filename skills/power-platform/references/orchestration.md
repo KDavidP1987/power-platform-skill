@@ -18,36 +18,57 @@ handed screens to helper agents finished first. This reference is the pattern th
 ## 1. The shape: one lead, lanes after the schema
 
 ```
-lead: plan (DOD when installed) -> acceptance contract -> decisions, all up front
+lead: acceptance contract + every decision with its recommendation          (~5 min)
   |
-lead, design lane: impeccable init -> DESIGN.md -> design/prototype.html (every screen at 1440
-  |                and 390, report mock) -> impeccable critique -> one fix batch -> tokens
+  +--> design helper: impeccable init -> DESIGN.md -> design/prototype.html (every screen at
+  |      1440 and 390, report mock) -> one critique -> one fix batch -> tokens  (~15-20 min)
+  +--> lead, lane 0: tables.json -> deploy-tables.py -> seed -> read back -> this build's
+  |      connections (Dataverse, Outlook, Approvals reference, Fabric)         (same time)
+  |
+  +--> after lane 0:      lane B flows, lane C reporting (both in one message)
+  +--> after the design:  lane A canvas (App.pa.yaml, then one helper per screen, compile, ship)
+  |                                                                            (~25 min)
   v
-lane 0 (lead, serial): tables.json -> deploy-tables.py -> seed sample data -> read back
-  |
-  +--> lane A: canvas app   (create, data sources, one helper per screen, compile, ship)
-  +--> lane B: flows        (definitions, lint-flows, deploy off, activate, run against seed rows)
-  +--> lane C: reporting    (bronze/silver/gold, model, report with the theme, reconcile)
-  |
+lead: walks in the foreground at both widths, screenshots, critique from screenshots
+  |   + independent reviewer (fresh helper) at the same time                  (~10 min)
   v
-lead: acceptance walks, screenshots, design critique (from screenshots)
-  |
-independent reviewer (fresh helper, no build context): contract, seed check, design record
-  |
-lead: one fix batch, confirm once, seed re-applied, hand-back
+lead: one fix batch, ship once, confirm once, seed re-applied, report refreshed last, hand-back
 ```
 
-- **Plan and decide first.** With DOD installed, `dod plan --autonomous` turns the brief into
-  checkable items and one batch of decisions, each with a recommendation the agent takes when no
-  person is present; `contract-to-walk.mjs --from-dod <plan.md>` turns the items into walks. Every
-  decision the build needs is made here, so no lane stops to ask.
-- **Design is the lead's first lane, in HTML.** impeccable writes `DESIGN.md` (creating the theme
-  when none is given) and the lead builds `design/prototype.html` from
-  `assets/templates/design-prototype.html`, critiques it with impeccable (its detector and browser
-  checks work on HTML) and fixes it once. Only then do the screen helpers start, each with its frame
-  of the prototype and the tokens; the reporting lane gets the report mock. A build that left design
-  to "required" in the guidance skipped it, and the person judged both measured builds without a
-  design step clearly weaker than apps built with one (`project-setup.md` section 3).
+- **Plan and decide first, in minutes.** The acceptance contract is the plan: every numbered
+  requirement as a row someone can perform, the business rules the brief leaves implicit (what a
+  pending request reserves, which state wins when two answers race, what a malformed date says),
+  and one list of decisions, each with a recommendation. `contract-to-walk.mjs` turns the rows into
+  walks. Every decision the build needs is made here, so no lane stops to ask.
+- **No person present (a headless run, or `"unattended": true` in `scripts/canvas-app.json`) means
+  no questions.** Take each recommendation, record it in
+  `docs/decisions.md` ("taken unattended"), and carry on. A step only the person can do (a licence,
+  a sign-in with no browser path) is recorded as open in `docs/STATE.md` and the build continues
+  around it; the hand-back lists it. A measured build stopped three times to ask questions it had
+  already answered with a recommendation; the plugin's Stop gate now blocks a headless turn that ends
+  on a question.
+- **Planning with DOD (opt-in, capped).** DOD (`dod@dod-skill`) plans a feature across fifteen
+  layers and closes with a prediction rate. Use it only when the person asks for it, or for a
+  multi-week feature with a person present. In a measured build of this size it raised quality a
+  little (its reviews caught real defects) at four times the time and cost of the build before it:
+  twelve review rounds, twenty amendments, and the plan kept changing through the build. When you
+  use it: at most two review rounds, then approve with the open findings recorded as assumptions;
+  freeze the plan when building starts (a build-time fix that does not change what an item claims
+  is a Log note, not an amendment and a re-review); advisory findings after READY go to the Log;
+  point an item's check at a bundled script (`check-all.mjs`, `seed-data.py check`, the walks)
+  instead of writing a parallel one; and read the items, not the whole plan, while building.
+- **Design runs beside the schema, in HTML, in a helper.** The design helper invokes impeccable
+  (`init` writes `DESIGN.md`, creating the theme when none is given), builds
+  `design/prototype.html` from `assets/templates/design-prototype.html`, critiques it once with
+  impeccable (its detector and browser checks work on HTML) and fixes it once; it does not loop on
+  polish. The screen helpers start when it returns, each with its frame of the prototype and the
+  tokens; the reporting lane gets the report mock. The build whose design the person rated best was
+  the first to run this step; builds that left design to "required" in the guidance skipped it
+  (`project-setup.md` section 3).
+- **The time budget.** For a five-screen app, two flows and a medallion, about an hour of agent
+  time: decisions 5 minutes, design and schema together 15 to 20, lanes 25, walks, critique and
+  review together 10, the fix batch and the final refresh 5. Microsoft's plugins built this brief in
+  63 minutes; a build that spends more is spending it on rework or on bookkeeping, so check which.
 
 - **Schema and sample data come first and alone.** Every other lane reads them. Seed enough
   realistic rows (`scripts/seed-data.py`, from a JSON or CSV file, idempotent by name or key) that
@@ -60,10 +81,15 @@ lead: one fix batch, confirm once, seed re-applied, hand-back
 - **Inside the canvas lane, fan out again**: write `App.pa.yaml` (tokens, named formulas, data
   sources) and a short screen plan first, then one helper per screen writing only its own
   `.pa.yaml`. Compile once, after all of them return.
-- **Never end a turn while helpers are running.** Wait for every helper's notification before
-  the final message. A headless run (`claude -p`) is terminated 600 s after the lead's turn ends
-  while background work continues, which cut a measured build off mid-task; the harness sets
-  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` for scripted runs as a backstop, not as permission.
+- **Never end a turn while helpers or background commands are running.** Wait for every helper's
+  notification before the final message. A headless run (`claude -p`) is terminated 600 s after the
+  lead's turn ends while background helpers continue; the harness sets
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` for scripted runs, but that covers helper agents and
+  workflows only, not a shell command started in the background: a measured build started its walk
+  batch that way, ended its turn ("I'll continue when they report") and lost the session twice.
+  Run walks and any check you need the answer to in the foreground (a timeout up to 600000 ms, split
+  a longer batch) or inside a helper; the plugin's Stop gate blocks a turn that ends with background
+  shell work still running.
 - **Start the lanes in one message.** Spawn the flows and reporting helpers in the same message,
   straight after lane 0, and the screen helpers together in one message; a build that ran one
   helper at a time lost the parallel gain.
@@ -160,9 +186,18 @@ else is the agent's work.
   connection because it happens to exist, and never ask the person to create one. Offer the
   permission rule that allows the command at the start (`tooling-and-auth.md` section 6), with the
   other decisions.
-- Approvals raised by your own flows during development: answer them in the owner's browser when
-  the owner has allowed it for this project. Until then, hand the person one instruction per
-  approval: the title, the response and where to click.
+- **Approvals is the exception: one connection per user per environment.** Creating a second is
+  refused by the platform (measured). Bind this build's own connection reference to the owner's
+  existing Approvals connection; that does not change the connection or anything that uses it, so
+  it needs no question. Do not replace the Approvals action with an Outlook options email to avoid
+  sharing it: a measured build did, and nothing reached the approval centre.
+- **Approvals your own test rows raise, sent to the owner: answer them yourself** in the signed-in
+  browser (Power Automate, Approvals, Received), one approve and one reject, and confirm both
+  outcomes in Dataverse and the run history. Only approvals raised by this build's own test rows
+  (the `[TEST]` prefix), never any other. A build that left them unanswered could not show its
+  approve and reject paths working.
+- **The Fabric connection needs no person either**: create it in the signed-in browser profile the
+  driver uses (`reporting.md`, "The refresh runs in Fabric").
 - Sign-in: once per identity, at the start (`references/first-run.md`), never repeated mid-build.
 - When the person must act, give one line to run in the session and verify the effect yourself.
 - Collect every decision you need at the start (theme, names, who receives messages, sample-data
@@ -180,7 +215,9 @@ else is the agent's work.
 ## 7. The finish: one verification round, one fix batch, one confirm
 
 1. The lead walks every acceptance row in the published app, at desktop and phone width, and
-   captures the screenshots the design critique needs.
+   captures the screenshots the design critique needs. The walks run in the foreground (see
+   section 1). Report screenshots show the report canvas only: never the Power BI header (it shows
+   the signed-in person's photo and the organisation's logo) or the workspace rail.
 2. Run the design critique (impeccable `critique`) on those screenshots and the report, and the
    clipping, overlap and dead-click sweeps. Truncation counts: text cut with an ellipsis where the
    full value matters to the task is a defect at phone width, not a pass.
@@ -201,5 +238,7 @@ else is the agent's work.
    which failed its own data row and hid an item from a filter.
 6. The hand-back states what passed, what was not measured and why, and never says "clean" for a
    check that did not cover truncation, both widths and every role. It includes both design
-   scores (prototype and product), the reviewer's findings and what was done with each, and, with
-   DOD, `dod close` and its prediction rate.
+   scores (prototype and product), the reviewer's findings and what was done with each, and, when
+   DOD was used, `dod close` and its prediction rate.
+7. **Refresh the report last.** After the last walk and the seed re-apply, run the pipeline once
+   more from Fabric and reconcile, so the report and Dataverse agree at hand-back.

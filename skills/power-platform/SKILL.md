@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.19.2"
+  version: "0.20.0"
 ---
 
 # Power Platform development
@@ -39,27 +39,35 @@ A measured build read this skill, followed the brief's concrete steps and skippe
 planning step below, which then cost it the design score. These are actions, not advice. For a new
 app or a multi-part build, before any table, screen or flow:
 
-1. **Plan.** When the dod skill is installed, invoke it (`dod plan --autonomous` from the brief);
-   its question batch is the decision list, and with no person present take each recommendation.
-   Otherwise write the acceptance contract (`assets/templates/acceptance-contract.md`).
-2. **Design.** Invoke the impeccable skill: `init` (PRODUCT.md, DESIGN.md; create the theme when
-   none is given), then `design/prototype.html` for every screen at 1440 and 390 px and the report
-   page, critiqued and fixed once (`references/project-setup.md` section 3).
-3. **Harness.** Install it (`scripts/setup-harness.mjs --apply`); with no person present, install
+1. **Plan and decide, in minutes.** Write the acceptance contract from the brief
+   (`assets/templates/acceptance-contract.md`): every numbered requirement as a row someone can
+   perform, the business rules the brief leaves implicit (a pending request reserves the item, a
+   typed date gets a format message, which state wins when two answers race), and one list of
+   decisions, each with a recommendation. **No person present (a headless run)? Take every
+   recommendation, record it in `docs/decisions.md`, and never end a turn on a question**: the
+   plugin blocks that stop. DOD is opt-in (section "Planning with DOD" in `references/orchestration.md`).
+2. **Harness.** Install it (`scripts/setup-harness.mjs --apply`); with no person present, install
    with the defaults rather than skipping it. It wires the checks and compacting at 40%.
-4. **Build in lanes.** Schema and sample data, then canvas (one helper per screen), flows and
-   reporting in parallel helpers; wait for every helper before ending a turn
-   (`references/orchestration.md`).
+3. **Design and schema at the same time.** In one message: a design helper invokes the impeccable
+   skill (`init` for PRODUCT.md and DESIGN.md, creating the theme when none is given, then
+   `design/prototype.html` for every screen at 1440 and 390 px and the report page, one critique, one
+   fix batch), while the lead deploys the schema, seeds the sample data and creates this build's
+   connections (`references/project-setup.md` section 3).
+4. **Build in lanes.** Flows and reporting start as soon as the schema is in; canvas (one helper per
+   screen) as soon as the prototype is. Wait for every helper and every background command before
+   ending a turn; run walks in the foreground (`references/orchestration.md`).
 5. **Prove and hand back.** Walks at both widths, impeccable `critique` from screenshots into
    `docs/design-critique.md`, the independent reviewer into `docs/review.md`, one fix batch, the
-   seed restored, then the hand-back.
+   seed restored, the report refreshed last from Fabric, then the hand-back. Budget: about an hour
+   of agent time for a five-screen app with two flows and a medallion.
 
 The plugin enforces this order with its own hooks, no project setup needed. Before a tool runs, it
 refuses a new app's screen `.pa.yaml` until DESIGN.md and `design/prototype.html` exist, and a table
-deploy until the plan exists (the DOD plan when dod is installed, otherwise a filled
-`docs/acceptance-contract.md`). At the end it blocks the hand-back, up to three times, while the
-critique, the plan or the reviewer's record is missing. A denial is an instruction: do the named
-step with its tool, then retry; do not work around it.
+deploy until the plan exists (a filled `docs/acceptance-contract.md`, or a DOD plan when the person
+chose DOD). At the end it blocks the hand-back, up to three times, while the critique or the
+reviewer's record is missing, while background work this session started is still running, or, with
+no person present, while the last message asks the person a question. A denial is an instruction: do
+the named step with its tool, then retry; do not work around it.
 
 ## The non-negotiables
 
@@ -135,8 +143,8 @@ user unproven.
    with impeccable before any `.pa.yaml` is written), tokens and the Power BI theme from it, and
    after the ship a `critique` of the published screens and report from screenshots, recorded in
    `docs/design-critique.md` (`references/project-setup.md` section 3). Never ship Power BI's default
-   theme. **With DOD installed, plan with it first** (`dod plan --autonomous`; its items become the
-   acceptance contract via `contract-to-walk.mjs --from-dod`). **Before the hand-back, an
+   theme. **The acceptance contract is the plan** (DOD only when the person chose it, capped as in
+   `references/orchestration.md`). **Before the hand-back, an
    independent reviewer** (a fresh helper, `assets/templates/reviewer-prompt.md`) walks the contract
    and the design record; fix its findings in one batch.
    **For a build with several parts, orchestrate**: schema and sample data first, then the canvas
@@ -200,7 +208,7 @@ points there.
 | If the task involves | Read |
 |---|---|
 | **Building a whole solution** | |
-| Planning with DOD and deciding up front, the design lane (impeccable, an HTML prototype of every screen and the report before any `.pa.yaml`), parallel lanes after the schema (canvas, flows, reporting), helper agents per screen, the lane contract and lock owners, keeping the lead's context and cost small (batched checks, compaction), a hands-off person (decisions only), browser hygiene, the independent reviewer and the single verification-and-fix round | `references/orchestration.md` |
+| Planning and deciding up front (DOD opt-in, capped), running with no person present, the time budget, the design lane (impeccable, an HTML prototype of every screen and the report before any `.pa.yaml`), parallel lanes after the schema (canvas, flows, reporting), helper agents per screen, the lane contract and lock owners, keeping the lead's context and cost small (batched checks, compaction), a hands-off person (decisions only), browser hygiene, the independent reviewer and the single verification-and-fix round | `references/orchestration.md` |
 | **Canvas apps** | |
 | Shipping a canvas change and proving it landed: the two ship paths, building on the live manifest, build stamps, `LoadFromYaml`, Save vs Publish proof, player caching, imports that remove nothing, rollback, the screen-file ceiling | `references/canvas-shipping.md` |
 | Studio opens read-only, `connect` returns 422, a compile shows thousands of "isn't recognized", a restore says "locked by user", the authoring MCP misleads (`isError`, contract drift) | `references/authoring-sessions.md` |

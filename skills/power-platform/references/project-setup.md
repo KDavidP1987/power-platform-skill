@@ -207,18 +207,14 @@ keeps the constraints a web design skill cannot know: canvas controls, absolute 
 rule, accessible names. When the person declines the install, record the decision and still write a
 short `DESIGN.md` by hand before the first screen, and still build the prototype.
 
-**Plan the requirements with DOD when it is installed.** DOD (a third-party planning skill,
-`dod@dod-skill` from `KDavidP1987/dod-skill`) walks fifteen consideration layers - purpose, actors and
-permissions, data, business rules, interfaces, states, security, design, failure handling, rollout
-and more - before anything is built, and closes with a prediction rate (how much of the work the
-plan foresaw). Run `dod plan --autonomous` from the brief before the first table. Its question batch
-is the single up-front decision list: each question carries a recommendation, and with no person
-present the agent takes the recommendation and records it. Turn its items into the acceptance
-contract with `contract-to-walk.mjs --from-dod <plan.md>`, so every item is performed in the published
-app; close with `dod close` and put the prediction rate in the hand-back. Without DOD, write the
-acceptance contract as before (`assets/templates/acceptance-contract.md`). It catches the business
-rules a brief leaves implicit - a pending request that must reserve the item, a typed date that needs
-a format message - which no layout check will.
+**The acceptance contract is the plan.** Write it from the brief before the first table
+(`assets/templates/acceptance-contract.md`): every numbered requirement as a row someone can perform,
+and the business rules the brief leaves implicit - a pending request that must reserve the item, a
+typed date that needs a format message, which state wins when an approval and an edit race - which no
+layout check will catch. DOD (`dod@dod-skill`) is opt-in: use it when the person asks for it or for a
+multi-week feature with a person present, capped as `references/orchestration.md` section 1 says. A
+measured build that planned with DOD uncapped spent four times the time and cost of the build before
+it for a small gain in quality.
 
 **Ask the same way about lists, messages and documents** - three things that are cheap at the
 design stage and a rework after go-live:

@@ -11,6 +11,61 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-04
+
+Test E, the fifth measured build of one brief, was the first in which every design and review step
+ran: the order gates worked. It had the best design of the five (blind 20/25, impeccable critique
+30/40), and the person rated it the best. But it took 291 agent minutes and about $82, against 63
+minutes and $24 for Microsoft's plugins, and it stopped three times to ask questions it had already
+answered. Nearly all of the extra time went to an uncapped DOD plan: 12 review rounds and 20
+amendments, with the plan still changing through the build. The other losses were a turn ended with
+the walk batch running in the background (twice), an Approvals action swapped for an Outlook email,
+and an audit that re-read 44 findings in the skill's own copied tools at every stop. This release
+keeps what made E's design best and removes what made it slow.
+
+### Added
+
+- **Run checks in the plugin's Stop gate**, read from the session transcript. They apply to every
+  project, harness or not:
+  - *Background work still running.* A command started in the background whose completion has not
+    arrived blocks the stop. `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` covers helper agents only, and a
+    headless session ends, killing the work, when the turn ends.
+  - *No person present.* In a headless run (entrypoint `sdk-*`, or `"unattended": true` in
+    `scripts/canvas-app.json`), a last message that asks the person something blocks the stop. The
+    agent takes its recommendation, records it and carries on.
+  - Replayed against Test E's real transcript, the checks catch all three stops on questions and the
+    stop with walks running, and none of the five builds' final hand-backs.
+  - 47 self-test cases.
+- **Vendored copies are skipped by the audit.** `setup-harness.mjs` records each copied tool and hook
+  with its hash in `.claude/hooks/vendored.json`. The end-of-turn audit skips a copy while it still
+  matches, and skips generated files listed in `auditIgnore` (default: the dod index).
+
+### Changed
+
+- **DOD is opt-in and capped.** The acceptance contract is the plan. The plugin no longer demands a
+  DOD plan when dod is installed, though one still counts as the plan.
+  - Use DOD when the person asks for it, or for a multi-week feature with a person present.
+  - When used: two review rounds at most, the plan frozen at build start, advisories after READY to
+    the Log, and items pointed at bundled checks.
+  - Findings and suggestions were sent to dod-skill (issues 15 and 16).
+- **Design and schema at the same time.** A design helper runs impeccable (init, the HTML prototype,
+  one critique, one fix batch) while the lead deploys the schema, seeds the data and creates the
+  connections. Flows and reporting start after the schema; canvas starts after the design.
+- **A time budget.** About an hour of agent time for a five-screen app, two flows and a medallion,
+  with each phase given its own allowance.
+- **Walks run in the foreground**, or inside a helper. Never as a background shell command.
+- **Hands-off, completed:**
+  - Approvals allows one connection per user per environment. Bind this build's own reference to the
+    owner's existing connection without asking, and never swap the action for an Outlook email.
+  - Answer the approvals your own `[TEST]` rows raise, in the signed-in browser, one approve and one
+    reject.
+  - Create the Fabric Dataflow connection in the signed-in browser profile, not by asking the person.
+- **Report screenshots show the report canvas only.** Never the Power BI header, which shows the
+  person's photo and the organisation's logo, or the workspace rail. The same rule is in the
+  reviewer prompt.
+- **More reviewer checks:** two date formats on one screen, another product's nouns in copy, blank
+  gaps, a phone list scrolling inside a short box, and a stale report. The report is refreshed last.
+
 ## [0.19.2] - 2026-10-04
 
 The 0.19.1 Stop gate produced a report, not compliance: in a live test the agent listed the missing

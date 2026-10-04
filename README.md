@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.19.2](https://img.shields.io/badge/plugin-0.19.2-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.20.0](https://img.shields.io/badge/plugin-0.20.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.19.2 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.20.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -470,8 +470,8 @@ Platform build, `"pluginGate": false` in `scripts/canvas-app.json` turns them of
 
 | Gate | Event | Does |
 |---|---|---|
-| `plugin-gate.mjs --pre` | PreToolUse | Refuses a new app's screen `.pa.yaml` (file tool or shell write) until `DESIGN.md` and `design/prototype.html` exist, and `deploy-tables.py` (not `--plan`) until the DOD plan or a filled acceptance contract exists. An established app (three or more screens) is not held up |
-| `plugin-gate.mjs` | Stop | Blocks the hand-back while the design, prototype, screenshot critique, DOD plan or reviewer's record is missing, or a token is written to a file or lakehouse; up to three times per session, then lets the stop through with the gaps on stderr |
+| `plugin-gate.mjs --pre` | PreToolUse | Refuses a new app's screen `.pa.yaml` (file tool or shell write) until `DESIGN.md` and `design/prototype.html` exist, and `deploy-tables.py` (not `--plan`) until a filled acceptance contract (or a DOD plan, when the person chose DOD) exists. An established app (three or more screens) is not held up |
+| `plugin-gate.mjs` | Stop | Blocks the hand-back while the design, prototype, screenshot critique or reviewer's record is missing, or a token is written to a file or lakehouse; and, read from the session transcript, while background shell work this session started is still running, or when no person is present (a headless run) and the last message asks the person a question. Up to three times per session and kind, then lets the stop through with the gaps on stderr |
 
 **Project hooks**: copy `skills/power-platform/scripts/hooks/` to `.claude/hooks/` and merge
 `assets/settings.snippet.json` into `.claude/settings.json`.

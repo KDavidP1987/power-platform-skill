@@ -1,4 +1,5 @@
 // Shared helpers for the power-platform skill's Claude Code hooks. Node built-ins only.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
@@ -25,6 +26,7 @@ export const DEFAULT_CONFIG = {
   canvasFileWarnAt: 45,
   debugMarkers: true,       // TODO/FIXME/console.log in source, at Stop
   designGate: true,         // at Stop: a UI project needs DESIGN.md, and a critique record once shipped (false turns it off)
+  auditIgnore: ['docs/dod/README.md'],   // generated files the audit never reads (the dod index writes its own symbols)
   bookkeeping: {
     solutionDir: 'solution/',
     dependencyRegister: 'docs/dependencies.md',
@@ -32,6 +34,14 @@ export const DEFAULT_CONFIG = {
     changelog: 'CHANGELOG.md',
   },
 };
+// Skill-owned copies (setup-harness records them with a hash): true while the file is unchanged.
+export function isVendoredCopy(root, rel) {
+  let man = null;
+  try { man = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'hooks', 'vendored.json'), 'utf8')); } catch { return false; }
+  const want = man?.files?.[rel.replace(/\\/g, '/')];
+  if (!want) return false;
+  try { return crypto.createHash('sha256').update(fs.readFileSync(path.join(root, rel))).digest('hex') === want; } catch { return false; }
+}
 export function loadConfig(root = process.cwd()) {
   const p = path.join(root, '.claude', 'hooks', 'standards.config.json');
   try {

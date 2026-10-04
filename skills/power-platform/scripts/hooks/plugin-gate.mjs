@@ -26,10 +26,21 @@
 //   1. DESIGN.md (root or docs/)                   - impeccable init
 //   2. design/prototype.html (canvas source)       - the HTML design pass
 //   3. docs/design-critique.md, once shipped        - impeccable critique of the published screens
-//   4. a DOD plan (docs/dod/*.md), when DOD is installed
-//   5. docs/review.md, once shipped                 - the independent reviewer
-//   6. no access token written to a file or to shared storage (lakehouse, OneLake), including a
+//   4. docs/review.md, once shipped                 - the independent reviewer
+//   5. no access token written to a file or to shared storage (lakehouse, OneLake), including a
 //      token file placed there over REST
+// The plan is the acceptance contract, or a DOD plan when the person chose DOD; neither is demanded
+// at the stop (a measured build spent four times the cost of the one before it on an open-ended
+// DOD plan, so DOD is opt-in since 0.20).
+//
+// Two run checks apply to every project, harness or not, read from the session transcript:
+//   R1. background shell work still running (a command started with run_in_background whose
+//       completion has not arrived): a headless run ends with the turn and kills it; a measured build
+//       lost two legs this way. Wait for it, then end the turn.
+//   R2. no person present (a headless run: entrypoint sdk-*, or "unattended": true in
+//       scripts/canvas-app.json) and the last message asks the person a question: take the
+//       recommendation, record it, carry on. A measured build stopped three times to ask questions
+//       it had already answered with a recommendation.
 // Self-test: node plugin-gate.mjs --selftest
 import fs from 'node:fs';
 import os from 'node:os';
@@ -132,11 +143,6 @@ export function evaluate(root, input = {}, env = process.env) {
         `screens at 1440 and 390 px${hasBi ? ' and the report' : ''}, fix what it raises in one batch, and record the screenshots and the score.`);
     }
   }
-  if (dodInstalled(env)) {
-    let plans = [];
-    try { plans = fs.readdirSync(path.join(root, 'docs', 'dod')).filter((f) => /\.md$/i.test(f) && f.toLowerCase() !== 'readme.md'); } catch { /* none */ }
-    if (!plans.length) missing.push('No DOD plan in docs/dod/. Invoke the dod skill (Skill tool: dod): dod plan --autonomous from the brief, and map its items to the acceptance contract.');
-  }
   if (shipped && !exists(root, 'docs/review.md')) {
     missing.push('docs/review.md is missing. Run the independent reviewer (assets/templates/reviewer-prompt.md, orchestration.md section 7) and record its findings and what was fixed.');
   }
@@ -151,18 +157,82 @@ export function evaluate(root, input = {}, env = process.env) {
     '\nTurn this gate off only with the person\'s agreement: "pluginGate": false in scripts/canvas-app.json.';
 }
 
-// Stop: block up to MAX_BLOCKS times per session, then let it through with the gaps on stderr.
+// ---- Run checks from the transcript (R1, R2) ---------------------------------------------------
+const BG_START = /running in background with ID: ([\w-]+)/g;
+const BG_DONE = /<task-id>([\w-]+)<\/task-id>[\s\S]{0,600}?<status>(completed|failed|killed|stopped|cancelled|timed_out)<\/status>/g;
+// A request to the person, with or without a question mark (a live stop listed "Decisions I need from
+// you" as statements); weaker wording counts only next to a question mark.
+const ASKS_STRONG = /\b(waiting (?:on|for) (?:you|your)|i need (?:you|your|from you)|decisions? (?:i need|for you)|answer by number|paused until you|your (?:go-ahead|choice|decision|answer|reply|confirmation)s?\b|please (?:confirm|sign in|choose|reply|answer|decide|approve))/i;
+const ASKS_WEAK = /\b(recommend(?:ed|ation)?|should i|do you want|would you like|may i|shall i)\b/i;
+export function transcriptFacts(transcriptPath) {
+  const facts = { entrypoint: '', pending: [], lastText: '' };
+  let text = '';
+  try { text = fs.readFileSync(transcriptPath, 'utf8'); } catch { return facts; }
+  const started = new Map(); const done = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (!facts.entrypoint) { const m = line.match(/"entrypoint":"([^"]+)"/); if (m) facts.entrypoint = m[1]; }
+    if (line.includes('in background with ID')) for (const m of line.matchAll(BG_START)) started.set(m[1], true);
+    if (line.includes('<task-id>')) for (const m of line.replace(/\\n/g, '\n').matchAll(BG_DONE)) done.add(m[1]);
+    if (line.includes('"type":"assistant"') && !line.includes('"isSidechain":true')) {
+      try {
+        const e = JSON.parse(line);
+        const t = (e.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+        if (t.trim()) facts.lastText = t;
+      } catch { /* partial line */ }
+    }
+  }
+  facts.pending = [...started.keys()].filter((id) => !done.has(id));
+  return facts;
+}
+export function unattended(root, facts, env = process.env) {
+  if (appConfig(root).unattended === true) return true;
+  return /^sdk/i.test(env.CLAUDE_CODE_ENTRYPOINT || facts.entrypoint || '');
+}
+export function asksPerson(text) {
+  const t = text || '';
+  return ASKS_STRONG.test(t) || (/\?/.test(t) && ASKS_WEAK.test(t));
+}
+export function runChecks(root, input = {}, env = process.env) {
+  const facts = transcriptFacts(input.transcript_path || '');
+  const out = [];
+  if (facts.pending.length) {
+    out.push(`Background shell work started in this session is still running (${facts.pending.slice(0, 5).join(', ')}). ` +
+      'When this turn ends a headless run ends with it and the work is killed. Wait for it now (Monitor with an until-loop on its ' +
+      'output, or read the output file once its notification arrives), act on the result, then finish. Run walks and other ' +
+      'checks you need the answer to in the foreground (timeout up to 600000 ms) or inside a helper agent.');
+  }
+  if (unattended(root, facts, env) && asksPerson(facts.lastText)) {
+    out.push('No person is present in this run, so a question will not be answered. Do not end the turn on one: take your own ' +
+      'recommendation for each question, record it in docs/decisions.md ("taken unattended"), and carry on with the work. A step only ' +
+      'the person can do (a licence, a sign-in with no browser path) goes into docs/STATE.md as open, and the build continues around it. ' +
+      'First try the documented no-person path: connections with canvas-browser.mjs connection, the Fabric connection in the signed-in ' +
+      'browser profile (reporting.md), your own test approvals in the browser (orchestration.md section 5).');
+  }
+  return out;
+}
+
+// Stop: block up to MAX_BLOCKS times per session and kind, then let it through with the gaps on stderr.
 export const MAX_BLOCKS = 3;
-export function decideStop(root, input = {}, env = process.env, stateDir = os.tmpdir()) {
-  const reason = evaluate(root, input, env);
-  if (!reason) return { block: false };
-  const sid = String(input.session_id || '').replace(/[^\w-]/g, '');
-  if (!sid) return input.stop_hook_active === true ? { block: false, note: reason } : { block: true, reason };   // no id: block once
-  const f = path.join(stateDir, `pp-plugin-gate-${sid}.json`);
+function counted(stateDir, sid, kind, reason) {
+  const f = path.join(stateDir, `pp-plugin-gate-${sid}${kind}.json`);
   const n = (readJson(f) || {}).blocks || 0;
   if (n >= MAX_BLOCKS) return { block: false, note: reason };
   try { fs.writeFileSync(f, JSON.stringify({ blocks: n + 1 })); } catch { /* unwritable temp: still block this once */ }
-  return { block: true, reason: n ? `(Block ${n + 1} of ${MAX_BLOCKS}: the steps are still missing.)\n${reason}` : reason };
+  return { block: true, reason: n ? `(Block ${n + 1} of ${MAX_BLOCKS}: still open.)\n${reason}` : reason };
+}
+export function decideStop(root, input = {}, env = process.env, stateDir = os.tmpdir()) {
+  const sid = String(input.session_id || '').replace(/[^\w-]/g, '');
+  const run = runChecks(root, input, env);
+  if (run.length) {
+    const reason = 'Power Platform run gate (power-platform plugin). Not finished yet:\n' + run.map((m, i) => `${i + 1}. ${m}`).join('\n');
+    if (!sid) return input.stop_hook_active === true ? { block: false, note: reason } : { block: true, reason };
+    const d = counted(stateDir, sid, '-run', reason);
+    if (d.block) return d;
+  }
+  const reason = evaluate(root, input, env);
+  if (!reason) return { block: false };
+  if (!sid) return input.stop_hook_active === true ? { block: false, note: reason } : { block: true, reason };   // no id: block once
+  return counted(stateDir, sid, '', reason);
 }
 
 // ---- PreToolUse order gates --------------------------------------------------------------------
@@ -199,11 +269,9 @@ function designReady(dirs) {
   return { design: has('DESIGN.md', 'docs/DESIGN.md'), proto: has('design/prototype.html') };
 }
 const TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'templates', 'acceptance-contract.md');
-function planReady(root, env) {
-  if (dodInstalled(env)) {
-    try { if (fs.readdirSync(path.join(root, 'docs', 'dod')).some((f) => /\.md$/i.test(f) && f.toLowerCase() !== 'readme.md')) return true; } catch { /* none */ }
-    return 'a DOD plan in docs/dod/ (invoke the dod skill: dod plan --autonomous from the brief)';
-  }
+function planReady(root) {
+  // A DOD plan counts when the person chose DOD; otherwise the acceptance contract is the plan.
+  try { if (fs.readdirSync(path.join(root, 'docs', 'dod')).some((f) => /\.md$/i.test(f) && f.toLowerCase() !== 'readme.md')) return true; } catch { /* none */ }
   const c = readFileSafe(path.join(root, 'docs', 'acceptance-contract.md')).replace(/\r/g, '').trim();
   if (c && c !== readFileSafe(TEMPLATE).replace(/\r/g, '').trim()) return true;
   return 'docs/acceptance-contract.md filled in from the brief (assets/templates/acceptance-contract.md)';
@@ -236,7 +304,7 @@ export function evaluatePre(root, input = {}, env = process.env) {
   }
   // B. plan before schema
   if (isShell && /deploy-tables\.py/i.test(cmd) && !/--plan\b/.test(cmd)) {
-    const ok = planReady(root, env);
+    const ok = planReady(root);
     if (ok !== true) {
       return `Power Platform order gate (power-platform plugin): plan before schema. Tables are deployed only once ${ok} exists; ` +
         'the plan is where the schema decisions are made. A dry run (deploy-tables.py --plan) is allowed.';
@@ -245,7 +313,9 @@ export function evaluatePre(root, input = {}, env = process.env) {
   return null;
 }
 
-if (process.argv.includes('--selftest')) selftest();
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (!isMain) { /* imported: no side effects */ }
+else if (process.argv.includes('--selftest')) selftest();
 else if (process.argv.includes('--pre')) {
   const input = readStdinJson();
   const reason = evaluatePre(input.cwd || process.cwd(), input);
@@ -326,11 +396,38 @@ function selftest() {
     check('complete project passes', evaluate(tmp, {}, env), silent);
     put('plugins/installed_plugins.json', JSON.stringify({ plugins: { 'dod@dod-skill': [{}] } }), cfgHome);
     check('dod detected', dodInstalled(env), (g) => g === true);
-    check('dod installed, no plan blocks', evaluate(tmp, {}, env), blocks('No DOD plan'));
-    check('B: dod installed, no DOD plan denies the deploy', evaluatePre(tmp, { tool_name: 'Bash', tool_input: { command: 'python scripts/deploy-tables.py' } }, env), (g) => typeof g === 'string' && g.includes('docs/dod/'));
+    check('dod installed is not a demand (opt-in since 0.20)', evaluate(tmp, {}, env), silent);
+    rm('docs/acceptance-contract.md');
     put('docs/dod/equipment-loans.md', '# plan');
-    check('B: DOD plan allows the deploy', evaluatePre(tmp, { tool_name: 'Bash', tool_input: { command: 'python scripts/deploy-tables.py' } }, env), silent);
-    check('dod plan present passes', evaluate(tmp, {}, env), silent);
+    check('B: a DOD plan also counts as the plan', evaluatePre(tmp, { tool_name: 'Bash', tool_input: { command: 'python scripts/deploy-tables.py' } }, env), silent);
+    rm('docs/dod');
+    // R1, R2 from a transcript
+    const tr = path.join(tmp, 't.jsonl');
+    const line = (o) => JSON.stringify(o);
+    const asst = (text, extra = {}) => line({ type: 'assistant', message: { content: [{ type: 'text', text }] }, ...extra });
+    const res = (text) => line({ type: 'user', message: { content: [{ type: 'tool_result', content: text }] } });
+    const st2 = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-gate-state-'));
+    const stop = (lines, sid = 'r', e = {}) => { fs.writeFileSync(tr, lines.join('\n')); return decideStop(tmp, { session_id: sid, transcript_path: tr }, e, st2); };
+    const cli = line({ type: 'user', entrypoint: 'cli', message: { content: 'go' } });
+    const sdk = line({ type: 'user', entrypoint: 'sdk-cli', message: { content: 'go' } });
+    check('R1: pending background shell blocks', stop([cli, res('Command running in background with ID: b1x. Output is being written to: x'), asst('I will continue when the walks report.')], 'r1'),
+      (g) => g.block && g.reason.includes('still running (b1x)'));
+    check('R1: completed background shell passes', stop([cli, res('Command running in background with ID: b1x.'), line({ type: 'user', message: { content: '<task-notification>\n<task-id>b1x</task-id>\n<status>completed</status>' } }), asst('All walks passed.')], 'r1b'),
+      (g) => !g.block);
+    check('R2: unattended question blocks', stop([sdk, asst('Decisions I need from you:\n1. Install Playwright? Recommend: yes.')], 'r2'),
+      (g) => g.block && g.reason.includes('No person is present'));
+    check('R2: the same question with a person present passes', stop([cli, asst('Decisions I need from you:\n1. Install Playwright? Recommend: yes.')], 'r2b'), (g) => !g.block);
+    check('R2: a request without a question mark blocks', stop([sdk, asst("I'm still waiting on your choice for the plan review: (a) run it, which I recommend.")], 'r2f'), (g) => g.block);
+    check('R2: an unattended hand-back without a question passes', stop([sdk, asst('Built and verified: 35 of 35 rows pass.')], 'r2c'), (g) => !g.block);
+    check('R2: "unattended": true in canvas-app.json counts', (put('scripts/canvas-app.json', JSON.stringify({ unattended: true })), stop([cli, asst('Should I publish now? I recommend yes.')], 'r2d')), (g) => g.block);
+    put('scripts/canvas-app.json', JSON.stringify({}));
+    check('R2: a sidechain question is not the lead\'s', stop([sdk, asst('Shall I continue? Recommend yes.', { isSidechain: true }), asst('Done.')], 'r2e'), (g) => !g.block);
+    const rr = [1, 2, 3, 4].map(() => stop([sdk, asst('May I proceed? I recommend yes.')], 'r3').block);
+    check('run checks block three times, then pass', rr, (g) => g.join() === 'true,true,true,false');
+    put('.claude/hooks/audit-stop.mjs', '// harness');
+    check('run checks apply with the project harness too', stop([sdk, asst('Shall I go on? Recommend yes.')], 'r4'), (g) => g.block);
+    rm('.claude/hooks/audit-stop.mjs');
+    fs.rmSync(st2, { recursive: true, force: true });
     put('fabric/notebooks/refresh.py', "token = get_token()\nnotebookutils.fs.put('Files/landing/t.txt', token, True)\n");
     check('token written to a lakehouse blocks', evaluate(tmp, {}, env), blocks('access token', 'fabric/notebooks/refresh.py:2'));
     put('fabric/notebooks/refresh.py', 'def token_file_url():\n    return "%s/%s/Files/_runtime/dv_token.txt" % (ONELAKE, item)\n');
@@ -347,7 +444,7 @@ function selftest() {
   }
   if (fails.length) { console.log('selftest FAILED:\n  ' + fails.join('\n  ')); process.exit(1); }
   console.log(`selftest ok: ${CASES} plugin-gate cases (Stop: unrelated silent, design missing, three blocks per session then a note, per-session count, ` +
-    'no-id fallback, harness present, two opt-outs, designed, shipped without critique/review, complete, dod detection and plan, token to ' +
+    'no-id fallback, harness present, two opt-outs, designed, shipped without critique/review, complete, dod opt-in, background shell pending and done, unattended question, attended question, unattended hand-back, unattended flag, sidechain, run-check cap, run checks with harness, token to ' +
     'lakehouse, token file over REST, non-token write, report-only; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
     'App.pa.yaml, _EditorState, shell read, other tools, prototype missing, designed, deploy-tables with and without --plan, bare template, ' +
     'filled contract, dod plan, opt-out, unrelated write)');

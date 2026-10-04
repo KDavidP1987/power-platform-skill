@@ -12,6 +12,7 @@
 //   options: --only hooks,tools,config,docs   --force   --selftest
 //
 // Exit codes: 0 done or nothing to do, 1 a file differs and was kept (plan shows which), 2 bad usage.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -96,15 +97,23 @@ function mergeSettings(existing, snippet) {
   return { out, added };
 }
 
+// The tools and hooks copied here are the skill's code, not the project's: the end-of-turn audit skips
+// a copy whose content still matches the hash recorded at install (a live build re-read 44 findings in
+// vendored scripts at every stop: their console output, template TODOs, the colour deny-list).
+export const VENDORED = '.claude/hooks/vendored.json';
+const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+
 export function setup(project, { apply = false, force = false, only = null, log = console.log } = {}) {
   const groups = only ? new Set(only) : null;
   let kept = 0, changes = 0;
+  const vendored = {};
   for (const [src, dst, group, why] of MANIFEST) {
     if (groups && !groups.has(group)) continue;
     const from = S(src), to = path.join(project, dst);
     const body = read(from);
     if (!body) { log(`  skip     ${dst}  (not in this skill version)`); continue; }
     const cur = read(to);
+    if (!OWNED_AFTER_COPY.has(group)) vendored[dst] = sha(body);
     let state;
     if (!cur) state = 'add';
     else if (cur.equals(body)) state = 'same';
@@ -137,6 +146,10 @@ export function setup(project, { apply = false, force = false, only = null, log 
       log(`  append   .gitignore  - ${missing.join(' ')}`);
       if (apply) fs.appendFileSync(gi, (lines.at(-1) === '' || !lines.join('') ? '' : '\n') + missing.join('\n') + '\n');
     }
+  }
+  if (apply && Object.keys(vendored).length) {
+    fs.mkdirSync(path.join(project, '.claude', 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(project, VENDORED), JSON.stringify({ note: 'skill-owned copies; the audit skips a file while it matches', files: vendored }, null, 2) + '\n');
   }
   if (apply && (changes || !fs.existsSync(path.join(project, '.claude', 'hooks', 'harness.json')))) {
     // Which skill version this harness came from; the pre-flight compares it with the latest release.
@@ -177,6 +190,8 @@ function selftest() {
     check('project-owned doc never compared', fs.readFileSync(path.join(t, 'docs', 'STATE.md'), 'utf8') === '# my state\n');
     const gi = fs.readFileSync(path.join(t, '.gitignore'), 'utf8');
     check('gitignore entries once', gi.split('.ship-work/').length === 2);
+    const vj = JSON.parse(fs.readFileSync(path.join(t, VENDORED), 'utf8'));
+    check('vendored manifest lists the tools with hashes', /^[0-9a-f]{64}$/.test(vj.files['scripts/canvas-browser.mjs'] || '') && !vj.files['docs/STATE.md']);
   } finally { fs.rmSync(t, { recursive: true, force: true }); }
   console.log(`selftest ${ok ? 'passed' : 'FAILED'}`);
   return ok ? 0 : 1;

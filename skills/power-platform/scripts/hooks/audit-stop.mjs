@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { readStdinJson, listRepoTextFiles, isProse, isHookFile, findEmoji, findPurple, readFileSafe, loadConfig, canvasSrcDirs, designGate, DEFAULT_CONFIG } from './lib.mjs';
+import { readStdinJson, listRepoTextFiles, isProse, isHookFile, findEmoji, findPurple, readFileSafe, loadConfig, canvasSrcDirs, designGate, isVendoredCopy, DEFAULT_CONFIG } from './lib.mjs';
 
 if (process.argv.includes('--selftest')) selftest();
 
@@ -46,7 +46,11 @@ const input = readStdinJson();
 const looping = input?.stop_hook_active === true;
 const root = process.cwd();
 const cfg = loadConfig(root);
-const files = listRepoTextFiles(root).filter((f) => !isHookFile(f));
+const ignore = new Set((cfg.auditIgnore || []).map((r) => r.replace(/\\/g, '/')));
+const files = listRepoTextFiles(root).filter((f) => {
+  const rel = path.relative(root, f).replace(/\\/g, '/');
+  return !isHookFile(f) && !ignore.has(rel) && !isVendoredCopy(root, rel);
+});
 const findings = [];
 const reminders = [];
 

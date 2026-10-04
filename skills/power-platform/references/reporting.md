@@ -261,7 +261,9 @@ Generate the report theme from the app's tokens with `scripts/pbi-theme.py --tok
 violet, indigo and magenta, contrast under 4.5:1 and unset values), and check it by screenshot. One page reads top to
 bottom: the headline figures in cards, then the trend, then the breakdown, then the detail table;
 titles state the question each visual answers; the same date format as the app. Run impeccable
-`critique` on the report screenshot with the canvas screens.
+`critique` on the report screenshot with the canvas screens. Screenshot the report canvas only
+(an element screenshot of the page, or the report in full-screen view): the service's header shows
+the signed-in person's photo and the organisation's logo, and the workspace rail lists other work.
 
 **Build the reporting lane in parallel with the app** once schema and sample data exist
 (`references/orchestration.md`): `scripts/fabric.py` deploys folder, notebooks, pipeline, model and
@@ -273,15 +275,22 @@ independent Dataverse count.
 token into a lakehouse file for a notebook to read: anyone with workspace access could read it
 until the notebook deleted it. Tokens never go to files, lakehouses, notebooks' parameters or logs.
 Fabric reaches Dataverse through a connection (Dataflow Gen2), Link to Microsoft Fabric, or a
-workspace identity; when that needs the person once, it is an up-front decision.
+workspace identity.
 
 **The refresh runs in Fabric, or it is not a refresh.** A measured build landed Dataverse rows as
 files from a script on the builder's machine and pointed bronze at them; the pipeline then ran
 "successfully" on stale files, and the report disagreed with Dataverse after the tests (6 loans
 shown, 8 live). Bronze must read Dataverse from inside Fabric: a Dataflow Gen2 on a Dataverse
-connection, Link to Microsoft Fabric (shortcuts), or a notebook with a token Fabric can mint. If none
-is possible without the person (a Fabric cloud connection needs a sign-in), say so as a decision at
-the start, not as a limit at the end. Before handing back, prove it with
+connection, Link to Microsoft Fabric (shortcuts), or a notebook with a token Fabric can mint.
+**Create the Dataflow's connection yourself, in the signed-in browser profile** the driver uses
+(`canvas-browser.mjs`, the persistent profile): open the Dataflow Gen2, select the first query, on
+"Credentials are required" choose Configure connection, Create new connection, name it
+`<prefix>_Dataverse`, Organizational account, Sign in (single sign-on completes in that profile with
+no prompt), Connect; the other queries pick it up. The lakehouse destination gets its own new
+connection the same way (never an unrelated existing one). Record both connection ids in
+`docs/STATE.md`. A measured build asked the person to do this and then did it itself in a few
+minutes; only a sign-in that actually prompts for credentials is a person step. Before handing back,
+prove it with
 `scripts/fabric.py prove-refresh --manifest fabric.json --checks report-checks.json --check "<figure>"
 --touch "<prefix>_table/<key column>=<key>/<column>=<value>" --apply`: it changes one row of this
 build's own (any other table is refused), confirms the Dataverse figure moved, runs the pipeline
