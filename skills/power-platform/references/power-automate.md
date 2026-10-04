@@ -593,9 +593,12 @@ ownership may have moved. Keep the cadence (immediate, daily, weekly) in a setti
   (`formatDateTime(..., 'dd MMM yyyy')`), right-aligned numbers, and a link to the record or the
   app. Approval requests are the same: the title says what is asked, the details say what the
   approver needs to decide, and the body says where to respond.
-- **Use this build's own connections.** A flow bound to a connection another project created breaks
-  when that project is torn down. Create the connection and its connection reference for this
-  solution (`scripts/deploy-flows.py`), and name them after the solution.
+- **Use this build's own connections, and create them yourself.** A flow bound to a connection
+  another project created breaks when that project is torn down. Create each one with
+  `canvas-browser.mjs connection --connector <name> --name <prefix>-<connector> --apply` (it checks
+  the account and environment, finishes OAuth consent in the signed-in browser, and prints the id
+  with `--json`), put the ids in the flows manifest, and bind them with `scripts/deploy-flows.py`.
+  Never ask the person to create a connection (`tooling-and-auth.md` section 6).
 
 ## 11. Testing a sending or scheduled flow without mailing anyone
 

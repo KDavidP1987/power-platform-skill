@@ -143,6 +143,8 @@
     "studio.formulaBar": {"surface": "studio", "kind": "role", "role": "textbox", "name": "formula", "flags": "i", "purpose": "The formula bar of the selected property (dirty)", "check": "conditional", "lastVerified": "0.18.0"},
     "studio.formulaEditor": {"surface": "studio", "kind": "css", "value": ".monaco-editor .view-lines", "purpose": "The formula bar's editable surface (dirty clicks here, then types)", "check": "conditional", "lastVerified": "0.18.0"},
     "browser.blankUrl": {"surface": "portal", "kind": "regex", "pattern": "^(about:blank|chrome://new-tab-page|chrome://newtab|edge://newtab|chrome-error://|chrome://crash|edge://crash)", "flags": "i", "purpose": "Blank, new-tab and crashed pages that tidy closes", "check": "conditional", "lastVerified": "0.18.0"},
-    "player.dropdownOption": {"surface": "player", "kind": "role", "role": "option", "name": "", "flags": "", "purpose": "An option of an open classic DropDown (a button plus a listbox, not a select); the walk's pick verb", "check": "conditional", "lastVerified": "0.18.0"}
+    "player.dropdownOption": {"surface": "player", "kind": "role", "role": "option", "name": "", "flags": "", "purpose": "An option of an open classic DropDown (a button plus a listbox, not a select); the walk's pick verb", "check": "conditional", "lastVerified": "0.18.0"},
+    "consent.confirmUrl": {"surface": "portal", "kind": "regex", "pattern": "consent\\.azure-apim\\.net/confirm\\?[^#]*[?&]code=", "flags": "i", "purpose": "The connector consent service's confirm step; reaching it completes an OAuth connection (the connection command)", "check": "conditional", "lastVerified": "0.18.1"},
+    "consent.accountTile": {"surface": "portal", "kind": "template", "value": "[data-test-id=\"{login}\" i]", "purpose": "The configured account's tile on the Entra account picker, when sign-in is not silent", "check": "conditional", "lastVerified": "0.18.1"}
   }
 }

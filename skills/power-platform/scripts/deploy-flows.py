@@ -149,7 +149,7 @@ def step_connrefs(dv, m, apply, allow_shared):
                 bad += 1
                 continue
         elif apply:
-            print("REFUSED %s: no connection id in the manifest (list them with the connections command)" % ln)
+            print("REFUSED %s: no connection id in the manifest. Create this build's own: node canvas-browser.mjs connection --connector %s --name <prefix>-<connector> --apply --json" % (ln, r["api"]))
             bad += 1
             continue
         if found:
@@ -229,7 +229,7 @@ def cmd_connections(dv, pa, m, env):
             print("  %-48s %-30s %-10s%s" % (c["name"], props.get("displayName", ""), st,
                                              ("  bound by " + ", ".join(others)) if others else ""))
         if not rows:
-            print("  (none: the person creates one in the maker portal, Connections > New connection)")
+            print("  (none: create one with node canvas-browser.mjs connection --connector <api> --name <prefix>-<connector> --apply)")
     return 0
 
 

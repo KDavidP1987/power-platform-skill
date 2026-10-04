@@ -11,6 +11,28 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-04
+
+### Added
+
+- `canvas-browser.mjs connection`: the agent creates this build's own signed-in connections instead
+  of asking the person. It refuses unless the token's account is the config's `login` and the
+  environment's Dataverse URL is the config's `environmentUrl`; creates the connection over the
+  API; for an OAuth connector (Dataverse, Outlook, Teams) completes consent in the driver's
+  signed-in profile (measured silent with a Windows-signed-in Edge: reaching the consent service's
+  confirm step sets it Connected); reuses this build's connection by name; reads back Connected.
+  Plan unless `--apply`; `--json` prints the id for the flows manifest.
+- `login` and `connectionPrefix` in `assets/canvas-app.example.json`; two consent anchors in
+  `assets/selectors.json`.
+
+### Changed
+
+- 0.18.0 told the agent to use its own connections but gave it no way to make one, so a measured
+  build stopped and asked the person. `tooling-and-auth.md` section 6 now makes connections the
+  agent's job, gives the one permission rule that allows the command, and corrects "one Approvals
+  connection per person" (Approvals needs no consent; API-created ones are Connected at once).
+  `power-automate.md`, `orchestration.md` and `deploy-flows.py`'s messages point at the command.
+
 ## [0.18.0] - 2026-10-04
 
 ### Added

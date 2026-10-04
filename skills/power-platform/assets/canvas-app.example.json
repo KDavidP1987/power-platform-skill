@@ -10,6 +10,10 @@
   "_comment_confirm": "Read by canvas-browser.mjs walk to confirm writes in Dataverse: a command that prints a bearer token for environmentUrl (never stored here).",
   "dataverseTokenCommand": "az account get-access-token --resource https://yourorg.crm.dynamics.com --query accessToken -o tsv",
 
+  "_comment_connections": "Read by canvas-browser.mjs connection: the account every token and the browser must be signed in as (checked before anything is created), and the prefix this build's connections are named with. The Power Apps token comes from powerAppsTokenCommand, or from dataverseTokenCommand with the resource swapped.",
+  "login": "maker@yourorg.com",
+  "connectionPrefix": "app",
+
   "_comment_ship": "Optional keys read by scripts/ship-canvas.py. Defaults shown; paths are relative to the repo root.",
   "appLogicalName": "app_yourapp_1a2b3",
   "externalTables": ["core_*"],

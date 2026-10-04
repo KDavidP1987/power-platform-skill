@@ -257,7 +257,7 @@ one build, and each was finished by the person running one prepared command:
 
 | Refused | Why the guard refuses it | What to prepare |
 |---|---|---|
-| Creating a connection (Approvals, Word Online, any connector) | it persists a credential | Prefer **reusing an existing connection** (below); otherwise the person creates it in the maker portal and you bind it |
+| Creating a connection (Approvals, Word Online, any connector) | it persists a credential | `canvas-browser.mjs connection`, allowed once by a permission rule (below); never a request to the person to click New connection |
 | Creating or changing a security role, assigning one | it grants permissions | an idempotent role script with `-Report` (prints the matrix, writes nothing) and a live subset verification |
 | `pac solution import` into a Production-type environment | it is a production deploy | a deploy script that exports a rollback first, gates the import on the checks (lint, recipient audit, marker inspection), and reads back what landed |
 
@@ -265,7 +265,35 @@ Validate each one read-only first (`-Report`, `-WhatIf`, a dry run of the gate o
 and hand over ONE command. Never look for a second route to the same effect; the refusal is the
 answer for that action.
 
-**Reuse existing connections instead of creating them.** List the connections the person already
+**Connections are the agent's job: allow the command once, then it never asks.** A build that told
+the agent to use its own connections, with no way to create one, stopped and asked the person; an
+auto-mode guard then refused the agent's own attempt ("Modify Shared Resources"), and later even
+the code that would do it ("Security Weaken"). The fix is to make the action narrow and checkable,
+and let the person allow exactly that, once:
+
+1. `node scripts/canvas-browser.mjs connection --connector <dataverse|outlook|approvals|...> --name <prefix>-<connector>`
+   prints the plan and writes nothing. It refuses (exit 3) unless the token's account is the
+   config's `login` and the environment's Dataverse URL is the config's `environmentUrl`. With
+   `--apply` it creates the connection over the API, completes OAuth consent in the driver's
+   signed-in profile (silent with a Windows-signed-in Edge, measured), and reads back Connected. It
+   reuses this build's own connection by name and never touches anyone else's.
+2. At the start of the project (with the harness, `project-setup.md` section 4), offer the person
+   this permission rule for the project's `.claude/settings.json`, and say what it allows - creating
+   connections named for this build, as the configured account, in the configured environment:
+
+   ```json
+   { "permissions": { "allow": [ "Bash(node scripts/canvas-browser.mjs connection:*)" ] } }
+   ```
+
+   Add it only when they agree. Without it, the first `--apply` asks them to approve that one call,
+   which is a decision, not labour.
+3. When the guard refuses anyway, stop and say which rule would allow it. Never look for a second
+   route, and never hand the step to a helper agent or another session.
+
+Approvals has no OAuth parameter: an API-created Approvals connection is Connected at once, and a
+person can hold several (an agent's claim of "one per person" was wrong when checked).
+
+**Reuse existing connections only when they are this build's own.** List the connections the person already
 has: `GET https://api.powerapps.com/providers/Microsoft.PowerApps/apis/<connector>/connections?api-version=2016-11-01&$filter=environment eq '<env id>'`
 with an Az token for `https://service.powerapps.com/`. Put each connection's `name` (the id) into the
 deployment-settings file (`ConnectionReferences[].ConnectionId`) and import with

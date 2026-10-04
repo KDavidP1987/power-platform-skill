@@ -104,9 +104,11 @@ else is the agent's work.
 
 - Creating the app, adding data sources, turning on settings, saving and publishing in Studio:
   the browser driver (`canvas-browser.mjs create`, `save`, `publish`).
-- Connections: create this build's own connections and connection references; never reuse another
-  project's connection because it happens to exist (it ties this build's flows to someone else's
-  lifecycle and its teardown).
+- Connections: create this build's own with `canvas-browser.mjs connection` (account and
+  environment checked, consent finished in the signed-in browser); never reuse another project's
+  connection because it happens to exist, and never ask the person to create one. Offer the
+  permission rule that allows the command at the start (`tooling-and-auth.md` section 6), with the
+  other decisions.
 - Approvals raised by your own flows during development: answer them in the owner's browser when
   the owner has allowed it for this project. Until then, hand the person one instruction per
   approval: the title, the response and where to click.

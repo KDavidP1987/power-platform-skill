@@ -22,6 +22,11 @@
 //                                                  create a blank canvas app IN the solution: first save,
 //                                                  layout, Coauthoring on, data sources by logical name,
 //                                                  save; writes appId to the config; holds Studio open
+//   node canvas-browser.mjs connection --connector dataverse|outlook|approvals|<api> --name N [--apply] [--json]
+//                                                  create (or reuse) this build's own signed-in connection: checks
+//                                                  the token's account against "login" and the environment against
+//                                                  "environmentUrl", creates it over the API, finishes OAuth consent
+//                                                  in the signed-in profile, reads back Connected; plan unless --apply
 //   node canvas-browser.mjs play [--screen NAME]   open the PUBLISHED app, capture, report console
 //   node canvas-browser.mjs walk <scenario.json>   PERFORM a task and assert the result
 //   node canvas-browser.mjs studio                 open Studio in EDIT mode and hold it open
@@ -80,6 +85,7 @@ async function pw() {
 }
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -159,6 +165,8 @@ const SELECTOR_DEFAULTS = {
   'studio.formulaEditor':     { surface: 'studio', kind: 'css', value: '.monaco-editor .view-lines', check: 'conditional' },
   'browser.blankUrl':         { surface: 'portal', kind: 'regex', pattern: '^(about:blank|chrome://new-tab-page|chrome://newtab|edge://newtab|chrome-error://|chrome://crash|edge://crash)', flags: 'i', check: 'conditional' },
   'player.dropdownOption':    { surface: 'player', kind: 'role', role: 'option', name: '', flags: '', check: 'conditional' },
+  'consent.confirmUrl':       { surface: 'portal', kind: 'regex', pattern: 'consent\\.azure-apim\\.net/confirm\\?[^#]*[?&]code=', flags: 'i', check: 'conditional' },
+  'consent.accountTile':      { surface: 'portal', kind: 'template', value: '[data-test-id="{login}" i]', check: 'conditional' },
 };
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // In the skill: assets/selectors.json. Installed into a project by setup-harness.mjs: next to this script.
@@ -1009,8 +1017,21 @@ function selftest() {
   const judged = J.filter(([, w, n]) => w.length !== n).map(([k, w]) => k + ' -> ' + JSON.stringify(w));
   const missing = want.filter((w) => !b.some((e) => e.includes(w)));
   const sel = selectorTableProblems();
+  // Connection helpers: who the token is for, which parameter needs consent, host comparison, the confirm step.
+  const fakeJwt = 'x.' + Buffer.from(JSON.stringify({ upn: 'maker@example.com', oid: 'o1' })).toString('base64').replace(/=+$/, '') + '.y';
+  const C = [
+    ['jwt upn', jwtClaims(fakeJwt).upn === 'maker@example.com'],
+    ['jwt garbage', Object.keys(jwtClaims('nope')).length === 0],
+    ['oauth found', (oauthParameter({ properties: { connectionParameters: { token: { type: 'oauthSetting', oAuthSettings: { redirectUrl: 'https://r' } } } } }) || {}).redirectUrl === 'https://r'],
+    ['no oauth', oauthParameter({ properties: { connectionParameters: { key: { type: 'securestring' } } } }) === null],
+    ['same host', sameHost('https://org.crm.dynamics.com/', 'https://ORG.crm.dynamics.com')],
+    ['other host', !sameHost('https://org1.crm.dynamics.com/', 'https://org2.crm.dynamics.com')],
+    ['confirm step', rx('consent.confirmUrl').test('https://unitedstates-002.consent.azure-apim.net/confirm?state=s&code=abc')],
+    ['not confirm', !rx('consent.confirmUrl').test('https://global.consent.azure-apim.net/redirect/x?code=abc')],
+  ].filter(([, okc]) => !okc).map(([k]) => 'connection: ' + k);
+  tabs.push(...C);
   const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0 && tabs.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
          : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}], tabs -> [${tabs.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }
@@ -1953,7 +1974,123 @@ async function cmdShot() {
   await ctx.close();
 }
 
-const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
+// --- connections ---------------------------------------------------------------------------
+// A flow needs signed-in connections. Created over the API, an OAuth connection (Dataverse,
+// Outlook, Teams) comes back "Unauthenticated"; the maker portal finishes it by sending the
+// browser through the connector's consent link. This does the same in the driver's signed-in
+// profile, so the person is never asked to click New connection. Measured: with a profile
+// signed in through the Windows account the sign-in was silent, and reaching the consent
+// service's confirm step set the connection Connected (no confirmConsentCode call needed).
+const PA_API = 'https://api.powerapps.com/providers/Microsoft.PowerApps';
+const CONNECTOR_NAMES = { dataverse: 'shared_commondataserviceforapps', outlook: 'shared_office365', office365: 'shared_office365',
+  approvals: 'shared_approvals', teams: 'shared_teams', users: 'shared_office365users', sharepoint: 'shared_sharepointonline' };
+function jwtClaims(token) {
+  try { return JSON.parse(Buffer.from(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')); }
+  catch { return {}; }
+}
+const sameHost = (a, b) => { try { return new URL(a).host.toLowerCase() === new URL(b).host.toLowerCase(); } catch { return false; } };
+// The OAuth parameter of a connector, if it has one (oauthSetting); null means API creation is enough.
+function oauthParameter(connector) {
+  const params = (connector && connector.properties && connector.properties.connectionParameters) || {};
+  const k = Object.keys(params).find((n) => params[n] && params[n].type === 'oauthSetting');
+  return k ? { name: k, redirectUrl: params[k].oAuthSettings && params[k].oAuthSettings.redirectUrl } : null;
+}
+function powerAppsToken() {
+  if (process.env.POWERAPPS_TOKEN) return process.env.POWERAPPS_TOKEN.trim();
+  let command = APP.powerAppsTokenCommand || process.env.POWERAPPS_TOKEN_COMMAND;
+  // The usual Dataverse token commands name their resource; the same command for the Power Apps
+  // service resource gives the token this needs, with no second sign-in.
+  const dv = String(APP.environmentUrl || '').replace(/\/+$/, '');
+  if (!command && APP.dataverseTokenCommand && dv && APP.dataverseTokenCommand.includes(dv)) command = APP.dataverseTokenCommand.split(dv).join('https://service.powerapps.com/');
+  if (!command) return null;
+  const out = execSync(command, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180000, cwd: REPO });
+  return out.trim().split(/\r?\n/).pop().trim() || null;
+}
+async function cmdConnection() {
+  const want = String(flag('connector', '') || '');
+  const api = CONNECTOR_NAMES[want.toLowerCase()] || want;
+  const name = String(flag('name', '') || '') || (APP.connectionPrefix ? APP.connectionPrefix + '-' + api.replace(/^shared_/, '') : '');
+  const env = APP.environmentId;
+  const apply = has('apply');
+  if (!api || api === 'true' || !name || !env) {
+    log('usage: connection --connector <dataverse|outlook|approvals|teams|users|sharepoint|shared_x> --name <display name> [--apply] [--json]');
+    log('  environmentId, environmentUrl and login come from scripts/canvas-app.json; --name defaults to <connectionPrefix>-<connector>.');
+    process.exitCode = 1; return;
+  }
+  let token;
+  try { token = powerAppsToken(); } catch (e) { log('  !! the token command failed: ' + String(e.stderr || e.message).split('\n').find((x) => x.trim())); process.exitCode = 2; return; }
+  if (!token) { log('  !! no Power Apps token: add "powerAppsTokenCommand" (resource https://service.powerapps.com/) to the app config, or set POWERAPPS_TOKEN.'); process.exitCode = 2; return; }
+  const H = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
+  const q = 'api-version=2016-11-01&$filter=' + encodeURIComponent(`environment eq '${env}'`);
+  const call = async (method, url, body) => {
+    const r = await fetch(url, { method, headers: H, body: body && JSON.stringify(body) });
+    const t = await r.text();
+    let j = null; try { j = t ? JSON.parse(t) : null; } catch { j = { raw: t.slice(0, 300) }; }
+    if (!r.ok) throw new Error(method + ' ' + url.split('?')[0].replace(PA_API, '') + ' -> ' + r.status + ' ' + JSON.stringify(j).slice(0, 300));
+    return j;
+  };
+
+  // 1. The profile: the token's account must be the one the config names.
+  const me = jwtClaims(token);
+  const upn = String(me.upn || me.preferred_username || me.unique_name || '');
+  if (APP.login && upn.toLowerCase() !== String(APP.login).toLowerCase()) {
+    log(`  REFUSED: the token is for ${upn || '(unknown account)'}, the config's login is ${APP.login}. Sign the token command in as ${APP.login}.`);
+    process.exitCode = 3; return;
+  }
+  // 2. The environment: it must exist for this account and be the one whose Dataverse URL the config names.
+  const e = await call('GET', `${PA_API}/environments/${env}?api-version=2016-11-01`);
+  const instance = e.properties && e.properties.linkedEnvironmentMetadata && e.properties.linkedEnvironmentMetadata.instanceUrl;
+  if (APP.environmentUrl && !sameHost(instance, APP.environmentUrl)) {
+    log(`  REFUSED: environment ${env} (${e.properties && e.properties.displayName}) is ${instance}, the config says ${APP.environmentUrl}.`);
+    process.exitCode = 3; return;
+  }
+  log(`  account ${upn || '(not stated in token)'}${APP.login ? ' = config login' : ' (no "login" in the config to compare)'}`);
+  log(`  environment ${e.properties && e.properties.displayName} (${instance || 'no Dataverse'})`);
+  // 3. Reuse this build's own connection when it already exists and is connected; never touch anyone else's.
+  const connector = await call('GET', `${PA_API}/apis/${api}?${q}`);
+  const oauth = oauthParameter(connector);
+  const mine = ((await call('GET', `${PA_API}/apis/${api}/connections?${q}`)).value || [])
+    .filter((c) => c.properties && c.properties.displayName === name && (!me.oid || !c.properties.createdBy || c.properties.createdBy.id === me.oid));
+  const statusOf = (c) => ((c.properties.statuses || [])[0] || {}).status || 'Unknown';
+  const done = (c, how) => {
+    const out = { connector: api, id: c.name, displayName: c.properties.displayName, status: statusOf(c), environmentId: env, how };
+    if (has('json')) console.log(JSON.stringify(out)); else log(`  ${how}: ${api} "${out.displayName}" id ${out.id} - ${out.status}`);
+    process.exitCode = out.status === 'Connected' ? 0 : 4;
+  };
+  const ready = mine.find((c) => statusOf(c) === 'Connected');
+  if (ready) return done(ready, 'reused');
+  const id = (mine[0] && mine[0].name) || randomUUID().replace(/-/g, '');
+  log(`  plan: ${mine[0] ? 'finish' : 'create'} ${api} connection "${name}" (${id})${oauth ? ', then consent in the signed-in browser profile' : ' (no sign-in needed)'}`);
+  if (!apply) { log('  plan only - nothing created. Re-run with --apply.'); return; }
+  const base = `${PA_API}/apis/${api}/connections/${id}`;
+  if (!mine[0]) await call('PUT', `${base}?${q}`, { properties: { environment: { id: `/providers/Microsoft.PowerApps/environments/${env}`, name: env }, displayName: name } });
+  if (oauth) {
+    const link = await call('POST', `${base}/getConsentLink?${q}`, { redirectUrl: oauth.redirectUrl });
+    const ctx = await launch({ headless: has('headless') });
+    const page = await freshPage(ctx);
+    let confirmed = false;
+    page.on('request', (r) => { if (rx('consent.confirmUrl').test(r.url())) confirmed = true; });
+    await page.goto(link.consentLink).catch(() => {});
+    const end = Date.now() + Number(flag('wait-for', 90000));
+    while (!confirmed && Date.now() < end) {
+      // Not silent: pick the configured account on the picker; anything else (MFA, a password) is the person's.
+      if (APP.login) { const tile = page.locator(tpl('consent.accountTile', { login: APP.login })); if (await tile.count().catch(() => 0)) await tile.first().click().catch(() => {}); }
+      await page.waitForTimeout(700);
+    }
+    if (!confirmed) {
+      const shot = join(OUT, 'connection-consent-' + Date.now() + '.png');
+      await page.screenshot({ path: shot }).catch(() => {});
+      log('  !! consent did not complete in this profile (a sign-in, MFA or admin-consent prompt is showing). Screenshot: ' + shot);
+      log('     Run `canvas-browser.mjs login` once as ' + (APP.login || 'the build account') + ', then re-run this command; it finishes the same connection.');
+    }
+    await ctx.close();
+  }
+  let c;
+  for (let i = 0; i < 15; i++) { c = await call('GET', `${base}?${q}`); if (statusOf(c) === 'Connected') break; await new Promise((r) => setTimeout(r, 2000)); }
+  return done(c, mine[0] ? 'finished' : 'created');
+}
+
+const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, connection: cmdConnection, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
   keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot,
   tabs: cmdTabs, tidy: cmdTidy, 'second-tab': cmdSecondTab, 'studio-has': cmdStudioHas, dirty: cmdDirty, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm };
 
@@ -1962,6 +2099,7 @@ else if (!commands[cmd]) {
   log('canvas-browser - drive Power Apps Studio and the published player\n');
   log('  login | check | play [--screen N] [--trace] [--fresh] | walk <scenario.json> [--trace] [--fresh] [--allow-writes]');
   log('  confirm <scenario.json> [--since ISO]   run only the scenario\'s Dataverse checks');
+  log('  connection --connector dataverse|outlook|approvals|<api> --name N [--apply] [--json]');
   log('  create --name N --solution-id GUID [--form-factor tablet|phone] [--layout responsive|fixed] [--tables a,b] [--publish] [--close]');
   log('  studio | keys [combo] | save | publish [--reload-first] | close-studio [--keep-browser] | shot <url> <name>');
   log('  tabs | tidy [--all] [--studio] [--dry-run] | second-tab [--expect a,b] | studio-has <name...> | dirty');
