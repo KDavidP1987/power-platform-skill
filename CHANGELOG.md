@@ -11,6 +11,16 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-04
+
+### Fixed
+
+- `canvas-browser.mjs` no longer leaves a row of `about:blank` tabs in the browser it drives. Every
+  command opened a new tab beside the blank tab a persistent context starts with, and the browser
+  restored earlier runs' tabs on the next launch. Commands now reuse the starting tab, close any
+  restored tabs at launch (a restored Studio tab would also compete for the edit lock), and launch
+  without session restore or the crash-restore bubble.
+
 ## [0.17.0] - 2026-10-04
 
 ### Added

@@ -210,7 +210,8 @@ function needApp() {
 async function launch(opts) {
   mkdirSync(PROFILE, { recursive: true });
   mkdirSync(OUT, { recursive: true });
-  const args = ['--disable-blink-features=AutomationControlled'];
+  // No session restore and no crash-restore bubble: each run starts from one tab, not the last run's.
+  const args = ['--disable-blink-features=AutomationControlled', '--no-first-run', '--hide-crash-restore-bubble', '--disable-session-crashed-bubble'];
   if (opts.debugPort) args.push('--remote-debugging-port=' + opts.debugPort);
   let ctx;
   try {
@@ -252,6 +253,18 @@ async function launch(opts) {
   }
   ctx.setDefaultTimeout(TIMEOUT);
   return ctx;
+}
+
+// A persistent context opens with one blank tab of its own. Use it instead of opening another, and
+// close any other blank tabs: a new tab per command, plus the browser restoring the last session's
+// tabs on the next launch, left a growing row of about:blank tabs in the driven browser.
+// Called straight after launch, so any other tab present was restored from an earlier run (a
+// restored Studio tab would also compete for the edit lock): keep one, close the rest.
+async function freshPage(ctx) {
+  const pages = ctx.pages();
+  const page = pages.find((p) => p.url() === 'about:blank') || pages[0] || await ctx.newPage();
+  for (const p of pages) if (p !== page) await p.close().catch(() => {});
+  return page;
 }
 
 // Studio must stay open ACROSS processes: the compile runs elsewhere, so save/publish/close
@@ -935,7 +948,7 @@ function selftest() {
 // --- commands --------------------------------------------------------------------------------
 async function cmdLogin() {
   const ctx = await launch({ headless: false });
-  const page = await ctx.newPage();
+  const page = await freshPage(ctx);
   log('Opening the maker portal. Sign in with your work account (MFA included).');
   await page.goto(tpl('portal.makerHome'), { waitUntil: 'domcontentloaded' });
   try {
@@ -947,7 +960,7 @@ async function cmdLogin() {
 
 async function cmdCheck() {
   const ctx = await launch({ headless: has('headless') });
-  const page = await ctx.newPage();
+  const page = await freshPage(ctx);
   await page.goto(tpl('portal.makerHome'), { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(6000);
   const ok = await isSignedIn(page);
@@ -958,7 +971,7 @@ async function cmdCheck() {
 }
 
 async function openPlayer(ctx, errors, trace) {
-  const page = await ctx.newPage();
+  const page = await freshPage(ctx);
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   if (trace) attachTrace(page, trace);
@@ -1064,7 +1077,7 @@ async function cmdWalk() {
 async function cmdStudio() {
   needApp();
   const ctx = await launch({ headless: false, debugPort: DEBUG_PORT });
-  const page = await ctx.newPage();
+  const page = await freshPage(ctx);
   log('Opening Studio in EDIT mode:\n  ' + STUDIO_URL);
   await page.goto(STUDIO_URL, { waitUntil: 'domcontentloaded' });
   if (!(await isSignedIn(page))) { log('NOT SIGNED IN - run `login` first.'); await ctx.close(); process.exitCode = 2; return; }
@@ -1405,7 +1418,7 @@ async function cmdCreate() {
   }
 
   const ctx = await launch({ headless: false, debugPort: DEBUG_PORT });
-  const page = await ctx.newPage();
+  const page = await freshPage(ctx);
   page.on('dialog', async (d) => { await d.accept().catch(() => {}); });
   const url = tpl('portal.newAppUrl', { environmentId: APP.environmentId, formFactor, name: encodeURIComponent(name), solutionId });
   log('1. Creating "' + name + '" (' + formFactor + ') in solution ' + solutionId);
@@ -1574,7 +1587,7 @@ async function cmdDoctor() {
   log('doctor: checking ' + Object.keys(SEL).length + ' UI anchors from ' + (SELECTORS.doc ? SELECTORS.file : 'the compiled-in defaults'));
   if (!APP.environmentId || !APP.appId) return cannot('no app configured (scripts/canvas-app.json or --config): the player and Studio cannot be opened.');
   const ctx = await launch({ headless: has('headless') });
-  const page = await ctx.newPage();
+  const page = await freshPage(ctx);
   try { await page.goto(tpl('portal.makerHome'), { waitUntil: 'domcontentloaded', timeout: 60000 }); }
   catch (e) { return cannot('the maker portal did not load (' + e.message.split('\n')[0] + ') - offline, proxied or blocked.', ctx); }
   await page.waitForTimeout(6000);
@@ -1714,7 +1727,7 @@ async function cmdShot() {
   const url = argv[1]; const name = argv[2] || 'shot';
   if (!url) { log('usage: canvas-browser.mjs shot <url> <name>'); process.exitCode = 1; return; }
   const ctx = await launch({ headless: has('headless') });
-  const page = await ctx.newPage();
+  const page = await freshPage(ctx);
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(Number(flag('settle', 6000)));
   await capture(page, name);
