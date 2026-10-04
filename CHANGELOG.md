@@ -11,6 +11,39 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-04
+
+Test D (the fourth measured build) followed the brief and skipped every design and planning step
+the skill asked for: no impeccable, no HTML prototype, no DOD plan, no independent reviewer, and the
+project-level gates never ran because the harness is installed only when a person agrees. Writing
+it down was not enough; this release enforces it from the plugin.
+
+### Added
+
+- **Plugin-level build gate** (`hooks/hooks.json`, `scripts/hooks/plugin-gate.mjs`): runs whenever
+  the plugin is enabled, with no project harness. Silent in any folder without canvas source or a
+  Power BI report; never loops; stands aside when the project harness's own gate is installed;
+  `"pluginGate": false` turns it off. It blocks the hand-back once, listing every missing step:
+  DESIGN.md (invoke impeccable `init`), `design/prototype.html`, the screenshot critique once an app
+  is packed, the dod plan when dod is installed, the independent reviewer's `docs/review.md` once
+  shipped, and any access token written to a file or shared storage. 17 self-test cases, in CI;
+  run read-only against the Test D build it flagged every skipped step and the token hand-off.
+- **"Start here" at the top of SKILL.md**: plan, design, harness, lanes, prove - in that order,
+  as actions.
+
+### Changed
+
+- The harness is installed with its defaults when no person is present, instead of being skipped.
+- `orchestration.md`: never end a turn while helpers run (a headless run is terminated 600 s after
+  the lead's turn ends with work still running, which cut a build off mid-task); start the lanes and
+  the screen helpers each in one message. The harness sets `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
+  as a backstop. Compacting stays at 40%: the build that used it re-read no more context than
+  Microsoft's plugins and was the cheapest of four.
+- `reporting.md`: never hand a token to Fabric through a file or lakehouse (a build staged the
+  owner's Dataverse token in a lakehouse file for a notebook).
+- `canvas-controls-and-patterns.md` section 1: a Radio group needs the height of all its options
+  (a clipped group passed a build's own 390 px sweep).
+
 ## [0.19.0] - 2026-10-04
 
 Quality first: the design is settled in HTML with impeccable before any screen is built, the product

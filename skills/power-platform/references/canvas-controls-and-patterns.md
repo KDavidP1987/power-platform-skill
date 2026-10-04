@@ -60,6 +60,12 @@ copying a working control from the same app.
 - **Do not give a dismiss scrim a tab stop, or a labelled control a second name.** What an
   accessibility audit should flag and exempt is in `audits.md`, section 11.
 
+- **A Radio group needs the height of all its options.** A classic Radio sized like a text input
+  clipped its circles top and bottom and drew a scroll arrow beside the last option, at desktop and
+  phone width alike, and the build's own 390 px sweep still called the screen clean. Height = options
+  x row height (about 40 per option at Size 13) plus padding, or `Layout.Horizontal` with enough
+  width; screenshot the control, since a clip check on text alone does not see clipped circles.
+
 ## 2. TextInput and live search
 
 - **A modern TextInput publishes `.Value` on blur by default.** A list bound to a search box does

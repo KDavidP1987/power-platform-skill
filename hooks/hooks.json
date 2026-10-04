@@ -1,0 +1,16 @@
+{
+  "description": "power-platform plugin gates: before a Power Platform build hands back, the design (impeccable), planning (dod), review and secret-hygiene steps must have happened. Silent in any folder without canvas source or a Power BI report.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/power-platform/scripts/hooks/plugin-gate.mjs\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

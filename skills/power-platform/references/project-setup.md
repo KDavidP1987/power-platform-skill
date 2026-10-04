@@ -265,7 +265,8 @@ same harness was copied into every project by hand - hooks that refused compile-
 time, a client that pushed to Studio and held the session, a token that never prompted, an order
 check after every publish, owner scripts for anything destructive - and every project that lacked
 a piece paid for it again. **Offer the harness at the start of every project**, say what it adds in
-one line per group, and install it when the person agrees:
+one line per group, and install it when the person agrees (with no person present - a scripted or
+headless build - install it with the defaults rather than skipping it):
 
 ```sh
 node <skill>/scripts/setup-harness.mjs <project>            # plan: every file it would add or merge

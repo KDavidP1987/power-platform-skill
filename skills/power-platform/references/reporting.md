@@ -269,6 +269,12 @@ report from `assets/templates/fabric-medallion/` (plan by default, `--apply` to 
 pipeline and waits; `scripts/reconcile-report.py` runs each figure's DAX and compares it with an
 independent Dataverse count.
 
+**Never hand a token to Fabric through a file.** A measured build wrote the owner's Dataverse
+token into a lakehouse file for a notebook to read: anyone with workspace access could read it
+until the notebook deleted it. Tokens never go to files, lakehouses, notebooks' parameters or logs.
+Fabric reaches Dataverse through a connection (Dataflow Gen2), Link to Microsoft Fabric, or a
+workspace identity; when that needs the person once, it is an up-front decision.
+
 **The refresh runs in Fabric, or it is not a refresh.** A measured build landed Dataverse rows as
 files from a script on the builder's machine and pointed bronze at them; the pipeline then ran
 "successfully" on stale files, and the report disagreed with Dataverse after the tests (6 loans

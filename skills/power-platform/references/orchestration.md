@@ -60,6 +60,13 @@ lead: one fix batch, confirm once, seed re-applied, hand-back
 - **Inside the canvas lane, fan out again**: write `App.pa.yaml` (tokens, named formulas, data
   sources) and a short screen plan first, then one helper per screen writing only its own
   `.pa.yaml`. Compile once, after all of them return.
+- **Never end a turn while helpers are running.** Wait for every helper's notification before
+  the final message. A headless run (`claude -p`) is terminated 600 s after the lead's turn ends
+  while background work continues, which cut a measured build off mid-task; the harness sets
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` for scripted runs as a backstop, not as permission.
+- **Start the lanes in one message.** Spawn the flows and reporting helpers in the same message,
+  straight after lane 0, and the screen helpers together in one message; a build that ran one
+  helper at a time lost the parallel gain.
 - **The lead runs the acceptance contract.** Helpers prove their own lane (the compile, a flow run, a
   reconciliation); only the lead walks the whole product end to end, because only the lead holds
   the contract.

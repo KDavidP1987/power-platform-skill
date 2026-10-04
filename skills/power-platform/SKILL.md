@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.19.0"
+  version: "0.19.1"
 ---
 
 # Power Platform development
@@ -32,6 +32,30 @@ listens to the wrong event. A formula that throws abandons the rest of the butto
 The published app runs a cached manifest that no longer matches the database. So the method is
 mostly about one question, asked at every step: **what does this step actually prove, and what
 does it not?**
+
+## Start here: a new app or solution, in this order
+
+A measured build read this skill, followed the brief's concrete steps and skipped every design and
+planning step below, which then cost it the design score. These are actions, not advice. For a new
+app or a multi-part build, before any table, screen or flow:
+
+1. **Plan.** When the dod skill is installed, invoke it (`dod plan --autonomous` from the brief);
+   its question batch is the decision list, and with no person present take each recommendation.
+   Otherwise write the acceptance contract (`assets/templates/acceptance-contract.md`).
+2. **Design.** Invoke the impeccable skill: `init` (PRODUCT.md, DESIGN.md; create the theme when
+   none is given), then `design/prototype.html` for every screen at 1440 and 390 px and the report
+   page, critiqued and fixed once (`references/project-setup.md` section 3).
+3. **Harness.** Install it (`scripts/setup-harness.mjs --apply`); with no person present, install
+   with the defaults rather than skipping it. It wires the checks and compacting at 40%.
+4. **Build in lanes.** Schema and sample data, then canvas (one helper per screen), flows and
+   reporting in parallel helpers; wait for every helper before ending a turn
+   (`references/orchestration.md`).
+5. **Prove and hand back.** Walks at both widths, impeccable `critique` from screenshots into
+   `docs/design-critique.md`, the independent reviewer into `docs/review.md`, one fix batch, the
+   seed restored, then the hand-back.
+
+The plugin's Stop hook blocks a hand-back on a canvas project that is missing DESIGN.md, the
+prototype, the critique, the DOD plan (when dod is installed) or the reviewer's record.
 
 ## The non-negotiables
 
@@ -89,7 +113,7 @@ user unproven.
    project, offer version control on GitHub** (optional; personal or organisation account) before
    the first change: `references/project-setup.md` section 12. **Offer the harness** too - the
    hooks and tools this method runs every cycle - and install it with `scripts/setup-harness.mjs`
-   when the person agrees (plan first; `references/project-setup.md` section 4). When a sign-in
+   when the person agrees, or with its defaults when no person is present (plan first; `references/project-setup.md` section 4). When a sign-in
    prompt appears, fix its cause rather than repeating it (`references/first-run.md` section 13).
 2. **Specify.** A written spec for anything non-trivial - an issue, or a backlog entry. Include
    who uses it, what proves it works, and what it touches (consult the dependency register).
