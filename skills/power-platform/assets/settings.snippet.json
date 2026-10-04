@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "40"
+  },
   "permissions": {
     "allow": [
       "Bash(pac org who*)",

@@ -11,6 +11,44 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-10-04
+
+Hardening from Test C (the third measured build of one brief): the rules that guidance alone did not
+enforce become gates, and the connection command gets the two fixes the build needed.
+
+### Added
+
+- **Design gate** in the end-of-turn hook (`audit-stop.mjs`): a project with canvas source or a
+  Power BI report must have a `DESIGN.md` (impeccable `init`, or written by hand when the person
+  declined impeccable, saying so) before the turn can end, and a `docs/design-critique.md` naming
+  the screenshots and the score once an app package has been built. `"designGate": false` in
+  `standards.config.json` turns it off. A build whose guidance called impeccable "required" skipped
+  it entirely. `audit-stop.mjs --selftest`, run in CI.
+- **`build-stamp-visible`** in `check-canvas-format.mjs` (error): a control showing the build-stamp
+  variable must be hidden or gated by a role, admin, support or debug flag; a layout condition
+  such as `Visible: =!lyPhone` is not a gate. A measured build shipped exactly that.
+- **Compact at 40%**: `setup-harness.mjs` writes `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=40` into the
+  project's `.claude/settings.json` (never overwriting a value the project set), and
+  `orchestration.md` section 4 adds the practice that makes it safe: state in `docs/STATE.md` at each
+  lane boundary, restored by the pre-flight hook after compaction; compact between lanes; the
+  strongest model for building and judging, a smaller one only for read-only errands; narrow reads.
+
+### Fixed
+
+- `canvas-browser.mjs connection` picks the configured account on "Pick an account" by its visible
+  text when the attribute selector does not match, and confirms the consent code over the API when
+  the consent page alone leaves the connection Unauthenticated (Dataverse and Outlook needed this).
+
+### Changed
+
+- `reporting.md` section 4: the refresh runs in Fabric, or it is not a refresh. A build landed
+  Dataverse rows as files from a local script, and the pipeline then served stale data after the
+  tests. Prove it by changing one row and refreshing from Fabric alone.
+- `orchestration.md`: the design step is a lane run first by the lead; seed data is re-applied after
+  the last walk (a build left two seed rows changed and failed its own data check).
+- `tooling-and-auth.md`: "one Approvals connection per person" is untested in either direction; try
+  before claiming.
+
 ## [0.18.1] - 2026-10-04
 
 ### Added

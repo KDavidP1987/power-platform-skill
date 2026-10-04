@@ -612,13 +612,15 @@ export function readThemeTokens(appText) {
   return tokens;
 }
 
+const STAMP_GATE = /^=?\s*false\s*$|admin|role|support|debug|diag|developer|owner|maker|showbuild|showstamp|User\(\)/i;
 const TEXT_CONTROLS = /^(Label|Text|Classic\/Label|ModernText)(@|$)/i;
 const COLOUR_PROPS = /(Color|Fill|Background|Border(Color)?)$/i;
 const LITERAL_COLOUR = /\b(RGBA\s*\(|ColorValue\s*\(|Color\.(?!Transparent\b)[A-Z][A-Za-z]+)|"#[0-9A-Fa-f]{3,8}"/;
 const LITERAL_FONT = /\bFont\.('[^']+'|[A-Za-z]+)|^="[^"]+"$/;
 
-export function analyse(files, { schema = null, screenWidth = 1366, screenHeight = 768, galleriesOnly = false, theme = true } = {}) {
+export function analyse(files, { schema = null, screenWidth = 1366, screenHeight = 768, galleriesOnly = false, theme = true, stampVar = 'gblBuild' } = {}) {
   const findings = [];
+  const stampRe = stampVar ? new RegExp('(^|[^A-Za-z0-9_])' + String(stampVar).replace(/[^A-Za-z0-9_]/g, '') + '($|[^A-Za-z0-9_])') : null;
   const stats = { files: 0, textControls: 0, bound: 0, measured: 0, unparsed: 0, collections: 0, literalColours: 0, literalFonts: 0, galleries: 0, listsWithoutFilter: 0,
     literalMeasured: 0, nameChecked: 0, unnamed: 0, contrastExamined: 0, contrastUnexamined: 0, lowContrast: 0 };
   const appFile = files.find((f) => /(^|[\\/])App\.pa\.yaml$/i.test(f.path));
@@ -701,6 +703,21 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
         stats.literalFonts++;
         findings.push({ level: tokens.size ? 'error' : 'warn', code: 'literal-font', file: c.file, line: pv.line, control: c.name,
           msg: `${c.name}.Font names a font directly (${s.trim().slice(0, 40)}). Reference the theme's font token.` });
+      }
+    }
+    // ---- build stamp shown to every user ----
+    // The stamp is for whoever ships and supports the app. A control that shows it (any property but
+    // Visible references the variable) must be gated by WHO is looking: its own or an ancestor's Visible
+    // is literal false, or names a role, admin, support, debug or owner flag (gblIsAdmin, locShowDebug,
+    // User().Email lookups against a roles table...). A layout condition is not a gate: a measured
+    // build shipped Visible: =!lyPhone, which hid the stamp on phones and showed it to every desktop user.
+    if (stampRe) {
+      const shows = Object.entries(c.props).find(([k, pv]) => k !== 'Visible' && stampRe.test(String(pv.v || '')));
+      let gated = false;
+      for (let a = c; a && !gated; a = a.parent) gated = STAMP_GATE.test(String(a.props?.Visible?.v ?? '').trim());
+      if (shows && !gated) {
+        findings.push({ level: 'error', code: 'build-stamp-visible', file: c.file, line: shows[1].line || c.line, control: c.name,
+          msg: `${c.name}.${shows[0]} shows the build stamp (${stampVar}) to every user. Gate it - Visible on an admin or support flag - or move it to an about panel only those roles open (canvas-shipping.md, "The build stamp").` });
       }
     }
     // ---- text fit ----
@@ -1016,6 +1033,13 @@ function report(res, json) {
   console.log('Room is an estimate that errs toward "does not fit"; confirm a borderline case in the running app.');
 }
 
+// The build-stamp variable is the one the ship writes (canvas-app.json buildStampVariable, default gblBuild).
+function readStampVar(root = process.cwd()) {
+  for (const c of ['scripts/canvas-app.json', 'canvas-app.json']) {
+    try { const v = JSON.parse(fs.readFileSync(path.join(root, c), 'utf8').replace(/^\uFEFF/, '')).buildStampVariable; if (v) return v; } catch { /* next */ }
+  }
+  return 'gblBuild';
+}
 function hookMode() {
   let input = {}; try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { /* not a hook payload */ }
   const file = input?.tool_input?.file_path || input?.tool_response?.filePath;
@@ -1028,7 +1052,7 @@ function hookMode() {
     const cfg = JSON.parse(fs.readFileSync(path.join(process.cwd(), '.claude', 'hooks', 'standards.config.json'), 'utf8'));
     if (cfg.textFitSchema) schema = loadSchema(path.resolve(process.cwd(), cfg.textFitSchema));
   } catch { /* no config: lengths guessed from column names */ }
-  const res = analyse(files, { schema });
+  const res = analyse(files, { schema, stampVar: readStampVar() });
   // A write-time hook blocks only on what is known: a length guessed from a column name does not block
   // (configure textFitSchema in .claude/hooks/standards.config.json to check those too).
   const mine = res.findings.filter((f) => f.level === 'error' && path.resolve(f.file) === path.resolve(file) && !(f.guessed && !schema));
@@ -1181,6 +1205,12 @@ function selftest() {
   expect('literal: hint with room', free([['lblHint', 'Label', { ...box, Width: '=600', Height: '=40', Size: '=10', Text: hint }]]), []);
   expect('literal: If of captions', free([['lblHint', 'Label', { ...box, Width: '=60', Height: '=22', Size: '=10', Text: '=If(locNew, "New order for this vendor", "Edit")' }]]), ['literal-text-overflow']);
   expect('literal: a count is not literal text', free([['lblN', 'Label', { ...box, Width: '=60', Height: '=22', Size: '=10', Text: '=CountRows(colRows)' }]]), []);
+  // Build stamp: shown to everyone is an error; gated by any Visible formula is not.
+  expect('stamp: shown to every user', free([['lblBuild', 'Label', { ...box, Text: '="Build " & gblBuild' }]]), ['build-stamp-visible']);
+  expect('stamp: Visible true is not a gate', free([['lblBuild', 'Label', { ...box, Text: '="Build " & gblBuild', Visible: '=true' }]]), ['build-stamp-visible']);
+  expect('stamp: admins only', free([['lblBuild', 'Label', { ...box, Text: '="Build " & gblBuild', Visible: '=gblIsAdmin' }]]), []);
+  expect('stamp: a layout condition is not a gate', free([['lblBuild', 'Label', { ...box, Text: '=gblBuild', Visible: '=!lyPhone' }]]), ['build-stamp-visible']);
+  expect('stamp: a name that merely contains it', free([['lblBuild', 'Label', { ...box, Text: '="Build " & gblBuildNotes' }]]), []);
   // Layout constants from Named Formulas: If on a resolved breakpoint, Mod and RoundDown.
   const cst = evalFormulaConstants(APP2, new Map(), 1366, 768), cstP = evalFormulaConstants(APP2, new Map(), 390, 844);
   if (cst.get('lyPad') !== 28 || cstP.get('lyPad') !== 14 || cst.get('lyCols') !== 6) fails.push(`formula constants: lyPad ${cst.get('lyPad')}/${cstP.get('lyPad')}, lyCols ${cst.get('lyCols')}`);
@@ -1190,7 +1220,7 @@ function selftest() {
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast and 4 literal-fit cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 4 literal-fit and 5 build-stamp cases decided as expected`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }
@@ -1201,12 +1231,12 @@ if (isMain) {
   if (argv.includes('--selftest')) selftest();
   else if (argv.includes('--hook')) hookMode();
   else if (argv.length === 0 || argv.includes('--help')) {
-    console.log('usage: node check-canvas-format.mjs <Src folder or .pa.yaml>... [--schema cols.json] [--screen-width N] [--screen-height N] [--char-em 0.56] [--galleries-only] [--no-theme] [--json] | --hook | --selftest');
+    console.log('usage: node check-canvas-format.mjs <Src folder or .pa.yaml>... [--schema cols.json] [--screen-width N] [--screen-height N] [--char-em 0.56] [--galleries-only] [--no-theme] [--stamp-var gblBuild] [--json] | --hook | --selftest');
     process.exit(argv.length === 0 ? 1 : 0);
   } else {
     const opt = (f) => { const k = argv.indexOf(f); return k === -1 ? null : argv[k + 1]; };
     if (opt('--char-em')) MODEL.unknownEm = Number(opt('--char-em'));   // calibrate from canvas-browser.mjs measurefont
-    const valued = new Set(['--schema', '--screen-width', '--screen-height', '--char-em'].map((f) => argv.indexOf(f)).filter((k) => k !== -1).map((k) => k + 1));
+    const valued = new Set(['--schema', '--screen-width', '--screen-height', '--char-em', '--stamp-var'].map((f) => argv.indexOf(f)).filter((k) => k !== -1).map((k) => k + 1));
     const paths = argv.filter((a, k) => !a.startsWith('--') && !valued.has(k));
     const files = collect(paths);
     // App.pa.yaml supplies constants and theme tokens even when only screen files are named.
@@ -1218,7 +1248,7 @@ if (isMain) {
     if (files.length === 0) { console.error('No .pa.yaml files found under: ' + paths.join(', ') + ' - this is NOT a pass.'); process.exit(2); }
     const schema = opt('--schema') ? loadSchema(opt('--schema')) : null;
     const res = analyse(files, { schema, screenWidth: Number(opt('--screen-width') || 1366), screenHeight: Number(opt('--screen-height') || 768),
-      galleriesOnly: argv.includes('--galleries-only'), theme: !argv.includes('--no-theme') });
+      galleriesOnly: argv.includes('--galleries-only'), theme: !argv.includes('--no-theme'), stampVar: opt('--stamp-var') || readStampVar() });
     report(res, argv.includes('--json'));
     if (res.stats.bound === 0) { console.error('No data-bound text control was examined - this is NOT a pass.'); process.exit(2); }
     process.exit(res.findings.some((f) => f.level === 'error') ? 1 : 0);

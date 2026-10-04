@@ -275,8 +275,10 @@ and let the person allow exactly that, once:
    prints the plan and writes nothing. It refuses (exit 3) unless the token's account is the
    config's `login` and the environment's Dataverse URL is the config's `environmentUrl`. With
    `--apply` it creates the connection over the API, completes OAuth consent in the driver's
-   signed-in profile (silent with a Windows-signed-in Edge, measured), and reads back Connected. It
-   reuses this build's own connection by name and never touches anyone else's.
+   signed-in profile (silent with a Windows-signed-in Edge, measured), confirms the consent code
+   over the API when the consent page alone did not finish it (Dataverse and Outlook needed this;
+   Office 365 Users did not), and reads back Connected. It picks the configured account on "Pick an
+   account". It reuses this build's own connection by name and never touches anyone else's.
 2. At the start of the project (with the harness, `project-setup.md` section 4), offer the person
    this permission rule for the project's `.claude/settings.json`, and say what it allows - creating
    connections named for this build, as the configured account, in the configured environment:
@@ -290,8 +292,10 @@ and let the person allow exactly that, once:
 3. When the guard refuses anyway, stop and say which rule would allow it. Never look for a second
    route, and never hand the step to a helper agent or another session.
 
-Approvals has no OAuth parameter: an API-created Approvals connection is Connected at once, and a
-person can hold several (an agent's claim of "one per person" was wrong when checked).
+Approvals has no OAuth parameter: an API-created Approvals connection is Connected at once.
+Whether one person may hold more than one has not been measured; an agent claimed "one per person"
+without trying. Try `connection --connector approvals --apply` before claiming either way, and
+report what the API answered.
 
 **Reuse existing connections only when they are this build's own.** List the connections the person already
 has: `GET https://api.powerapps.com/providers/Microsoft.PowerApps/apis/<connector>/connections?api-version=2016-11-01&$filter=environment eq '<env id>'`

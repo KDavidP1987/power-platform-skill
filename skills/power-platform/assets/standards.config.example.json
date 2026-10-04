@@ -5,6 +5,7 @@
   "canvasFileCeiling": 50,
   "canvasFileWarnAt": 45,
   "debugMarkers": true,
+  "designGate": true,
   "textFitSchema": "canvas/text-fit-schema.json",
   "bookkeeping": {
     "solutionDir": "solution/",

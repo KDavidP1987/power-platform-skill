@@ -46,6 +46,7 @@ jobs:
       - run: node skills/power-platform/scripts/contract-to-walk.mjs --selftest
       - run: node skills/power-platform/scripts/setup-harness.mjs --selftest
       - run: node skills/power-platform/scripts/hooks/shared-guard.mjs --selftest
+      - run: node skills/power-platform/scripts/hooks/audit-stop.mjs --selftest
       - run: node skills/power-platform/scripts/canvas-browser.mjs --selftest
       - run: pip install python-docx pillow
       - run: python skills/power-platform/assets/doc-kit/doc_kit.py --selftest

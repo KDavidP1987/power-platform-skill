@@ -74,6 +74,12 @@ function mergeSettings(existing, snippet) {
   for (const rule of (snippet.permissions?.allow || [])) {
     if (!out.permissions.allow.includes(rule)) { out.permissions.allow.push(rule); added++; }
   }
+  // Environment for the session (e.g. compact at 40% of the window). Never overwrite a value the
+  // project already chose.
+  for (const [k, v] of Object.entries(snippet.env || {})) {
+    out.env = out.env || {};
+    if (!(k in out.env)) { out.env[k] = v; added++; }
+  }
   out.hooks = out.hooks || {};
   for (const [event, groups] of Object.entries(snippet.hooks || {})) {
     out.hooks[event] = out.hooks[event] || [];
@@ -118,7 +124,7 @@ export function setup(project, { apply = false, force = false, only = null, log 
       const { out, added } = mergeSettings(existing, JSON.parse(read(S('assets', 'settings.snippet.json')).toString('utf8')));
       if (added) {
         changes++;
-        log(`  merge    .claude/settings.json  - ${added} hook or permission entr${added === 1 ? 'y' : 'ies'} added, existing ones kept`);
+        log(`  merge    .claude/settings.json  - ${added} hook, permission or env entr${added === 1 ? 'y' : 'ies'} added, existing ones kept`);
         if (apply) { fs.mkdirSync(path.dirname(sp), { recursive: true }); fs.writeFileSync(sp, JSON.stringify(out, null, 2) + '\n'); }
       }
     }

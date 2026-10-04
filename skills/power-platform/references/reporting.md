@@ -269,6 +269,15 @@ report from `assets/templates/fabric-medallion/` (plan by default, `--apply` to 
 pipeline and waits; `scripts/reconcile-report.py` runs each figure's DAX and compares it with an
 independent Dataverse count.
 
+**The refresh runs in Fabric, or it is not a refresh.** A measured build landed Dataverse rows as
+files from a script on the builder's machine and pointed bronze at them; the pipeline then ran
+"successfully" on stale files, and the report disagreed with Dataverse after the tests (6 loans
+shown, 8 live). Bronze must read Dataverse from inside Fabric: a Dataflow Gen2 on a Dataverse
+connection, Link to Microsoft Fabric (shortcuts), or a notebook with a token Fabric can mint. If none
+is possible without the person (a Fabric cloud connection needs a sign-in), say so as a decision at
+the start, not as a limit at the end. Before handing back, change one row in Dataverse, run the
+documented refresh from Fabric alone, and check the figure moved.
+
 **Licensing, before promising a report to leaders:** viewing a Power BI report needs a Pro (or
 Premium Per User) licence for each viewer unless the workspace sits on a capacity of F64 / P1 or
 larger, where free-licence viewers can open what is SHARED with them (share the report or an app,

@@ -2068,13 +2068,25 @@ async function cmdConnection() {
     const link = await call('POST', `${base}/getConsentLink?${q}`, { redirectUrl: oauth.redirectUrl });
     const ctx = await launch({ headless: has('headless') });
     const page = await freshPage(ctx);
-    let confirmed = false;
-    page.on('request', (r) => { if (rx('consent.confirmUrl').test(r.url())) confirmed = true; });
+    let confirmed = false, code = null;
+    const seeUrl = (u) => {
+      if (!rx('consent.confirmUrl').test(u)) return;
+      confirmed = true;
+      const m = /[?&]code=([^&#]+)/.exec(u);
+      if (m && !code) code = decodeURIComponent(m[1]);
+    };
+    page.on('request', (r) => seeUrl(r.url()));
+    page.on('framenavigated', (f) => { if (f === page.mainFrame()) seeUrl(f.url()); });
     await page.goto(link.consentLink).catch(() => {});
     const end = Date.now() + Number(flag('wait-for', 90000));
     while (!confirmed && Date.now() < end) {
-      // Not silent: pick the configured account on the picker; anything else (MFA, a password) is the person's.
-      if (APP.login) { const tile = page.locator(tpl('consent.accountTile', { login: APP.login })); if (await tile.count().catch(() => 0)) await tile.first().click().catch(() => {}); }
+      // Not silent: pick the configured account on "Pick an account" (by its attribute, else by its
+      // visible text - the attribute did not match in one measured run); anything else is the person's.
+      if (APP.login) {
+        for (const tile of [page.locator(tpl('consent.accountTile', { login: APP.login })), page.getByText(APP.login, { exact: true })]) {
+          if (await tile.count().catch(() => 0)) { await tile.first().click().catch(() => {}); break; }
+        }
+      }
       await page.waitForTimeout(700);
     }
     if (!confirmed) {
@@ -2084,6 +2096,13 @@ async function cmdConnection() {
       log('     Run `canvas-browser.mjs login` once as ' + (APP.login || 'the build account') + ', then re-run this command; it finishes the same connection.');
     }
     await ctx.close();
+    // Reaching the confirm step was enough for one connector (Office 365 Users); Dataverse and
+    // Outlook stayed Unauthenticated until the code was confirmed over the API. Confirm whenever
+    // the connection is not yet Connected and a code was seen. The body is { code } only.
+    if (code) {
+      const now = await call('GET', `${base}?${q}`);
+      if (statusOf(now) !== 'Connected') await call('POST', `${base}/confirmConsentCode?${q}`, { code }).catch((e) => log('  !! confirmConsentCode: ' + e.message));
+    }
   }
   let c;
   for (let i = 0; i < 15; i++) { c = await call('GET', `${base}?${q}`); if (statusOf(c) === 'Connected') break; await new Promise((r) => setTimeout(r, 2000)); }

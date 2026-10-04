@@ -91,8 +91,31 @@ The cost of a long build is mostly context re-read on every turn, not output.
 - **Use the bundled tools before writing new ones.** `deploy-tables.py`, `seed-data.py`,
   `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `canvas-browser.mjs` cover what a build needs;
   an agent that writes its own helper mid-build pays for it in time and tokens.
+- **The design step is a lane of its own, run first by the lead**: invoke the impeccable skill
+  (`init`, then the tokens) before handing out screens; the end-of-turn hook blocks a hand-back
+  without `DESIGN.md` and a critique record. A build that left it to "required" in the guidance
+  skipped it.
 - **Do not patch the driver mid-build.** When the driver lacks a step, use the Playwright MCP tools
   for that step, record the gap, and fix the driver after the build.
+- **Compact early, and keep the state in files so nothing is lost.** The harness sets
+  `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=40` in the project's `.claude/settings.json`, so the session
+  compacts at 40% of the window instead of carrying (and re-reading) a near-full context every turn.
+  Some Claude Code versions are reported to ignore that key in `settings.json`; for headless or
+  scripted runs also set it in the shell that launches `claude`, and check with `/context` that a
+  long build stays below half the window. Compaction is safe only when what matters is written
+  down: update `docs/STATE.md` at every lane boundary (what passed, with numbers; what is open;
+  decisions; ids of apps, flows, connections and items), and the pre-flight hook, which also runs
+  when a session resumes after compacting, puts it back in front of the agent. Compact between lanes
+  or after a fix batch, never in the middle of a diagnosis; a manual `/compact` takes a focus
+  ("keep the acceptance results and the open defects").
+- **Spend the expensive model on judgement, not on errands.** Quality is the first measure:
+  building screens, flows and the model, and every review or critique, stay on the strongest
+  model. Read-only errands (listing items, scanning a long log or run history for one fact,
+  capturing a screenshot set) can go to a smaller, cheaper helper model, which returns only the
+  fact or the file paths.
+- **Read narrowly.** Read the part of a large file you need (a line range, a `grep` first), ask
+  tools for compact output (`--json`, a count, the first failing case), and never paste a Studio
+  tree, a whole run history or a full transcript into the lead's context.
 - **Prefer a scenario walk to an interactive click-through** once a path works: re-running it costs
   one call.
 
@@ -134,5 +157,9 @@ else is the agent's work.
    clipping, overlap and dead-click sweeps. Truncation counts: text cut with an ellipsis where the
    full value matters to the task is a defect at phone width, not a pass.
 3. Fix everything found in one batch, ship once, confirm once. Do not loop on polish.
-4. The hand-back states what passed, what was not measured and why, and never says "clean" for a
+4. **Put the data back.** Walks that lend, return or approve change the seed rows. Re-apply the seed
+   (`seed-data.py seed --update --apply`) after the last walk, and list any evidence rows you leave
+   (prefixed so a cleanup can find them). A measured build left two seed assets in the wrong state,
+   which failed its own data row and hid an item from a filter.
+5. The hand-back states what passed, what was not measured and why, and never says "clean" for a
    check that did not cover truncation, both widths and every role.
