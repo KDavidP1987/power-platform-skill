@@ -595,6 +595,16 @@ and a stale date nothing else read.
   band-cut helper removes a role-only banner from the middle of a screen. Write to a new directory;
   never overwrite the originals.
 - **Keep captures out of git.** They carry real colleagues' names.
+- **Capture an email as the message, never the mailbox.** When a flow's email must be shown, take an
+  element screenshot of the single open message's reading pane (header and body). A capture of the
+  mail client shows the person's folder list and other mail; never publish one.
+
+**Screenshots for the design critique.** After a ship, capture every published screen at 1440 and
+390 px and the report with `assets/templates/screenshot-walk.json` (replace its click targets with the
+app's navigation; it uses `viewport`, `capture` and `clipcheck`, so it also fails on clipped text).
+Give the images to impeccable `critique` and record the result in `docs/design-critique.md`
+(`project-setup.md` section 3). Capture as the role that uses the screen, and from the published
+player, not Studio.
 
 ## 17. What browser verification does not prove
 

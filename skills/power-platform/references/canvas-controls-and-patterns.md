@@ -606,6 +606,22 @@ relying on `DisplayMode`.
   panels before the final ship.
 - **Remove the leftover blank screen** that app creation leaves (`Screen1`) once your own screens
   exist, and set `App.StartScreen`.
+- **A pending request reserves the item.** A measured build kept an asset "Available" while a loan
+  request for it waited for approval, so a second person could request the same asset and two
+  approvals went out. Treat a pending (requested, awaiting approval) record like an active one in
+  the eligibility rule: the item shows "Requested by <name> on <date>", the request action is
+  replaced by that reason, and the save handler checks again server-side (a `LookUp` for an open or
+  pending record on the item, immediately before the `Patch`) because two people can have the screen
+  open at once. Walk it: request, then request the same item again as a second step, and confirm in
+  Dataverse that one record exists.
+- **A typed date gets a format message, not "required".** The date picker accepts typing; a
+  measured build rejected a typed date it could not parse with "Due date is required", which tells
+  the person the field is empty when they can see it is not. Distinguish blank from unreadable
+  (`IsBlank(dpDue.SelectedDate)` with the text box non-empty means "not a date"), say which format
+  is expected ("Use the calendar, or type 31/12/2026"), and keep the typed text in the box.
+- **Every rule here is walk-tested, not assumed.** Each bullet in this section that gates an action
+  has a refusal or `twice` scenario in the acceptance contract (`browser-verification.md` section
+  18); a rule only read in the source is unproven in the published app.
 
 ## 16. Lists: filter, search, group, sort
 

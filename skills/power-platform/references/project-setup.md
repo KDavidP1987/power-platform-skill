@@ -164,17 +164,61 @@ start) and run it, in this order:
 1. `init` before the first screen: `PRODUCT.md` (who uses the app, what they must get done, the
    usage scene) and `DESIGN.md` (type scale, palette within the organisation's rules, spacing,
    hierarchy, density). Mode is Operate for an app, Read for a report page.
-2. Translate `DESIGN.md` into `canvas/theme.json`, the tokens in `App.pa.yaml`
+   When nobody gives a theme, create one: impeccable chooses it from the product and the usage
+   scene, within the organisation's palette rules (never a default theme, and no colour the
+   organisation forbids). Ask for a theme only when the person is present and has one.
+2. **Design the screens in HTML first: `design/prototype.html`** (`assets/templates/design-prototype.html`
+   is the skeleton). Every screen at 1440 and 390 px, every state a user meets (empty, loading,
+   error, saved), and a mock of the report page, built with impeccable's normal workflow - its
+   detector and its browser critique both work on HTML, which they cannot on a canvas app. Run
+   `critique` on the prototype and fix everything it raises in one batch. Why first, and why HTML:
+   impeccable is at its strongest on a web page, and a design changed in HTML costs minutes while the
+   same change across finished `.pa.yaml` screens is a rebuild. The prototype is the visual spec;
+   the tokens are the single source of every value in it.
+3. Translate `DESIGN.md` into `canvas/theme.json`, the tokens in `App.pa.yaml`
    (`references/canvas-layout.md` section 10) and the Power BI report theme
    (`scripts/pbi-theme.py`, from `theme.json`; `references/reporting.md` section 4).
-3. Give each screen helper `DESIGN.md` and the tokens, not a free hand.
-4. `critique` on the published screens at 1440 and 390 px and on the report, once, then fix
-   everything it raises in one batch (`references/orchestration.md` section 7).
+4. Give each screen helper `DESIGN.md`, the tokens and its frame of the prototype, not a free hand;
+   the reporting lane gets the report mock.
+5. After the ship, **critique the real product from screenshots**: capture the published screens at
+   1440 and 390 px and the report (`assets/templates/screenshot-walk.json` with
+   `canvas-browser.mjs walk`), run impeccable `critique` on the images, and declare the run degraded
+   where its detector cannot run on a canvas app (impeccable's own rule: a silent degraded critique
+   is a failed one). Write `docs/design-critique.md`: the score, how the product departs from the
+   prototype, and every finding marked fixed or deferred with a reason. Fix in one batch
+   (`references/orchestration.md` section 7). The end-of-turn design gate checks that the file
+   exists and names the screenshots and the score.
 
-Record in the hand-back that each step ran (the files it wrote, the critique's score). This skill
+**What impeccable's web practice means on a canvas.** The same rules, in canvas terms:
+
+| Web practice | On a canvas app |
+|---|---|
+| A type scale with few, distinct steps | Four or five `Size` tokens (caption, body, subtitle, title, figure); nothing set by hand on a control |
+| A spacing rhythm from one base unit | Every `X`, `Y`, padding and gap a multiple of one unit token (8 is common) |
+| One primary action per view | One filled button per screen in the primary colour; every other action secondary |
+| Hierarchy before decoration | Title, then the thing the person came for, then supporting detail; colour carries state, not ornament |
+| Density for the task (Operate mode) | Scannable rows with the columns people sort by; tables at desktop width, stacked cards at phone width |
+| Every state designed | Empty, loading (a "Saving..." or spinner flag), error with what to do next, success; none left to the default |
+| No default theme | Tokens from `DESIGN.md` on every control, report and email; the Power BI default palette never ships |
+| Text that fits | Long values wrap at phone width, never cut where the full value matters (`canvas-layout.md` section 8) |
+
+Record in the hand-back that each step ran (the files it wrote, both critiques' scores). This skill
 keeps the constraints a web design skill cannot know: canvas controls, absolute geometry, the fit
 rule, accessible names. When the person declines the install, record the decision and still write a
-short `DESIGN.md` by hand before the first screen.
+short `DESIGN.md` by hand before the first screen, and still build the prototype.
+
+**Plan the requirements with DOD when it is installed.** DOD (a third-party planning skill,
+`dod@dod-skill` from `KDavidP1987/dod-skill`) walks fifteen consideration layers - purpose, actors and
+permissions, data, business rules, interfaces, states, security, design, failure handling, rollout
+and more - before anything is built, and closes with a prediction rate (how much of the work the
+plan foresaw). Run `dod plan --autonomous` from the brief before the first table. Its question batch
+is the single up-front decision list: each question carries a recommendation, and with no person
+present the agent takes the recommendation and records it. Turn its items into the acceptance
+contract with `contract-to-walk.mjs --from-dod <plan.md>`, so every item is performed in the published
+app; close with `dod close` and put the prediction rate in the hand-back. Without DOD, write the
+acceptance contract as before (`assets/templates/acceptance-contract.md`). It catches the business
+rules a brief leaves implicit - a pending request that must reserve the item, a typed date that needs
+a format message - which no layout check will.
 
 **Ask the same way about lists, messages and documents** - three things that are cheap at the
 design stage and a rework after go-live:

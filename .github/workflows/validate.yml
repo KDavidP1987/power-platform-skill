@@ -43,6 +43,7 @@ jobs:
       - run: python skills/power-platform/scripts/fabric.py --selftest
       - run: python skills/power-platform/scripts/reconcile-report.py --selftest
       - run: python skills/power-platform/scripts/pbi-theme.py --selftest
+      - run: node skills/power-platform/scripts/check-all.mjs --selftest
       - run: node skills/power-platform/scripts/contract-to-walk.mjs --selftest
       - run: node skills/power-platform/scripts/setup-harness.mjs --selftest
       - run: node skills/power-platform/scripts/hooks/shared-guard.mjs --selftest

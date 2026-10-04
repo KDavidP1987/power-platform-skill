@@ -47,6 +47,7 @@ export const MANIFEST = [
   ['scripts/reconcile-report.py', 'scripts/reconcile-report.py', 'tools', 'report figures against Dataverse (read only)'],
   ['scripts/pbi-theme.py', 'scripts/pbi-theme.py', 'tools', 'Power BI theme from the app tokens'],
   ['scripts/lint-flows.mjs', 'scripts/lint-flows.mjs', 'tools', 'flow definitions: loops, guards, recipients'],
+  ['scripts/check-all.mjs', 'scripts/check-all.mjs', 'tools', 'every static check in one call, one compact table'],
   ['scripts/flow-runs.py', 'scripts/flow-runs.py', 'tools', 'why did a flow run fail (read only)'],
   ['scripts/audit-pages-permissions.py', 'scripts/audit-pages-permissions.py', 'tools', 'Power Pages permissions, allow-lists and headers'],
   ['scripts/dv-token.ps1', 'scripts/dv-token.ps1', 'tools', 'one-sign-in Dataverse token'],

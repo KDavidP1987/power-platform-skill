@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.18.2"
+  version: "0.19.0"
 ---
 
 # Power Platform development
@@ -102,9 +102,15 @@ user unproven.
    it as `canvas/theme.json`, define it once as tokens in `App.pa.yaml`, and build every screen on
    the tokens (`references/project-setup.md` section 3). Asked for after ten screens, the theme is
    a rebuild. **Run the impeccable design skill; it is a required step**: `init` for `PRODUCT.md`
-   and `DESIGN.md` before the first screen, tokens and the Power BI theme from them, `critique` on
-   the published screens and the report (`references/project-setup.md` section 3). Never ship
-   Power BI's default theme.
+   and `DESIGN.md` before the first screen (creating the theme when none is given), then **design
+   every screen and the report page in HTML first** (`design/prototype.html`, critiqued and fixed
+   with impeccable before any `.pa.yaml` is written), tokens and the Power BI theme from it, and
+   after the ship a `critique` of the published screens and report from screenshots, recorded in
+   `docs/design-critique.md` (`references/project-setup.md` section 3). Never ship Power BI's default
+   theme. **With DOD installed, plan with it first** (`dod plan --autonomous`; its items become the
+   acceptance contract via `contract-to-walk.mjs --from-dod`). **Before the hand-back, an
+   independent reviewer** (a fresh helper, `assets/templates/reviewer-prompt.md`) walks the contract
+   and the design record; fix its findings in one batch.
    **For a build with several parts, orchestrate**: schema and sample data first, then the canvas
    app, flows and reporting in parallel helper agents with one screen per helper, the lead running
    the acceptance walks (`references/orchestration.md`).
@@ -166,7 +172,7 @@ points there.
 | If the task involves | Read |
 |---|---|
 | **Building a whole solution** | |
-| Parallel lanes after the schema (canvas, flows, reporting), helper agents per screen, the lane contract and lock owners, keeping the lead's context and cost small, a hands-off person (decisions only), browser hygiene, the single verification-and-fix round | `references/orchestration.md` |
+| Planning with DOD and deciding up front, the design lane (impeccable, an HTML prototype of every screen and the report before any `.pa.yaml`), parallel lanes after the schema (canvas, flows, reporting), helper agents per screen, the lane contract and lock owners, keeping the lead's context and cost small (batched checks, compaction), a hands-off person (decisions only), browser hygiene, the independent reviewer and the single verification-and-fix round | `references/orchestration.md` |
 | **Canvas apps** | |
 | Shipping a canvas change and proving it landed: the two ship paths, building on the live manifest, build stamps, `LoadFromYaml`, Save vs Publish proof, player caching, imports that remove nothing, rollback, the screen-file ceiling | `references/canvas-shipping.md` |
 | Studio opens read-only, `connect` returns 422, a compile shows thousands of "isn't recognized", a restore says "locked by user", the authoring MCP misleads (`isError`, contract drift) | `references/authoring-sessions.md` |
@@ -216,6 +222,8 @@ than carrying an id. Run any of them with `--help`.
 | `scripts/fabric.py` | Fabric items from repo files into one workspace folder, idempotently (`deploy`), list (`items`), and run a pipeline or notebook job and wait (`run`). Resolves item ids and SQL endpoints at deploy time; refuses unfilled template tokens and names that exist outside the folder. Templates in `assets/templates/fabric-medallion/`. Plan by default. |
 | `scripts/reconcile-report.py` | Each report figure's DAX (executeQueries) against an independent Dataverse count, sum or group; exit 1 on any difference. Read-only. |
 | `scripts/pbi-theme.py` | A Power BI report theme from the app's `theme.json` tokens, installed into a PBIR report folder; refuses purple, violet, indigo and magenta, contrast under 4.5:1 and unset values. |
+| `scripts/check-all.mjs` | One call for the routine checks: canvas format, overlap, flow lint, drift, seed drift and the build stamp, printed as one compact table with an exit code. Use it instead of a shell call per check. |
+| `assets/templates/design-prototype.html`, `reviewer-prompt.md`, `screenshot-walk.json` | The design lane's HTML prototype skeleton (tokens as CSS properties, both widths, no palette of its own), the independent reviewer's prompt, and the walk that captures every published screen at 1440 and 390 px for the design critique. |
 | `scripts/setup-harness.mjs` | Installs this method's harness into a project: the hooks wired with `$CLAUDE_PROJECT_DIR`, the tools, the config and continuity documents, `.gitignore` entries and the version record the pre-flight's update notice reads. Plan by default, `--apply` to install; never overwrites a changed file or removes anything; merges into an existing `settings.json`. |
 | `scripts/canvas-mcp.py` | Direct stdio client for the canvas authoring server: `tools` (the argument names it accepts now), `compile`, `hold` (push, refuse unless clean, hold the session until a release file appears), `sync` (never into `Src`), `sources`, `schema`, `describe`, `a11y`, `checker`, `accounts`. Sends `login_hint` so connect never prompts; always releases the session and kills the server tree. |
 | `scripts/check-published-order.py` | Compares control (z-)order in a downloaded published app with the repo; catches a push that drew a card over its gallery while every property matched. |

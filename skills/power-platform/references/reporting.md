@@ -275,8 +275,13 @@ files from a script on the builder's machine and pointed bronze at them; the pip
 shown, 8 live). Bronze must read Dataverse from inside Fabric: a Dataflow Gen2 on a Dataverse
 connection, Link to Microsoft Fabric (shortcuts), or a notebook with a token Fabric can mint. If none
 is possible without the person (a Fabric cloud connection needs a sign-in), say so as a decision at
-the start, not as a limit at the end. Before handing back, change one row in Dataverse, run the
-documented refresh from Fabric alone, and check the figure moved.
+the start, not as a limit at the end. Before handing back, prove it with
+`scripts/fabric.py prove-refresh --manifest fabric.json --checks report-checks.json --check "<figure>"
+--touch "<prefix>_table/<key column>=<key>/<column>=<value>" --apply`: it changes one row of this
+build's own (any other table is refused), confirms the Dataverse figure moved, runs the pipeline
+from Fabric, re-reads the figure through the model, then restores the row and refreshes again.
+Exit 1 means the refresh does not reach Dataverse from Fabric; the hand-back cannot call the report
+live until it exits 0.
 
 **Licensing, before promising a report to leaders:** viewing a Power BI report needs a Pro (or
 Premium Per User) licence for each viewer unless the workspace sits on a capacity of F64 / P1 or

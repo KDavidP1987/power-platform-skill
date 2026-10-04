@@ -11,6 +11,44 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-04
+
+Quality first: the design is settled in HTML with impeccable before any screen is built, the product
+is critiqued again from screenshots after the ship, the build is planned with DOD when it is
+installed, and an independent reviewer checks it before the hand-back. Cost savings that do not
+touch quality: one call for every static check.
+
+### Added
+
+- **Design lane first, in HTML** (`project-setup.md` section 3, `orchestration.md` section 1):
+  impeccable `init` (the agent creates the theme when none is given), then `design/prototype.html`
+  with every screen at 1440 and 390 px, every state (empty, loading, error, saved) and a report mock,
+  critiqued with impeccable's detector and browser check and fixed once; only then do the screen
+  helpers start, each with its frame and the tokens. A table turns impeccable's web practice into
+  canvas terms. Template `assets/templates/design-prototype.html` (token-driven, no fixed palette).
+- **Critique of the real product from screenshots**: `assets/templates/screenshot-walk.json` captures
+  every published screen at both widths (and fails on clipped text); impeccable critiques them
+  (declared degraded where its detector cannot run on canvas) into `docs/design-critique.md`, which
+  the 0.18.2 design gate checks. Email captures are the single open message, never the mailbox.
+- **Planning with DOD** when installed: `dod plan --autonomous` first, its question batch as the one
+  up-front decision list, `contract-to-walk.mjs --from-dod <plan.md>` to turn its items into walks,
+  `dod close` with the prediction rate in the hand-back.
+- **Independent reviewer** before the fix batch (`orchestration.md` section 7,
+  `assets/templates/reviewer-prompt.md`): a fresh helper walks the contract on the published app and
+  in Dataverse, runs `seed-data.py check` and reads the design record; findings only.
+- `check-all.mjs`: every static check (pa-yaml, format with build-stamp-visible, overlap, flow lint,
+  offline drift, seed) in one call, one compact table, at most `--max` findings per failing check.
+  Installed by the harness; CI runs its self-test.
+- `seed-data.py check` (read-only, exit 1 on drift); `fabric.py prove-refresh` (change one of this
+  build's rows, refresh from Fabric alone, check the report followed, restore).
+- `canvas-controls-and-patterns.md` section 15: a pending request reserves the item; a typed date the
+  picker cannot read gets a format message, not "required"; gating rules are walk-tested.
+
+### Fixed
+
+- `check-canvas-format.mjs` exits 1 when it finds an error (a visible build stamp) even on a screen
+  with no data-bound text, instead of 2 ("nothing examined").
+
 ## [0.18.2] - 2026-10-04
 
 Hardening from Test C (the third measured build of one brief): the rules that guidance alone did not

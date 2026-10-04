@@ -8,6 +8,20 @@ Usage:
     python fabric.py deploy  --manifest fabric.json [--only NAME ...] [--apply]
     python fabric.py run     TYPE NAME --workspace WS --folder NAME [--job-type J] [--apply]
     python fabric.py run     --manifest fabric.json TYPE NAME [--apply]
+    python fabric.py prove-refresh --manifest fabric.json --checks report-checks.json --check NAME
+                             --touch TABLE/KEYCOL=KEY/COLUMN=VALUE [--pipeline NAME] [--apply]
+
+prove-refresh answers one question: does a refresh run from Fabric ALONE reach Dataverse? A build
+that landed Dataverse rows as files from a script on the builder's machine had a pipeline that
+"succeeded" on stale files. The command reads the figure (DAX on the published model, and the same
+figure counted in Dataverse), changes ONE row under this build's prefix (--touch; refused for any
+other table), checks the Dataverse figure moved, runs the pipeline from Fabric, re-reads the DAX
+figure, then puts the row back and runs the pipeline again. Exit 0 when the report followed the
+change; 1 when it did not (the refresh does not reach Dataverse) or the touch did not move the
+figure. Without --apply it only reads both figures and prints the plan.
+--touch: "app_loan/app_loannumber=L-0001/app_status=choice:Returned" (choice:<label> is resolved;
+digits become numbers, true/false booleans). The checks file is reconcile-report.py's; --check
+names one of its checks (a single-value one).
 
 Every write is planned first: without --apply, deploy and run print what they WOULD do and send
 nothing but GETs (the client refuses anything else, structurally). Nothing is ever deleted; removing
@@ -350,6 +364,119 @@ def cmd_run(fab, kind, name, job_type, apply, timeout, poll):
             return 1
 
 
+def _reconcile():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "reconcile_report", os.path.join(os.path.dirname(os.path.abspath(__file__)), "reconcile-report.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def parse_touch(t):
+    """'table/keycol=key/col=value' -> (table, keycol, key, col, raw value)."""
+    parts = (t or "").split("/", 2)
+    if len(parts) != 3 or "=" not in parts[1] or "=" not in parts[2]:
+        raise Finding("--touch is TABLE/KEYCOL=KEY/COLUMN=VALUE, got %r" % t)
+    kc, kv = parts[1].split("=", 1)
+    col, val = parts[2].split("=", 1)
+    return parts[0].strip(), kc.strip(), kv.strip(), col.strip(), val.strip()
+
+
+def touch_value(raw, meta, table, col):
+    if raw.startswith("choice:"):
+        return meta.choice_value(table, col, raw[len("choice:"):])
+    if re.match(r"^-?\d+$", raw):
+        return int(raw)
+    if raw in ("true", "false"):
+        return raw == "true"
+    return raw
+
+
+def cmd_prove_refresh(fab, man, a, transport, sleep):
+    from _ppapi import dataverse
+    rr = _reconcile()
+    if not (a.checks and a.check and a.touch):
+        print("prove-refresh needs --checks, --check and --touch")
+        return 2
+    with open(a.checks, encoding="utf-8-sig") as f:
+        spec = json.load(f)
+    chk = next((c for c in spec.get("checks") or [] if c.get("name") == a.check), None)
+    if not chk or not chk.get("dataverse") or chk["dataverse"].get("groupBy"):
+        print("--check must name a single-value check with a \"dataverse\" side in %s" % a.checks)
+        return 2
+    table, keycol, key, col, raw = parse_touch(a.touch)
+    prefix = a.prefix or (man.get("vars") or {}).get("prefix")
+    if not prefix:
+        print("pass --prefix (or vars.prefix in the manifest): only this build's rows may be touched")
+        return 2
+    if not table.lower().startswith(prefix.lower() + "_"):
+        print("REFUSED: %s is not under this build's prefix %s_; prove-refresh changes only its own rows" % (table, prefix))
+        return 1
+    pipeline = a.pipeline or next((i["name"] for i in man.get("items") or [] if i.get("type") == "DataPipeline"), None)
+    if not pipeline:
+        print("no pipeline: pass --pipeline or list a DataPipeline in the manifest")
+        return 2
+    org, ws, ds = spec.get("org"), spec.get("workspace"), spec.get("dataset")
+    if transport:
+        dvt = pbit = "fixture"
+    else:
+        dvt, _ = get_token(org, a.dv_token_cmd, "DATAVERSE_TOKEN", org)
+        pbit, _ = get_token(RESOURCES["powerbi"], a.pbi_token_cmd, "POWERBI_TOKEN")
+    dv = dataverse(org, dvt, read_only=not a.apply, transport=transport, sleep=sleep)
+    pbi = Client(rr.PBI, pbit, read_only=True, transport=transport, sleep=sleep)
+    meta = rr.Meta(dv)
+    today = rr.today_in(spec.get("timezone"))
+    ds = rr.resolve_dataset(pbi, ws, ds)
+    figure = lambda: (rr.dataverse_value(dv, meta, chk["dataverse"], today), rr.dax_value(pbi, ws, ds, chk["dax"], False))
+    dv0, dax0 = figure()
+    print("before: Dataverse %s, report %s (%s)" % (dv0, dax0, a.check))
+    t = meta.table(table)
+    from _ppapi import odata_literal
+    rows = (dv.get("%s?$select=%s,%s&$filter=%s eq %s" % (t["set"], col, keycol, keycol, odata_literal(key))) or {}).get("value") or []
+    if len(rows) != 1:
+        print("--touch matched %d rows in %s where %s = %r; it must match exactly one" % (len(rows), table, keycol, key))
+        return 2
+    row = rows[0]
+    pk = next((k for k in row if k.endswith("id") and k.startswith(table)), None) or (table + "id")
+    ident = row.get(pk)
+    original = row.get(col)
+    new = touch_value(raw, meta, table, col)
+    if not a.apply:
+        print("would set %s %s=%s: %s %r -> %r, run pipeline %r, re-read the figure, then restore %r and run it again"
+              % (table, keycol, key, col, original, new, pipeline, original))
+        print("plan only: nothing was written. Re-run with --apply.")
+        return 0
+    if original == new:
+        print("--touch value equals the current value; choose a change that moves %r" % a.check)
+        return 2
+    rc = 1
+    try:
+        dv.call("PATCH", "%s(%s)" % (t["set"], ident), {col: new})
+        dv1, _ = figure()
+        if rr.same(dv0, dv1, 0.0001):
+            print("the touch did not move the Dataverse figure (%s); choose a change that %r counts" % (dv1, a.check))
+            return 1
+        if cmd_run(fab, "DataPipeline", pipeline, None, True, a.timeout, a.poll) != 0:
+            print("the pipeline did not complete; the refresh is not proved")
+            return 1
+        _, dax1 = figure()
+        moved = not rr.same(dax0, dax1, 0.0001) and rr.same(dv1, dax1, 0.0001)
+        print("after:  Dataverse %s, report %s" % (dv1, dax1))
+        if moved:
+            print("PROVED: a refresh run from Fabric alone carried a Dataverse change into the report")
+            rc = 0
+        else:
+            print("NOT PROVED: the report did not follow the change - the refresh does not reach Dataverse from Fabric "
+                  "(a landing step outside Fabric, a stale frame, or a filter that hides the row)")
+    finally:
+        dv.call("PATCH", "%s(%s)" % (t["set"], ident), {col: original})
+        print("restored %s %s=%s: %s %r" % (table, keycol, key, col, original))
+        if cmd_run(fab, "DataPipeline", pipeline, None, True, a.timeout, a.poll) != 0:
+            print("note: the restoring refresh did not complete; run the pipeline again")
+    return rc
+
+
 def cmd_items(fab, kind):
     rows = [i for i in fab.items() if (not kind or i.get("type") == kind)]
     if fab.folder_name:
@@ -364,7 +491,7 @@ def cmd_items(fab, kind):
 def run(argv, transport=None, sleep=None):
     ap = argparse.ArgumentParser(prog="fabric.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
-    ap.add_argument("command", nargs="?", choices=["items", "deploy", "run"])
+    ap.add_argument("command", nargs="?", choices=["items", "deploy", "run", "prove-refresh"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--manifest")
     ap.add_argument("--workspace")
@@ -377,6 +504,13 @@ def run(argv, transport=None, sleep=None):
     ap.add_argument("--poll", type=float, default=15)
     ap.add_argument("--token-cmd")
     ap.add_argument("--token-env", default="FABRIC_TOKEN")
+    ap.add_argument("--checks")
+    ap.add_argument("--check")
+    ap.add_argument("--touch")
+    ap.add_argument("--pipeline")
+    ap.add_argument("--prefix")
+    ap.add_argument("--dv-token-cmd")
+    ap.add_argument("--pbi-token-cmd")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -407,10 +541,12 @@ def run(argv, transport=None, sleep=None):
             token = "fixture"
         else:
             token, _ = get_token(RESOURCES["fabric"], a.token_cmd, a.token_env)
-        writes = a.apply and a.command in ("deploy", "run")
+        writes = a.apply and a.command in ("deploy", "run", "prove-refresh")
         fab = Fabric(Client(BASE, token, read_only=not writes, transport=transport, sleep=sleep), ws, folder)
         if a.command == "items":
             return cmd_items(fab, a.type)
+        if a.command == "prove-refresh":
+            return cmd_prove_refresh(fab, man, a, transport, sleep)
         if a.command == "deploy":
             rc = cmd_deploy(fab, man, root, set(a.only or []), a.apply)
             if not a.apply:
@@ -589,6 +725,57 @@ def selftest():
         check("items lists the folder only", rc == 0 and "APP_Silver" in out and "Loose report" not in out)
         rc, out = go(t, "items", "--workspace", "No Such Workspace")
         check("unknown workspace exits 2", rc == 2)
+
+        # prove-refresh: a refresh that reaches Dataverse, one that does not, and the prefix guard.
+        with open(mpath, "w") as f:
+            json.dump(dict(man, items=[{"type": "DataPipeline", "name": "APP_Refresh"}]), f)
+        state["items"].append({"id": "pl-1", "type": "DataPipeline", "displayName": "APP_Refresh", "folderId": lane[0]["id"]})
+        state["jobs"].pop(nb["id"], None)
+        cpath = os.path.join(tmp, "checks.json")
+        with open(cpath, "w") as f:
+            json.dump({"org": "https://example.crm.dynamics.com", "workspace": "ws-1", "dataset": "11111111-aaaa-bbbb-cccc-222222222222",
+                       "checks": [{"name": "open", "dax": "EVALUATE ROW(\"v\", [Open])",
+                                   "dataverse": {"table": "app_loan", "filter": "app_status eq {choice:app_loan.app_status:Open}"}}]}, f)
+        dvrows = [{"app_loanid": "r1", "app_number": "L-1", "app_status": 1}, {"app_loanid": "r2", "app_number": "L-2", "app_status": 1}]
+        model = {"open": 2, "reaches": True}
+        t.on("GET", "EntityDefinitions(", lambda u, b: {"value": [{"LogicalName": "app_status", "OptionSet": {"Options": [
+            {"Value": 1, "Label": {"UserLocalizedLabel": {"Label": "Open"}}},
+            {"Value": 2, "Label": {"UserLocalizedLabel": {"Label": "Returned"}}}]}}]} if "Picklist" in u
+            else {"EntitySetName": "app_loans", "PrimaryIdAttribute": "app_loanid"})
+        t.on("GET", "/app_loans?$apply", lambda u, b: {"value": [{"n": sum(1 for r in dvrows if r["app_status"] == 1)}]})
+        t.on("GET", "/app_loans?$select", lambda u, b: {"value": [r for r in dvrows if r["app_number"] in u]})
+
+        def patch_row(u, b):
+            ident = u.split("(")[1].split(")")[0]
+            next(r for r in dvrows if r["app_loanid"] == ident).update(b)
+            return 204, {}, None
+        t.on("PATCH", "/app_loans(", patch_row)
+
+        def run_pipeline(u, b):
+            if model["reaches"]:
+                model["open"] = sum(1 for r in dvrows if r["app_status"] == 1)
+            return 202, {"location": "https://api.fabric.microsoft.com/v1/jobs/pl-1"}, None
+        t.on("POST", "/items/pl-1/jobs/instances", run_pipeline)
+        t.on("POST", "executeQueries", lambda u, b: {"results": [{"tables": [{"rows": [{"[v]": model["open"]}]}]}]})
+        args = ["prove-refresh", "--manifest", mpath, "--checks", cpath, "--check", "open", "--prefix", "app",
+                "--touch", "app_loan/app_number=L-1/app_status=choice:Returned"]
+        w0 = len(t.writes())
+        rc, out = go(t, *args)
+        check("prove-refresh plan reads both figures and writes nothing", rc == 0 and "before: Dataverse 2, report 2" in out
+              and "would set" in out and all("executeQueries" in u for _, u in t.writes()[w0:]))
+        rc, out = go(t, *args, "--apply")
+        check("prove-refresh passes when the report follows the change", rc == 0 and "PROVED" in out and "NOT PROVED" not in out)
+        check("prove-refresh restores the row", dvrows[0]["app_status"] == 1 and "restored" in out)
+        model["reaches"] = False
+        model["open"] = 2
+        rc, out = go(t, *args, "--apply")
+        check("prove-refresh fails (exit 1) when the refresh does not reach Dataverse", rc == 1 and "NOT PROVED" in out
+              and dvrows[0]["app_status"] == 1)
+        bad = list(args)
+        bad[bad.index("--touch") + 1] = "core_person/core_name=X/core_flag=true"
+        w0 = len(t.writes())
+        rc, out = go(t, *bad, "--apply")
+        check("prove-refresh refuses a table outside the build's prefix", rc == 1 and "REFUSED" in out and len(t.writes()) == w0)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

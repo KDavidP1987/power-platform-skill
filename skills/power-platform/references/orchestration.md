@@ -18,8 +18,10 @@ handed screens to helper agents finished first. This reference is the pattern th
 ## 1. The shape: one lead, lanes after the schema
 
 ```
-lead: spec + acceptance contract + design (DESIGN.md, tokens, Power BI theme)
+lead: plan (DOD when installed) -> acceptance contract -> decisions, all up front
   |
+lead, design lane: impeccable init -> DESIGN.md -> design/prototype.html (every screen at 1440
+  |                and 390, report mock) -> impeccable critique -> one fix batch -> tokens
   v
 lane 0 (lead, serial): tables.json -> deploy-tables.py -> seed sample data -> read back
   |
@@ -28,8 +30,24 @@ lane 0 (lead, serial): tables.json -> deploy-tables.py -> seed sample data -> re
   +--> lane C: reporting    (bronze/silver/gold, model, report with the theme, reconcile)
   |
   v
-lead: acceptance walks, design critique, one fix batch, confirm, hand-back
+lead: acceptance walks, screenshots, design critique (from screenshots)
+  |
+independent reviewer (fresh helper, no build context): contract, seed check, design record
+  |
+lead: one fix batch, confirm once, seed re-applied, hand-back
 ```
+
+- **Plan and decide first.** With DOD installed, `dod plan --autonomous` turns the brief into
+  checkable items and one batch of decisions, each with a recommendation the agent takes when no
+  person is present; `contract-to-walk.mjs --from-dod <plan.md>` turns the items into walks. Every
+  decision the build needs is made here, so no lane stops to ask.
+- **Design is the lead's first lane, in HTML.** impeccable writes `DESIGN.md` (creating the theme
+  when none is given) and the lead builds `design/prototype.html` from
+  `assets/templates/design-prototype.html`, critiques it with impeccable (its detector and browser
+  checks work on HTML) and fixes it once. Only then do the screen helpers start, each with its frame
+  of the prototype and the tokens; the reporting lane gets the report mock. A build that left design
+  to "required" in the guidance skipped it, and the person judged both measured builds without a
+  design step clearly weaker than apps built with one (`project-setup.md` section 3).
 
 - **Schema and sample data come first and alone.** Every other lane reads them. Seed enough
   realistic rows (`scripts/seed-data.py`, from a JSON or CSV file, idempotent by name or key) that
@@ -87,7 +105,10 @@ The cost of a long build is mostly context re-read on every turn, not output.
   `SKILL.md`), not every one up front. Delegate anything that produces long output (screen files,
   Studio trees, run histories) and keep only its conclusion.
 - **Batch checks into one script call.** Ten single-purpose shell calls re-send the whole
-  conversation ten times. Write one check script that prints a compact table, and run it.
+  conversation ten times. `node scripts/check-all.mjs` runs the format, overlap, flow-lint, drift,
+  seed and build-stamp checks together and prints one compact table; use it, or one check script of
+  your own that does the same, instead of a call per check. A measured lead made 190 small shell
+  calls.
 - **Use the bundled tools before writing new ones.** `deploy-tables.py`, `seed-data.py`,
   `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `canvas-browser.mjs` cover what a build needs;
   an agent that writes its own helper mid-build pays for it in time and tokens.
@@ -156,10 +177,22 @@ else is the agent's work.
 2. Run the design critique (impeccable `critique`) on those screenshots and the report, and the
    clipping, overlap and dead-click sweeps. Truncation counts: text cut with an ellipsis where the
    full value matters to the task is a defect at phone width, not a pass.
-3. Fix everything found in one batch, ship once, confirm once. Do not loop on polish.
-4. **Put the data back.** Walks that lend, return or approve change the seed rows. Re-apply the seed
+3. **An independent reviewer before the fix batch.** Start a fresh helper agent with no build
+   context, using `assets/templates/reviewer-prompt.md`: it walks the acceptance contract against the
+   published app and Dataverse, runs `seed-data.py check` against the seed manifest, reads
+   `docs/design-critique.md` against the prototype, and looks for what a user would hit that the
+   contract does not say. It returns findings only (`docs/review/findings.json`); it changes nothing
+   but its own test rows, and never answers an approval it did not raise. The lead does not argue
+   with a finding: it fixes it or records why not. A blind evaluator found three failures a measured
+   build's own walks had passed (seed rows left changed, a refresh that served stale data, a stamp
+   shown to users); a reviewer with fresh eyes is cheaper than the rework.
+4. Fix everything found (critique and reviewer) in one batch, ship once, confirm once. Do not loop
+   on polish.
+5. **Put the data back.** Walks that lend, return or approve change the seed rows. Re-apply the seed
    (`seed-data.py seed --update --apply`) after the last walk, and list any evidence rows you leave
    (prefixed so a cleanup can find them). A measured build left two seed assets in the wrong state,
    which failed its own data row and hid an item from a filter.
-5. The hand-back states what passed, what was not measured and why, and never says "clean" for a
-   check that did not cover truncation, both widths and every role.
+6. The hand-back states what passed, what was not measured and why, and never says "clean" for a
+   check that did not cover truncation, both widths and every role. It includes both design
+   scores (prototype and product), the reviewer's findings and what was done with each, and, with
+   DOD, `dod close` and its prediction rate.

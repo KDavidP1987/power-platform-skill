@@ -1,0 +1,21 @@
+{
+  "name": "design-screenshots",
+  "description": "Read-only walk that captures every published screen at desktop (1440) and phone (390) width for the design critique, and fails on clipped text at both widths (the captures are kept either way). Replace the click targets with your app's navigation names; add one block per screen. Captures land in the driver's output folder as <name>.png plus an aria snapshot.",
+  "settle": 4000,
+  "steps": [
+    { "viewport": [1440, 900], "wait": 3000 },
+    { "capture": "canvas-list-1440", "clipcheck": "list-1440" },
+    { "click": "<first row or item name>", "capture": "canvas-detail-1440" },
+    { "click": "<primary action, e.g. New request>", "capture": "canvas-form-1440" },
+    { "click": "<save button>", "capture": "canvas-form-error-1440", "note": "submit the empty form: the validation state is part of the design" },
+    { "click": "<back or cancel>" },
+    { "click": "<second screen in the navigation>", "capture": "canvas-second-1440" },
+
+    { "viewport": [390, 844], "wait": 3000 },
+    { "click": "<home or list in the navigation>", "capture": "canvas-list-390", "clipcheck": "list-390" },
+    { "click": "<first row or item name>", "capture": "canvas-detail-390", "clipcheck": "detail-390" },
+    { "click": "<primary action>", "capture": "canvas-form-390" },
+    { "click": "<back or cancel>" },
+    { "click": "<second screen in the navigation>", "capture": "canvas-second-390" }
+  ]
+}

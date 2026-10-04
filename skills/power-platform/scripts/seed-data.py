@@ -9,6 +9,7 @@ Usage:
     python seed-data.py seed    --seed seed.json                plan: create / skip / drift per row
     python seed-data.py seed    --seed seed.json --apply        create the missing rows
     python seed-data.py seed    --seed seed.json --apply --update   also put drifted seed values back
+    python seed-data.py check   --seed seed.json                read-only: do the live rows still hold the seed values?
     python seed-data.py cleanup --seed seed.json                list what cleanup would delete/restore
     python seed-data.py cleanup --seed seed.json --apply        do it (an OWNER step: hand it over)
 
@@ -41,6 +42,11 @@ Values:
 Rows are matched by "key" (one column whose value is unique among seed rows). An existing row is
 never overwritten unless --update, and then only the columns the seed file names.
 
+`check` is read-only and meant for the end of a build: walks that lend, return or approve change
+seed rows, and a build that hands back with its own test edits still in the data fails its data
+check. It prints one line per drifted or missing row (compact: a table, then the differences) and
+exits 1 on any drift; re-apply with `seed --update --apply`.
+
 Cleanup is list-only without --apply. "cleanup": "delete" deletes the seed rows of that table (and,
 with "cleanupFilter", every row matching that OData filter - test rows a walk created);
 "cleanup": "restore" puts the "restore" columns back to their seed values. Tables run in reverse
@@ -54,7 +60,7 @@ Options:
     --token-env NAME    variable holding the token (default DATAVERSE_TOKEN)
     --selftest          offline tests against a simulated Web API
 
-Exit: 0 done (or planned); 1 a finding (unknown choice label, unresolvable lookup, duplicate key);
+Exit: 0 done (or planned, or check clean); 1 a finding or (check) drift (unknown choice label, unresolvable lookup, duplicate key);
 2 cannot run (bad seed file, no token, API error).
 """
 import argparse
@@ -253,6 +259,42 @@ def cmd_seed(dv, meta, seed, only, apply, update, today):
     return 1 if bad else 0
 
 
+def cmd_check(dv, meta, seed, only, today):
+    """Read-only: every seed row present and holding its seed values (lookups and choices resolved)."""
+    rows_out, total, bad = [], 0, 0
+    for t in seed.get("tables") or []:
+        if only and t["table"] not in only:
+            continue
+        m = meta.table(t["table"])
+        live = existing(dv, meta, t["table"], t["key"])
+        for row in t["_rows"]:
+            k = str(row[t["key"]])
+            total += 1
+            if k not in live:
+                rows_out.append((t["table"], k, "missing"))
+                bad += 1
+                continue
+            try:
+                _, plain = to_payload(row, t["table"], meta, dv, today, {"_pending": set()})
+            except Finding as e:
+                rows_out.append((t["table"], k, "cannot compare: %s" % e))
+                bad += 1
+                continue
+            cols = [c for c in plain if not c.startswith("_")]
+            look = {c: v for c, v in plain.items() if c.startswith("_")}
+            full = dv.get("%s(%s)?$select=%s" % (m["set"], live[k][m["pk"]], ",".join(cols + list(look)))) if (cols or look) else {}
+            d = drift(full or {}, plain)
+            if d:
+                rows_out.append((t["table"], k, "; ".join(d)))
+                bad += 1
+    print("seed check: %d row(s) compared, %d drifted or missing" % (total, bad))
+    for table, k, what in rows_out:
+        print("  DRIFT %-20s %-24s %s" % (table, k, what))
+    if bad:
+        print("Put the seed back with: seed --seed <file> --update --apply (and list test rows with cleanup).")
+    return 1 if bad else 0
+
+
 def cmd_cleanup(dv, meta, seed, only, apply, today, seed_path):
     tables = [t for t in seed.get("tables") or [] if t.get("cleanup") and (not only or t["table"] in only)]
     count = 0
@@ -300,7 +342,7 @@ def cmd_cleanup(dv, meta, seed, only, apply, today, seed_path):
 def run(argv, transport=None, today=None):
     ap = argparse.ArgumentParser(prog="seed-data.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
-    ap.add_argument("command", nargs="?", choices=["seed", "cleanup"])
+    ap.add_argument("command", nargs="?", choices=["seed", "check", "cleanup"])
     ap.add_argument("--seed")
     ap.add_argument("--org")
     ap.add_argument("--only", action="append")
@@ -326,13 +368,15 @@ def run(argv, transport=None, today=None):
         return 2
     try:
         token = "fixture" if transport else get_token(org, a.token_cmd, a.token_env, org)[0]
-        dv = dataverse(org, token, read_only=not a.apply, transport=transport,
+        dv = dataverse(org, token, read_only=(a.command == "check") or not a.apply, transport=transport,
                        sleep=(lambda s: None) if transport else None)
         meta = Meta(dv)
         day = today or today_in(seed.get("timezone"))
         only = set(a.only or [])
         if a.command == "seed":
             return cmd_seed(dv, meta, seed, only, a.apply, a.update, day)
+        if a.command == "check":
+            return cmd_check(dv, meta, seed, only, day)
         return cmd_cleanup(dv, meta, seed, only, a.apply, day, a.seed)
     except Finding as e:
         print("FINDING %s" % e)
@@ -465,11 +509,21 @@ def selftest():
         rc, out = go(t, "seed", "--seed", p, "--apply")
         check("re-run is idempotent", rc == 0 and len(t.writes()) == n and len(db["app_loans"]) == 1)
 
+        rc, out = go(t, "check", "--seed", p)
+        check("check: clean seed exits 0 and writes nothing", rc == 0 and len(t.writes()) == n and "0 drifted" in out)
         a2["app_status"] = 100000000                      # a walk returned the asset
         db["app_loans"].append({"app_loanid": "walk1", "app_borrower": "[SAMPLE] walk row"})
         db["app_loans"].append({"app_loanid": "real1", "app_borrower": "Real person"})
         rc, out = go(t, "seed", "--seed", p)
         check("drift is reported and left alone", "drift app_asset A-02" in out)
+        n0 = len(t.writes())
+        rc, out = go(t, "check", "--seed", p)
+        check("check: drift exits 1, names the row and column, writes nothing",
+              rc == 1 and "DRIFT app_asset" in out and "A-02" in out and "app_status" in out and len(t.writes()) == n0)
+        gone = db["app_loans"].pop(0)
+        rc, out = go(t, "check", "--seed", p)
+        check("check: a missing seed row is drift", rc == 1 and "missing" in out)
+        db["app_loans"].insert(0, gone)
         n = len(t.writes())
         rc, out = go(t, "cleanup", "--seed", p)
         check("cleanup without --apply only lists", rc == 0 and len(t.writes()) == n and "would delete app_loan" in out

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App prototype</title>
+<!--
+  Design prototype for a canvas app and its report: the visual spec the screen builders follow.
+
+  How to use it:
+  1. Run the impeccable skill's init first; it writes PRODUCT.md and DESIGN.md.
+  2. Copy DESIGN.md's tokens into the :root block below (one custom property per token, named by
+     role, exactly as they will be named in App.pa.yaml: clrPrimary -> --clr-primary).
+     The values here are neutral greys on purpose: replace every one. Respect the organisation's
+     palette rules; never default to purple, violet, indigo or magenta.
+  3. Build one <section class="frame"> per screen at each width (1440 and 390), plus the report page.
+     Use the controls the canvas app will really have: a gallery is a list of rows, a form is labelled
+     inputs, one primary button per screen.
+  4. Run impeccable's critique on this file, fix everything it raises in one batch, then hand the
+     file and the tokens to the screen builders. The tokens are the single source; this page is the
+     picture of how they are used.
+-->
+<style>
+:root {
+  /* Colour tokens - replace with DESIGN.md values (role names, not hue names) */
+  --clr-primary: #3a3a3a;
+  --clr-primary-ink: #ffffff;
+  --clr-surface: #ffffff;
+  --clr-canvas: #f2f2f2;
+  --clr-text: #1c1c1c;
+  --clr-text-muted: #5c5c5c;
+  --clr-line: #d6d6d6;
+  --clr-success: #2f6b3a;
+  --clr-warning: #8a5a00;
+  --clr-error: #a3262a;
+  /* Type scale - canvas Size values are points; keep the same steps */
+  --fnt-body: "Segoe UI", system-ui, sans-serif;
+  --size-caption: 12px;
+  --size-body: 14px;
+  --size-subtitle: 16px;
+  --size-title: 20px;
+  --size-figure: 28px;
+  /* Spacing rhythm - one base unit, multiples only */
+  --space: 8px;
+  --radius: 4px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --clr-surface: #1e1e1e; --clr-canvas: #141414; --clr-text: #ececec; --clr-text-muted: #a8a8a8; --clr-line: #333333;
+  }
+}
+:root[data-theme="dark"] {
+  --clr-surface: #1e1e1e; --clr-canvas: #141414; --clr-text: #ececec; --clr-text-muted: #a8a8a8; --clr-line: #333333;
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: calc(var(--space) * 3) 16px; background: var(--clr-canvas); color: var(--clr-text); font: var(--size-body)/1.5 var(--fnt-body); }
+h1 { font-size: var(--size-title); margin: 0 0 calc(var(--space) * 2); }
+.frames { display: grid; gap: calc(var(--space) * 4); }
+.frame { background: var(--clr-surface); border: 1px solid var(--clr-line); overflow: hidden; margin: 0 auto; max-width: 100%; }
+.frame.w1440 { width: 1440px; min-height: 900px; }
+.frame.w390 { width: 390px; min-height: 844px; }
+.frame > header.label { font: 600 var(--size-caption)/1 var(--fnt-body); color: var(--clr-text-muted); padding: var(--space) calc(var(--space) * 2); border-bottom: 1px solid var(--clr-line); }
+.bar { background: var(--clr-primary); color: var(--clr-primary-ink); padding: calc(var(--space) * 1.5) calc(var(--space) * 3); font-size: var(--size-subtitle); font-weight: 600; }
+.body { padding: calc(var(--space) * 3); display: grid; gap: calc(var(--space) * 2); }
+.w390 .body { padding: calc(var(--space) * 2); }
+.title { font-size: var(--size-title); font-weight: 600; margin: 0; }
+.muted { color: var(--clr-text-muted); }
+.row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: calc(var(--space) * 2); padding: calc(var(--space) * 1.5) 0; border-bottom: 1px solid var(--clr-line); }
+.w390 .row { grid-template-columns: 1fr; gap: calc(var(--space) / 2); }
+.btn { display: inline-block; padding: var(--space) calc(var(--space) * 2); border-radius: var(--radius); border: 1px solid var(--clr-line); background: var(--clr-surface); color: var(--clr-text); font: inherit; }
+.btn.primary { background: var(--clr-primary); border-color: var(--clr-primary); color: var(--clr-primary-ink); font-weight: 600; }
+.field { display: grid; gap: calc(var(--space) / 2); }
+.field input { font: inherit; padding: var(--space); border: 1px solid var(--clr-line); border-radius: var(--radius); background: var(--clr-surface); color: var(--clr-text); }
+.error { color: var(--clr-error); font-size: var(--size-caption); }
+.empty { padding: calc(var(--space) * 4); text-align: center; color: var(--clr-text-muted); border: 1px dashed var(--clr-line); }
+.figure { font-size: var(--size-figure); font-weight: 600; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: calc(var(--space) * 2); }
+.card { border: 1px solid var(--clr-line); padding: calc(var(--space) * 2); border-radius: var(--radius); }
+</style>
+</head>
+<body>
+<h1>App prototype</h1>
+<p class="muted">One frame per screen and width. Replace the placeholder content with the real screens; keep every state the user can meet (empty, loading, error, saved).</p>
+<div class="frames">
+
+  <section class="frame w1440" aria-label="List, 1440 px">
+    <header class="label">List &middot; 1440 px</header>
+    <div class="bar">App name</div>
+    <div class="body">
+      <p class="title">Items</p>
+      <div class="row"><strong>Item name that may be long</strong><span class="muted">Status</span><span class="muted">Due date</span></div>
+      <div class="row"><strong>Second item</strong><span class="muted">Status</span><span class="muted">Due date</span></div>
+      <div class="empty">Empty state: what to do when there is nothing here</div>
+    </div>
+  </section>
+
+  <section class="frame w390" aria-label="List, 390 px">
+    <header class="label">List &middot; 390 px</header>
+    <div class="bar">App name</div>
+    <div class="body">
+      <p class="title">Items</p>
+      <div class="row"><strong>Item name that may be long wraps, never cut</strong><span class="muted">Status &middot; Due date</span></div>
+    </div>
+  </section>
+
+  <section class="frame w1440" aria-label="Form, 1440 px">
+    <header class="label">Form with validation &middot; 1440 px</header>
+    <div class="bar">App name</div>
+    <div class="body">
+      <p class="title">New request</p>
+      <div class="field"><label for="f1">Required field</label><input id="f1"><span class="error">Say exactly what to enter, and in what format</span></div>
+      <div><button class="btn primary" type="button">One primary action</button> <button class="btn" type="button">Cancel</button></div>
+    </div>
+  </section>
+
+  <section class="frame w1440" aria-label="Report page">
+    <header class="label">Report page &middot; 1440 px</header>
+    <div class="body">
+      <p class="title">Report title that states the question</p>
+      <div class="cards">
+        <div class="card"><div class="muted">Headline figure</div><div class="figure">0</div></div>
+        <div class="card"><div class="muted">Headline figure</div><div class="figure">0</div></div>
+        <div class="card"><div class="muted">Headline figure</div><div class="figure">0</div></div>
+      </div>
+      <div class="card">Trend visual, then breakdown, then the detail table (series colours from the tokens)</div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

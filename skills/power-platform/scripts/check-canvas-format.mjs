@@ -1250,6 +1250,9 @@ if (isMain) {
     const res = analyse(files, { schema, screenWidth: Number(opt('--screen-width') || 1366), screenHeight: Number(opt('--screen-height') || 768),
       galleriesOnly: argv.includes('--galleries-only'), theme: !argv.includes('--no-theme'), stampVar: opt('--stamp-var') || readStampVar() });
     report(res, argv.includes('--json'));
+    // An error found anywhere (a visible build stamp, a literal colour) fails the run even when no
+    // data-bound text was examined; only a run with nothing examined AND nothing found is "cannot judge".
+    if (res.findings.some((f) => f.level === 'error')) process.exit(1);
     if (res.stats.bound === 0) { console.error('No data-bound text control was examined - this is NOT a pass.'); process.exit(2); }
     process.exit(res.findings.some((f) => f.level === 'error') ? 1 : 0);
   }
