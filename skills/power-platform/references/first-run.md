@@ -23,6 +23,7 @@ sequence and the checks.
 10. What the agent will hand back to the person
 11. The smoke test
 12. Why it gets quieter: what removed each manual step
+13. No sign-in barriers: every identity, signed in once
 
 ## 1. What the person needs before the agent can do anything
 
@@ -65,9 +66,10 @@ characters, and a synced documents folder adds length (`tooling-and-auth.md` sec
 1. **Open the project folder itself** in Claude Code, not a parent: project hooks and `CLAUDE.md`
    load only from the opened folder.
 2. **Install the skill** (plugin, or `.claude/skills/power-platform/`).
-3. **Wire the hooks** from `assets/settings.snippet.json` into `.claude/settings.json`: the
-   pre-flight at session start, the `.pa.yaml` compile-killer check, the text-fit and overlap checks
-   on every write, and the end-of-turn audit.
+3. **Offer the harness, and install it when the person agrees**: `node <skill>/scripts/setup-harness.mjs
+   <project>` prints the plan, `--apply` installs the hooks (pre-flight, compile-killers, text fit,
+   overlap, accessibility, standards, shared-table reminder, end-of-turn audit), the tools and the
+   config and continuity files (`project-setup.md` section 4).
 4. **Offer version control on GitHub** if the folder is not already a repository with a remote:
    explain what it is and why it matters, and help choose a personal or an organisation account
    (`project-setup.md` section 12). Set the commit identity in the repository before the first
@@ -228,7 +230,7 @@ reason, and each reason is a setup step above:
 
 | Manual step that disappeared | What removed it |
 |---|---|
-| Signing in for every script | a cached refresh token that rotates on each use (section 5) |
+| Signing in for every script | a cached refresh token that rotates on each use (section 5); the full list per identity is section 13 |
 | Signing in to the browser | device single sign-on on a managed machine, or one saved profile (section 6) |
 | "Please open Studio and compile" | the driver holding Studio open and the authoring server compiling against it (section 7) |
 | "Please click through the app and tell me what happens" | scenarios walked in the published app, with overlap, clipping and dead-click sweeps (section 6) |
@@ -237,3 +239,36 @@ reason, and each reason is a setup step above:
 | Remembering what is live and what is held | the state file the pre-flight hook prints at session start |
 
 What does not go away, by design: the steps in section 10. They stay one deliberate command each.
+
+## 13. No sign-in barriers: every identity, signed in once
+
+Early in one build the person was asked to sign in again and again: a device code for each script,
+an account picker on every authoring-server connect, a fresh browser profile per run, a broker window
+that could not open in the agent's console. Each prompt has one cause and one fix, and with all of
+them in place a working day needs no sign-in at all. Set them up in this order and prove each with
+its check; the column on the right is what to suspect when prompts come back.
+
+| Identity | Sign in once by | Check (silent when right) | Lasts | Prompts again when |
+|---|---|---|---|---|
+| `pac` | `pac auth create --environment <url>` (section 4) | `pac org who` | until revoked | a second profile is created per repo; use one universal profile and `pac org select` |
+| Dataverse Web API | `scripts/dv-token.ps1 -OrgUrl <url>` run once by the person with `!` (section 5) | `dv-token.ps1 -OrgUrl <url> -WhoAmI` prints your user id in about a second | the refresh-token lifetime, about 90 days in one tenant | the rotated refresh token is not saved; the cache is inside a synced or repo folder; scope lacks `offline_access` |
+| Azure / Fabric / Power BI / Flow APIs | `Update-AzConfig -EnableLoginByWam $false` once, then `Connect-AzAccount -Tenant <tenant>` (`tooling-and-auth.md` section 2) | `Get-AzAccessToken -ResourceUrl <resource>` | the Az context, saved automatically | the WAM broker is left on: it needs a window handle the agent's console does not have |
+| Canvas authoring server | the first `connect` opens a browser sign-in; after that the server keeps the account | `python scripts/canvas-mcp.py accounts` lists it as `(connected)` | the server's cached account | `login_hint` is not sent, so it shows an account picker; set `login` (your sign-in) in `scripts/canvas-app.json`. Measured: with it, connect completed in 5 seconds with no prompt. `force_account_select` must stay off |
+| Browser (Studio, player, maker portal, Power Pages) | nothing on an Entra-joined device (single sign-on); otherwise `canvas-browser.mjs login` once (section 6) | `canvas-browser.mjs check --headless` says SIGNED IN | the profile's session | a new profile per run; two tools fighting over one profile (`browser-verification.md` section 3); a Private Power Pages site needs its own first sign-in in that profile |
+| GitHub | `gh auth login --web` once (the token goes to the operating system's credential store) | `gh auth status` | until revoked | `gh` is not on PATH, so a second install signs in again; a portable install in the user profile needs no admin rights |
+| Optional MCP servers | Dataverse MCP: its first tool call; GitHub hosted MCP: a token in a header (section 8) | the tool answers | varies | the server starts after the session's connect window (`MCP_TIMEOUT`, section 8) |
+
+Three rules keep it that way:
+
+- **The person signs in; the agent never handles a password or a code it can see.** A device code or
+  a browser sign-in cannot be answered inside the agent's shell: hand the person one `!` line that
+  starts it in this session, then verify with the check column yourself.
+- **Every token command prints only the token** and caches outside every repository and synced
+  folder. Tools take a token *command* (`dataverseTokenCommand`, `--token-cmd`), so no token is ever
+  written into a file the agent edits.
+- **Permission prompts are barriers too.** Allow the read-only and self-checking commands the method
+  runs every cycle (the harness's `settings.json` does: `pac org who`, the checkers, `canvas-mcp.py`,
+  the walk), and keep imports, role changes and deletions as deliberate, prompted steps. When the
+  person grants a standing authorisation ("publishing this repository is approved once the checks
+  pass"), record it in their user-level instructions so it is not asked for again - and never infer
+  one they did not give.

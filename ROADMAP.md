@@ -120,48 +120,57 @@ actually shipped.
   measured at each form factor, with the overlap and format checks extended to every breakpoint.
 - **Approvals in Teams and Outlook** from cloud flows, with the recipient pin kept.
 
-## Gaps found against Microsoft's official skills (evaluated 2026-10-03)
+## Gaps found against Microsoft's official skills (evaluated 2026-10-03, closed in 0.15.0)
 
-Microsoft publishes eight plugins in `microsoft/power-platform-skills` (canvas, model-driven,
-code apps, Power Pages code sites, Power Automate, mobile, mobile extensions, MCP apps). They
-generate; this skill ships and verifies in a real tenant. Their canvas skill ends at a clean
-compile ("Runtime evaluation: NOT RUN"), with no save, publish or player verification - that is
-this skill's centre. The comparison found these gaps here, highest value first:
+Microsoft publishes eight plugins in `microsoft/power-platform-skills`. They generate; this skill
+ships and verifies in a real tenant. Their canvas skill ends at a clean compile ("Runtime
+evaluation: NOT RUN"). The comparison found eight gaps here; 0.15.0 closes each as follows, and what
+is still documentation rather than measurement is listed so it can be confirmed:
 
-- **Work alongside their plugins, and say so.** A "which skill for which job" table in `SKILL.md`
-  and the README: their canvas planner and screen builders (or app builder, code-site and
-  code-app skills) to generate, this skill to schema, ship, verify and guard. Prove the pairing
-  with an evaluation task run three ways (theirs alone, ours alone, both) and publish the result.
-- **Requirements to verification.** Their canvas planner turns a request into a requirement
-  coverage table, action contracts (precondition, event, write set, observable result) and a
-  Given/When/Then test matrix, checked statically. Add the same shape up front here, and generate
-  `canvas-browser.mjs walk` scenarios and `confirm` read-backs from it, so every requested action
-  is performed in the published app, not only traced in source.
-- **Responsive layout with containers.** Their layout rules require one auto-layout root sized to
-  the screen and check reflow, scroll traps, fill portions and minimum sizes. This skill's canvas
-  layout guidance is mostly absolute geometry driven by layout variables. Add the container
-  approach, when to use each, and extend the overlap and format checks to containers (joins the
-  responsive-app item above).
-- **Accessibility and contrast checks in the canvas scripts.** Their QA flags a missing
-  `AccessibleLabel`, low-contrast text, text that does not fit and actions that wrap. Add those
-  findings to `check-canvas-format.mjs` with self-tests.
-- **Power Pages security beyond table permissions.** Their plugin reviews security headers (CSP,
-  clickjacking, cookies), the web application firewall (production sites only), runs the
-  platform's site scan, and audits table permissions against the site's code into one report.
-  Add a release checklist and a permission audit script that reads the site source and the
-  permission records; record which parts a trial site cannot use.
-- **Power Automate run diagnosis.** This skill is strong on authoring and guards (loops,
-  recipients, trigger conditions) and thin on reading runs: run history, the failing action, the
-  failing loop iteration, resubmitting. Document the API route (or their flow MCP server) and the
-  order of diagnosis.
-- **Model-driven apps.** Their app builder creates forms, views, charts, sitemap and roles from a
-  request, and generative pages. Cover where this skill's schema and shared-environment rules
-  apply to it, and verify a model-driven app in the browser the way canvas is verified.
-- **Install and update.** Theirs installs with one command, auto-updates and has a report-issue
-  skill. Add an installer note per agent, a version check that tells the user a newer release
-  exists, and an issue template.
-- **Out of scope, stated rather than built:** code apps, Power Pages code sites (SPA), mobile apps
-  and PCF controls - point to Microsoft's plugins for these.
+- **Work alongside their plugins** (done): `SKILL.md` "Alongside Microsoft's official plugins", the
+  README limits.
+- **Requirements to verification** (done): the acceptance contract, `contract-to-walk.mjs`,
+  `browser-verification.md` section 18. Measured offline on a real change-request stage machine (12
+  scenarios; six writing moves found never pressed twice). Still to do: run generated walks against
+  a tenant, and add a combo-box step to the walk vocabulary.
+- **Responsive layout with containers** (done as guidance): `canvas-layout.md` section 9. Computed
+  geometry is measured; the auto-layout skeleton and its traps are from documentation and marked
+  to confirm. Still to do: compile and publish the skeleton in a tenant, and teach the overlap and
+  format checks to see inside auto-layout.
+- **Accessibility and contrast checks** (done): `check-canvas-format.mjs` `no-accessible-name`
+  (note), `low-contrast` and `literal-text-overflow` (block), measured on a nine-screen app. Still
+  to do: compare with the authoring server's `get_accessibility_errors` on the same app.
+- **Power Pages security** (done): `power-pages.md` section 8 and `audit-pages-permissions.py`,
+  measured on a real site's source and live headers. The firewall and the studio scan are from
+  documentation (a trial site cannot use the firewall).
+- **Flow run diagnosis** (done): `power-automate.md` section 18 and `flow-runs.py`, measured on a
+  real failed run. Resubmit and cancel are from documentation.
+- **Model-driven apps** (done as guidance): `model-driven-and-docs.md` section 8. Browser
+  verification of a model-driven app and the pairing with Microsoft's app builder are marked to
+  confirm.
+- **Install and update** (done): README updating, issue templates, the harness's version record and
+  the pre-flight's once-a-day update notice (measured against the real release feed).
+- **Also from this round:** `setup-harness.mjs` installs the hooks and tools into a project;
+  `first-run.md` section 13 removes repeated sign-ins (each identity measured silent).
+
+## Next: a measured baseline against Microsoft's canvas plugin
+
+Once the gaps above are closed, build the same app twice and compare. Plan:
+
+- **The app:** one realistic brief with a Dataverse table or two, a list, a detail and edit screen,
+  a status change with a refusal, and a phone layout - small enough to finish in a day each way.
+- **Arm A:** Microsoft's `canvas-apps` plugin alone (its planner and screen builders), then its
+  documented hand-off to the person for save and publish.
+- **Arm B:** this skill with its harness (contract, generator or hand-written screens, hooks, push,
+  save, publish, walk).
+- **Same model, same environment, a fresh blank app each, a fresh session each, the same brief.**
+- **Measure:** wall-clock time to a published app; agent tokens (input, output, cache); tool calls;
+  compile errors met and fixed; person interventions (sign-ins, clicks, questions); defects found
+  afterwards by one independent walk of the acceptance contract against each published app
+  (requirements met, refusals that hold, rows confirmed in Dataverse); accessibility and contrast
+  findings; layout defects at 1440 and 390 px; rework needed to make each one correct.
+- **Report:** a table per metric with both arms, what each arm left unproven, and the raw logs in
+  `evals/baseline-ms/`.
 
 ## 0.9: stabilise
 

@@ -13,7 +13,8 @@ check and a full audit suite. Measure in the running app; use static checks as a
 6. Readable, reachable controls
 7. What a static geometry audit must do to be worth running
 8. Long text: the fit rule
-9. Theme tokens: decided once, referenced everywhere
+9. Responsive screens: computed geometry or auto-layout containers
+10. Theme tokens: decided once, referenced everywhere
 
 ---
 
@@ -29,8 +30,10 @@ hook now blocks `Variant: AutoLayout`. This is team experience, not a platform g
 - **Define shared column positions once**, as globals set in `App.OnStart` (`gblColName`,
   `gblColQty`), so a grid's header, entry row, gallery template and subtotal cannot drift apart.
   A static audit then has to resolve those globals (section 7).
-- **Absolute layout is desktop-only.** A fixed 1366x768 app does not reflow; making it responsive
-  is a per-screen rebuild. State the supported size in the in-app help.
+- **Absolute layout on a fixed surface is desktop-only.** A fixed 1366x768 app does not reflow;
+  making it responsive is a per-screen rebuild. State the supported size in the in-app help.
+  Absolute layout can still be responsive when every coordinate is computed from the app's width;
+  section 9 compares that with auto-layout containers.
 
 ## 2. Text width and height (and the unit)
 
@@ -189,6 +192,50 @@ wrong handler. A control missing its tab condition in `Visible` draws over every
   replace it.
 - **A disabled control must say why**, with a hint label beside it. A disabled button with no
   reason, or one enabled only by typing in a box far away, is filed as a bug.
+
+### Accessible names and contrast
+
+`scripts/check-canvas-format.mjs` checks both from source, offline, at write time (`--hook`). That
+check is the first of two: after a push, the canvas authoring server's own accessibility checker
+reads the live Studio session and is the second check. Run both; neither stands in for the other
+(what the server's checker reports has not been measured here).
+
+- **`no-accessible-name`.** A screen reader announces an input, or a clickable control that shows
+  no text, as "edit" or "button" with nothing else, unless `AccessibleLabel` is set. A label drawn
+  beside an input is not associated with it in canvas. Flagged: every visible input (text, number,
+  combo box, dropdown, date picker, toggle, slider, radio, list box) and every icon, image or shape
+  with an `OnSelect` - including an empty `AccessibleLabel: =""`, which is right for a decorative
+  image and wrong for anything clickable - and a button whose text is empty. Buttons and labels with
+  text are named by it and are not flagged. A shape that only repeats the click of a labelled
+  control (a row's click pad, a scrim that closes a menu) may instead leave the tab order with
+  `TabIndex: =-1`. Measured on one 9-screen app: 101 controls needed a name, 16 had none - six
+  clickable home tiles, a capacity cell and the menu scrim on every screen.
+- **`low-contrast`.** The text's `Color` against what is actually behind it: its own `Fill`, else
+  the nearest earlier sibling (a rectangle, gallery, container, or label with a fill) whose box
+  contains the text's centre, else the parent gallery's `TemplateFill` or `Fill`, else the
+  container's, else the screen's (white by default). Colours resolve through `RGBA`, `ColorValue`,
+  `ColorFade`, `Color.*` and the app's colour tokens (`Set` in `App.OnStart` or Named Formulas); a
+  half-transparent fill is composited over what is under it. WCAG minimums: 4.5:1, or 3:1 from
+  18 pt or 14 pt bold. Checked at the configured screen width and at 390 px, since a backdrop can
+  move with the layout. Branches of the same `If` in `Color` and `Fill` are paired (a selected chip
+  is white on navy, an unselected one navy on white); one bad branch is a finding.
+- **Not examined is not a pass.** A colour read from data (`LookUp(colStage, ...).Bg`), a theme
+  default (no `Color` set), an image, HtmlViewer or modern button behind the text, a `Color` and
+  `Fill` that depend on two different conditions, or a backdrop whose geometry depends on data
+  (`Height: =CountRows(...) * 60`) leaves the text unexamined; the summary counts these separately.
+  A sibling whose `Visible` is a condition the text itself (or an ancestor) also requires is taken
+  as shown with it. When every backdrop it could have passes, the text counts as examined. The same
+  app: 373 examined, none below the minimum, 96 not examined (mostly cards whose height grows with
+  their rows). Check the unexamined ones in the running app or with the server's checker.
+- **`literal-text-overflow`.** A caption or hint the app writes itself (strings joined with `&`,
+  chosen by `If`/`Switch`) is measured like data (section 8) at the configured screen width. The
+  same app had two: a 168-character legend and a 63-character hint, each needing two lines in a
+  40 px box sized for one. Text that includes a count, a date or a variable is not literal and is
+  left to the data rule.
+- **Layout constants from Named Formulas resolve.** `lyW = Max(App.Width - 18, 320)`,
+  `lyPhone = lyW < 700`, `If(lyPhone, 14, 28)`, `Mod` and `RoundDown` are evaluated at the screen
+  width given, so geometry written that way is measured rather than skipped. An `If` whose
+  condition still does not resolve takes the smaller branch, as before.
 
 ## 7. What a static geometry audit must do to be worth running
 
@@ -381,7 +428,173 @@ rest on known lengths: set `"textFitSchema": "canvas/text-fit-schema.json"` in
 `.claude/hooks/standards.config.json` so it knows them. Without a schema a guessed length never
 blocks a write; the CLI still reports it.
 
-## 9. Theme tokens: decided once, referenced everywhere
+## 9. Responsive screens: computed geometry or auto-layout containers
+
+One app for desktop, tablet and phone has two workable routes. Choose per app, before the first
+screen, and do not mix them on one screen.
+
+| | Computed geometry | Auto-layout containers |
+|---|---|---|
+| How | absolute `X`/`Y`/`Width`/`Height`, every value a formula over layout values derived from `App.Width` | `GroupContainer` with `Variant: AutoLayout`; children sized by `FillPortions`, minimums and alignment; the platform places them |
+| Strength | exact control; the overlap, text-fit and format checks in this skill can resolve every box; easy to reason about from source | reflows by itself, including at widths nobody tested; what Microsoft's canvas generators produce |
+| Cost | every screen computes a phone branch and a wide branch; nothing reflows that you did not write | positions are decided at render time, so the geometry checks here cannot see them; more ways to clip silently (below) |
+| Measured here | yes - one multi-screen management app, published and checked at 1440 and 390 px | no - written from Microsoft's documentation and its plugin's layout rules; confirm in your tenant |
+
+Either route needs **Scale to fit turned off** (Settings > Display) so `App.Width` follows the
+window. Display settings are not in `.pa.yaml`; check them in Studio.
+
+### Computed geometry (measured)
+
+Define the layout once as named formulas in `App.Formulas`. Named formulas recalculate when the
+window is resized; a variable captured with `Set()` in `OnStart` or `OnVisible` does not, so never
+hold layout in a variable:
+
+```
+lyW = Max(App.Width - 18, 320);                     // 18: the vertical scrollbar takes width
+lyPhone = lyW < 700;
+lyNarrow = lyW < 1180;
+lyPad = If(lyPhone, 14, 28);
+lyCW = Min(lyW - 2 * lyPad, 1360);                  // content width, capped on wide monitors
+lyX = (lyW - lyCW) / 2;                             // centred content column
+lyGap = If(lyPhone, 14, 24);
+lyMainW = If(lyNarrow, lyCW, lyCW - 380 - lyGap);   // the side panel stacks below when narrow
+```
+
+Controls read only these: `X: =lyX`, `Width: =lyMainW`, `Height: =If(lyPhone, 58, 40)`.
+
+- **Subtract the scrollbar.** Without the 18 px allowance a scrolling screen showed a horizontal
+  scroll bar at every width.
+- **A phone branch is a second design, not a squeeze.** Rows that hold three facts side by side
+  need a taller phone template with the facts stacked (a ranked list's phone rows grew to 104 px; a
+  capacity cell's detail went from one line to three). Filter chips on a phone need their own row
+  height, and a template wide enough that the scrollbar does not cover the last chip.
+- **Use short date formats in narrow cells**; the long format truncated on the phone.
+- **The checks see everything**, because every value resolves from the named formulas. Run them,
+  then check both branches in the published player (below).
+
+### Auto-layout containers (from documentation; confirm in your tenant)
+
+The shape that Microsoft's generator and documentation converge on: one vertical auto-layout root,
+the **only** child of the screen, sized to the screen, scrolling, with every section inside it.
+Nothing in this skeleton was compiled here: copy control names, variants and enum literals from
+`describe_control` in your tenant, which is the authority.
+
+```yaml
+Screens:
+  OrdersScreen:
+    Children:
+      - conOrdersRoot:
+          Control: GroupContainer
+          Variant: AutoLayout
+          Properties:
+            LayoutDirection: =LayoutDirection.Vertical
+            LayoutOverflowY: =LayoutOverflow.Scroll
+            LayoutGap: =16
+            LayoutMinWidth: =0
+            LayoutMinHeight: =0
+            Width: =Parent.Width
+            Height: =Parent.Height
+          Children:
+            - conOrdersHeader:
+                Control: GroupContainer
+                Variant: AutoLayout
+                Properties:
+                  LayoutDirection: =LayoutDirection.Horizontal
+                  LayoutWrap: =true
+                  LayoutMinWidth: =0
+                  LayoutMinHeight: =0
+                  FillPortions: =0
+                  Height: =64
+            - galOrders:
+                Control: Gallery
+                Variant: Vertical
+                Properties:
+                  Items: =colOrders
+                  FillPortions: =0
+                  Height: =480
+                  TemplateSize: =72
+                  TemplatePadding: =8
+                Children:
+                  - conOrdersRow:
+                      Control: GroupContainer
+                      Variant: AutoLayout
+                      Properties:
+                        LayoutDirection: =LayoutDirection.Horizontal
+                        LayoutMinWidth: =0
+                        LayoutMinHeight: =0
+                        Width: =Parent.TemplateWidth
+                        Height: =Parent.TemplateHeight
+            - conOrdersFooter:
+                Control: GroupContainer
+                Variant: AutoLayout
+                Properties:
+                  LayoutDirection: =LayoutDirection.Horizontal
+                  LayoutMinWidth: =0
+                  LayoutMinHeight: =0
+                  FillPortions: =0
+                  Height: =56
+```
+
+The traps, each of which compiles clean:
+
+- **Anything beside the root escapes the layout.** A header placed as the root's sibling is
+  positioned absolutely and can cover the content. Overlays, confirmations and editors go inside
+  the root, with their own `Visible`.
+- **Minimum sizes default large.** A container's `LayoutMinWidth` and `LayoutMinHeight` default to
+  about 250 and 100 px and push a narrow sidebar or cell wider than intended. Set both to 0 on
+  every container and give real minimums deliberately.
+- **A fixed size is ignored without `FillPortions: =0`.** An auto-layout child with a `Width` or
+  `Height` and a non-zero fill portion is resized by the container. Set one or the other.
+- **The scroll trap.** A direct child of a scrolling container with `FillPortions: =1` is pinned to
+  the viewport height, so its content is clipped rather than scrolled. Direct children of a
+  scrolling root take `FillPortions: =0` and a height.
+- **A fixed-height container does not grow for its content.** `AutoHeight` on a label inside it
+  does not make the parent taller; budget every child, gap and padding at each breakpoint.
+- **Gallery rows do not reflow.** A gallery template is classic absolute layout. Give it one
+  auto-layout child sized with `Parent.TemplateWidth` and `Parent.TemplateHeight` (they resolve only
+  on that direct child), and size the row's content by fill portions inside it. Give the gallery a
+  bounded height and let it scroll; do not derive its height from `CountRows`.
+- **Horizontal rows need a reflow plan.** Three or more substantive children in a horizontal
+  container need `LayoutWrap: =true` or a direction switch below a width
+  (`LayoutDirection: =If(Parent.Width < 640, LayoutDirection.Vertical, LayoutDirection.Horizontal)`);
+  otherwise they squeeze to unusable sizes on a phone.
+- **Breakpoints belong in properties, not variables.** `App.Size` against `App.SizeBreakpoints`, or a
+  `Parent.Width` test, written in the property itself recalculates on resize; a `varIsPhone` set in
+  `OnVisible` does not - the same rule as the named formulas above.
+- **Hide a region by its container.** An emptied container with a fixed height keeps its space;
+  set `Visible` on the container. Confirm in the player whether a hidden child releases its space
+  in your layout before relying on it.
+- **Do not nest scrolling containers**, and do not put a manual-layout container inside an
+  auto-layout one.
+
+**What this skill's checks cannot see.** `check-canvas-overlap.mjs` and the text-fit rules in
+`check-canvas-format.mjs` resolve literal and formula coordinates. Inside an auto-layout container
+the platform decides `X` and `Y` at render time, so those controls cannot be placed, and a clean
+result there proves nothing about overlap or clipping. For auto-layout screens, rely on the render
+checks below.
+
+### Verifying a responsive app (either route)
+
+Measure in the **published player** at each size the app claims, by performing the task at that
+size. Studio's canvas is a fixed design surface and proves nothing about reflow.
+
+```js
+for (const [w, h] of [[1440, 900], [1024, 768], [390, 844]]) {
+  await page.setViewportSize({ width: w, height: h });
+  await page.waitForTimeout(1500);               // the player re-lays out after a resize
+  await page.screenshot({ path: `orders-${w}.png` });
+  // then walk the scenario at this size: the primary action must be reachable
+}
+```
+
+At each size: no horizontal scroll bar on the page; the primary action reachable by scrolling the
+screen; no text clipped or overlapping (the sweeps in `browser-verification.md`); tap targets at
+least 44 px at phone size; every state shown, not only the empty one. The management app above found
+five phone defects this way that no static check flagged: wrapped detail text in a cell, a truncated
+meta line, filter chips wrapping and covered by the scrollbar, header chips overflowing, and a
+truncated row in a list.
+
+## 10. Theme tokens: decided once, referenced everywhere
 
 **Record the theme before the first screen** (`references/project-setup.md`, section 3): the
 organisation's palette and restrictions, fonts, logo and imagery, iconography and symbolism, the

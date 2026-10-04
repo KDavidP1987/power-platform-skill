@@ -1,0 +1,23 @@
+name: Something in the skill is wrong
+description: A rule, script or snippet that misled you, or a check that passed when it should not have.
+labels: [defect]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Skill version
+      description: metadata.version in SKILL.md, or .claude/hooks/harness.json in your project.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: The reference section or script, the command, and the output. Remove tenant names, people, URLs and ids first.
+    validations:
+      required: true
+  - type: textarea
+    id: measured
+    attributes:
+      label: How you know
+      description: What you measured in your environment (the published app, a Web API read, a download) rather than what you inferred.

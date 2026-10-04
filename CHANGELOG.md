@@ -11,6 +11,61 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-04
+
+Closes the gaps found comparing this skill with Microsoft's official Power Platform plugins, adds
+the development harness as something the agent offers and installs, and removes repeated sign-ins.
+
+### Added
+
+- **The harness, offered at the start of a project.** `scripts/setup-harness.mjs` installs the
+  hooks (wired with `$CLAUDE_PROJECT_DIR`), the tools, the config and the continuity documents into
+  a project: plan by default, `--apply` to install, idempotent, never overwrites a changed file,
+  merges into an existing `settings.json`. `project-setup.md` section 4 (generated screens and owner
+  scripts as the two per-project patterns); `SKILL.md` working loop step 1.
+- `scripts/canvas-mcp.py`: a direct client for the canvas authoring server - `tools`, `compile`,
+  `hold` (refuses unless clean, holds the session until a release file appears), `sync`, `sources`,
+  `schema`, `describe`, `a11y`, `checker`, `accounts`. Sends `login_hint`, always releases the
+  session and kills the server tree. Tested against the live server (connect without a prompt in 5 s).
+- `scripts/check-published-order.py`: control order in the published app against the repo.
+- `scripts/dv-token.ps1`: a Dataverse token with one sign-in (rotating cached refresh token);
+  measured silent in about a second.
+- `scripts/hooks/shared-guard.mjs`: a non-blocking reminder when an edit names a shared table.
+- `assets/templates/owner-cleanup.ps1`: the owner-run, list-first, prefix-guarded cleanup script.
+- **Update notice:** the harness records the skill version; the pre-flight checks the latest
+  release at most once a day and tells the agent to offer the update. README "Updating"; issue
+  templates for defects and lessons.
+- **No sign-in barriers:** `first-run.md` section 13, every identity (pac, Dataverse, Az, the
+  authoring server, the browser, GitHub, MCP servers) signed in once, with its check and the cause
+  when prompts come back; permission prompts and standing authorisations.
+- **Requirements to verification:** `assets/templates/acceptance-contract.md`,
+  `scripts/contract-to-walk.mjs` (coverage findings, walk skeletons with Dataverse confirms) and
+  `browser-verification.md` section 18; pairing with Microsoft's canvas planner.
+- **Accessibility and contrast:** `check-canvas-format.mjs` gains `no-accessible-name` (a note at
+  write time), `low-contrast` (WCAG against the real backdrop at desktop and phone width; unresolved
+  counted, never passed) and `literal-text-overflow`; `canvas-layout.md` section 6.
+- **Responsive screens:** `canvas-layout.md` section 9, computed geometry (measured) against
+  auto-layout containers (a skeleton and ten traps, marked to confirm); theme tokens are section 10.
+- **Power Pages security review:** `power-pages.md` section 8 (a release checklist, each item
+  measured or from documentation) and `scripts/audit-pages-permissions.py`; the design section is
+  now section 9.
+- **Flow run diagnosis:** `power-automate.md` section 18 and `scripts/flow-runs.py`, measured on a
+  real failed run (the error of an action inside a loop is only on the failing iteration; list the
+  side effects before any resubmit).
+- **Model-driven apps:** `model-driven-and-docs.md` section 8.
+- `SKILL.md` "Alongside Microsoft's official plugins".
+
+### Changed
+
+- `assets/settings.snippet.json` anchors every hook on `$CLAUDE_PROJECT_DIR` (the relative form
+  stopped running from a subfolder) and allows the harness's read-only tools.
+- `check-canvas-format.mjs` evaluates layout constants written as named formulas, resolved `If`
+  conditions, `Mod` and real rounding, so far more geometry is measured; on one app, existing screens
+  showed text-fit findings the earlier version could not see (2 of 9 screens now block on edit).
+- `canvas-browser.mjs` finds `selectors.json` next to itself when installed into a project.
+- The pre-flight hook ends with `process.exitCode`, not `process.exit` (Windows aborted while a
+  network handle was closing).
+
 ## [0.14.0] - 2026-10-03
 
 ### Added

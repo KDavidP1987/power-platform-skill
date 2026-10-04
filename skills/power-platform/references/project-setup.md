@@ -5,7 +5,7 @@
 1. Layout
 2. Bootstrapping
 3. First session for a new canvas app
-4. The hooks
+4. The harness: hooks and tools, offered at the start
 5. Continuity documents
 6. Trackers that cannot drift
 7. Issue and PR templates, and the dependency register
@@ -92,10 +92,8 @@ npm i -D playwright
 node scripts/browser/canvas-browser.mjs login
 ```
 
-Then copy the hooks from this skill's `scripts/hooks/` into `.claude/hooks/`, merge
-`assets/settings.snippet.json` into `.claude/settings.json`, and run each hook once by hand to see
-it pass on a clean tree and fail on a seeded fault. Templates for the continuity documents are in
-`assets/templates/`.
+Then offer and install the harness (section 4: `setup-harness.mjs`, plan first), and run each
+hook once by hand to see it pass on a clean tree and fail on a seeded fault.
 
 Bootstrap traps:
 
@@ -154,7 +152,7 @@ for now, it is one file. Ask, and record the answers in `canvas/theme.json`
 If nobody can answer yet, record an interim palette and mark the theme **interim** with what is
 pending: the app is built on tokens either way, so the brand arrives as a change to one file, not to
 every screen. Then define the tokens in `App.pa.yaml` and reference only them from screens
-(`references/canvas-layout.md`, section 9); `check-canvas-format.mjs` fails a screen that uses a
+(`references/canvas-layout.md`, section 10); `check-canvas-format.mjs` fails a screen that uses a
 literal colour or font. Respect the organisation's own palette and restrictions; the skill prescribes
 neither.
 
@@ -192,14 +190,59 @@ the first screen:
 6. **Publish**, then confirm from a fresh download. Studio settings (a raised row limit, an added
    data source) are saved-but-unpublished until you do.
 
-## 4. The hooks
+## 4. The harness: hooks and tools, offered at the start
+
+The method only stays fast when the checks run themselves. In the builds behind this skill the
+same harness was copied into every project by hand - hooks that refused compile-killers at write
+time, a client that pushed to Studio and held the session, a token that never prompted, an order
+check after every publish, owner scripts for anything destructive - and every project that lacked
+a piece paid for it again. **Offer the harness at the start of every project**, say what it adds in
+one line per group, and install it when the person agrees:
+
+```sh
+node <skill>/scripts/setup-harness.mjs <project>            # plan: every file it would add or merge
+node <skill>/scripts/setup-harness.mjs <project> --apply    # install; re-run any time, it is idempotent
+```
+
+| Group | Installs | Why it pays |
+|---|---|---|
+| hooks | the six hooks below into `.claude/hooks/`, wired in `.claude/settings.json` with `$CLAUDE_PROJECT_DIR` | compile-killers, clipped text, overlaps, accessibility and palette are caught on the write that caused them, not at the next ship |
+| tools | `canvas-mcp.py`, `ship-canvas.py` (+ `inspect-artifact.py`), `check-published-order.py`, `canvas-browser.mjs`, `contract-to-walk.mjs`, `deploy-tables.py`, `check-drift.py`, `lint-flows.mjs`, `flow-runs.py`, `audit-pages-permissions.py`, `dv-token.ps1` into `scripts/` | the ship, verify and data loop as one command each, with refusals instead of silent passes |
+| config | `standards.config.json`, `canvas-app.json`, `selectors.json` (copied once; the project owns them after) | one statement of the app's identity that every tool reads |
+| docs | `STATE.md`, `decisions.md`, `dependencies.md`, `acceptance-contract.md`, and the owner cleanup script template | the session-start context and the owner-step pattern |
+
+It never overwrites a file that differs from the skill's copy (it reports it; `--force` replaces
+it), never removes anything, merges hook wiring and permissions into an existing
+`settings.json`, appends the build folders to `.gitignore`, and records the skill version in
+`.claude/hooks/harness.json`. The pre-flight hook compares that version with the latest release at
+most once a day and, when a newer one exists, tells the agent to offer the update and re-run the
+plan. After installing: fill `scripts/canvas-app.json` (including `login`, section 13 of
+`first-run.md`), set the shared prefixes, run each hook once by hand, and restart the session so
+Claude Code loads the hooks.
+
+Two patterns the harness supports but cannot install, because they are written per project:
+
+- **Generate screens from code.** For an app of more than a few screens, write the `.pa.yaml` from
+  a small generator (Python functions that emit a control with its properties, a layout helper for
+  the phone and desktop geometry, one module per screen) and never hand-edit the output. A rename,
+  a palette change or a new phone rule is then one edit and one regeneration, and the hooks check
+  the generated files exactly as they would hand-written ones. Keep removed controls in the
+  generator (hidden) for one push when a co-authoring push would delete them
+  (`canvas-shipping.md` section 4).
+- **Owner scripts for anything destructive.** The template in `assets/templates/owner-cleanup.ps1`
+  lists by default, deletes only with `-Apply`, refuses tables outside the app's own prefix, and
+  is handed over as one `!` line (`tooling-and-auth.md` section 6).
+
+### The hooks
 
 | Hook | Event | Does |
 |---|---|---|
 | `preflight.mjs` | SessionStart | Prints branch and dirty state, unpushed commits, `pac org who`, and the top of `docs/STATE.md`. Never blocks. |
 | `check-pa-yaml.mjs` | PostToolUse Write/Edit | On `.pa.yaml` only: colon-space in a single-line Power Fx value, YAML comments, `Tooltip` on a modern Button, file-count ceiling, block-scalar continuation indented shallower than its block. Exit 2 feeds the problem back so it is fixed in the same turn. |
 | `check-standards.mjs` | PostToolUse Write/Edit | Optional, configurable output standards (by default: no emoji, no purple/violet accent colours in UI and docs). Turn off or edit `standards.config.json` to taste. |
-| `check-canvas-format.mjs --hook` | PostToolUse Write/Edit | On a screen `.pa.yaml`: a data-bound label whose text can overflow its box with no remedy, a clamp whose full text is unreachable, scroll inside a gallery row, and literal colours or fonts once the app defines theme tokens (`references/canvas-layout.md`, sections 8 and 9). Blocks only on known lengths: set `textFitSchema` in `standards.config.json`. Copy it from the skill's `scripts/`, not `scripts/hooks/`. |
+| `check-canvas-format.mjs --hook` | PostToolUse Write/Edit | On a screen `.pa.yaml`: text with too little contrast and captions that clip (block), inputs and click targets with no accessible name (note), a data-bound label whose text can overflow its box with no remedy, a clamp whose full text is unreachable, scroll inside a gallery row, and literal colours or fonts once the app defines theme tokens (`references/canvas-layout.md`, sections 6, 8 and 10). Blocks only on known lengths: set `textFitSchema` in `standards.config.json`. Copy it from the skill's `scripts/`, not `scripts/hooks/`. |
+| `check-canvas-overlap.mjs --hook` | PostToolUse Write/Edit | On a screen `.pa.yaml`: controls drawn over other controls under conditions that can both hold, dead clicks behind decoration, controls outside their gallery row. |
+| `shared-guard.mjs` | PostToolUse Write/Edit | When an edit names a table with a shared prefix (`shared.prefixes` in `standards.config.json`), a non-blocking reminder to record the change in the shared registry and sync log (`shared-environments.md`). Silent otherwise. |
 | `audit-stop.mjs` | Stop | Repo-wide standards scan, leftover debug markers, file ceiling, and bookkeeping reminders (solution changed without the dependency register or state file; commits today without a changelog entry). Blocks once on findings, never loops. |
 
 Keep hooks **narrow**: only things known to break, never style. Exempt a line with a

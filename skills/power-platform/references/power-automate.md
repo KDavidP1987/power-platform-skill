@@ -19,11 +19,13 @@
 15. A checklist for every flow
 16. Every message is logged, can be resent, and shows when it was last sent
 17. Documents and templates
+18. Diagnosing a failed run: where the error really is, and resubmitting safely
 
 Lint definitions with `scripts/lint-flows.mjs <solution/src/Workflows>` - it checks most of what
 follows statically. Add `--entity-sets sets.json` to verify every entity set name,
 `--date-only cols.json` to flag date-only columns used as instants, `--require-safe-recipients`
 while no message may reach a real person (section 10), and `--verbose` to print the trigger graph.
+Explain a failed run with `scripts/flow-runs.py why <flow>` (section 18).
 
 **Point it at ALL the flows in the solution at once.** The loop rules (sections 3 and 4) read the
 graph across flows; linting one file at a time cannot see a cycle through two. Exit 0 is the gate
@@ -851,3 +853,115 @@ Edit form with the file column's card, or open the record in the model-driven ed
 (`<org>/main.aspx?etn=<table>&id=<guid>&pagetype=entityrecord`) in a new tab. Reading the stored
 name works in a formula: `ThisRecord.'<File Column>'.FileName` (confirmed in a compile and a
 publish, 2026-10-02).
+
+## 18. Diagnosing a failed run: where the error really is, and resubmitting safely
+
+Section 14 covers reading run history. This section is the order to diagnose a failure in, measured
+on a real failed run of a scheduled flow with 99 actions, a loop inside a loop and conditions inside
+both (marked **measured**); what was not exercised is marked **documented**.
+
+```sh
+python scripts/flow-runs.py why "<flow name or id>"          # the latest failed run
+python scripts/flow-runs.py why <flow> <run>                  # a given run
+python scripts/flow-runs.py runs <flow> --status Failed      # failed runs, filtered on the server
+```
+
+It reads only, takes a token for `https://service.flow.microsoft.com/` (Azure CLI, Az PowerShell or
+`--token-cmd`), and exits 1 when it explained a failure. On the measured run it took 11 seconds and
+about eight calls.
+
+**1. Which run.** `runs?$filter=status eq 'Failed'&$top=1` filters on the server and returns the
+newest first (measured). Judge the run against the definition that was live when it started (section
+14). If nothing happened at all, there may be no run: read `triggers/<name>/histories` - each entry
+carries `fired` true or false and its payload (measured) - before suspecting the actions. A trigger
+condition that never matches produces no run, so "no failed runs" is not "no failure".
+
+**2. The headline error is not the cause.** The run's error, the Dataverse `flowrun` row
+(`errorcode`, `errormessage`) and every container on the failure path all read `ActionFailed: An
+action failed. No dependent actions succeeded.` (measured: the run, its `flowrun` row and five
+containers and conditions). Treat that text as "look further down", never as a diagnosis.
+
+**3. The deepest action with a specific error is the cause.** `runs/<run>/actions` returns every
+action in the definition, nested ones included, as one flat list (measured: 99 of 99, one page). An
+action **inside a loop** shows only an aggregate status there - `Failed` with code `NotSpecified`, no
+error, no inputs or outputs links (measured). Its error is on the failing **iteration**:
+`actions/<name>/repetitions`, where each repetition carries the error, `repetitionIndexes` (the
+loop and item index at every level, for example `For_each_order[0] > Send_each_line[0]`) and, when
+recorded, its own inputs and outputs links. Ask for the repetitions of the action **inside** the loop:
+the loop container itself returned none (measured). The measured cause was found only this way: an
+`InvalidTemplate` from `substring` with a start index past the end of the string, two loops deep.
+
+**4. Read the status words precisely.**
+
+| What you see | What it means |
+|---|---|
+| `Failed` with a specific code and message | a root-cause candidate |
+| `Failed`, `ActionFailed`, "No dependent actions succeeded" | a container or condition failing because of a child |
+| `Skipped`, `ActionDependencyFailed` | an action it depends on was skipped or failed |
+| `Skipped`, `ActionConditionFailed` | its run-after condition was not met (it waited for Succeeded and got Failed or Skipped) |
+| `Skipped`, `ActionBranchingConditionNotSatisfied` | the other branch of a condition ran - normal |
+| `Running`, one action `Waiting` | the run waits on a person (an approval or a send-with-options) - measured; it ends when they answer or at the 30-day run limit (documented) |
+| `TimedOut` | the action or the run passed its timeout (documented) |
+| `Cancelled` | someone or something cancelled the run |
+
+On the measured run: one root cause, five cascading failures, 40 skipped actions. A Terminate action
+set to Failed also produces a failed run with no action error - read its message.
+
+**5. The inputs that produced it.** `inputsLink` and `outputsLink` are pre-signed URLs: fetch them
+**without** the bearer token (measured: 200 with no token; the API itself returns 401 without one).
+An expression error (`InvalidTemplate`, `ExpressionEvaluationFailed`) fails before the call is made,
+so there are **no inputs** to read (measured) - read the expression in the definition, then the
+outputs of the actions that fed it. The flow definition is readable from the same API
+(`flows/<id>`, `properties.definition`, measured), which is how the script names each action's type
+and operation.
+
+**6. Classify the error before fixing it.**
+
+- **Expression** (`InvalidTemplate`, `ExpressionEvaluationFailed`): data the expression did not
+  expect - an empty string, a null, a shorter text. Guard it (`coalesce`, `empty`, `length` before
+  `substring`) and test with a fixture missing the value (section 7).
+- **Connector or service** (HTTP 400 or 404 from the action, `BadRequest`, a Dataverse error text):
+  the call reached the service and was refused - read the outputs for the service's message.
+- **Authorisation** (401, 403, `ConnectionNotFound`, `AuthorizationFailed`): the connection's
+  account, its rights, or a removed connection (section 9).
+- **Throttling** (429, `TooManyRequests`): actions retry 429s under their retry policy (documented:
+  exponential by default); a failure means the retries ran out. Reduce loop concurrency and spread
+  scheduled work rather than adding retries.
+- **A licence or DLP block** returns 403 or suspends the flow (`flowSuspensionReason` on the flow);
+  it does not produce a parameter or expression error (section 14).
+
+**7. Before any resubmit, list what already happened.** In the measured run an email **had already
+been sent** inside the loop when the next action - recording the send - failed. A resubmit would have
+sent it again and still not recorded it. So the script lists every action that succeeded with a side
+effect (a send, post, create, update, delete or HTTP call) before it says anything about
+resubmitting.
+
+**Resubmitting (documented, not measured: this method never resubmits on its own).** The portal
+offers Resubmit on a run and on several selected runs; the API equivalent resubmits the trigger
+history the run came from. A resubmit replays the **original trigger inputs** - the data and the
+recipients as they were then. Rules that keep this skill's guards intact:
+
+- Resubmit only after the fix is deployed, and only when repeating every side effect listed is
+  harmless. Otherwise fix the data and let the next trigger run, or run a catch-up that is itself
+  guarded (section 4).
+- The recipient gate and the safe-recipient pin in the flow still apply to a resubmitted run
+  (section 10) - confirm they are on its path before resubmitting a sending flow.
+- A resubmitted run of an Update-triggered flow writes like the original; check that the loop rules
+  (sections 3 and 4) still hold with the old payload.
+- Resubmitting, cancelling and turning flows on or off are steps for the person, handed over as one
+  command (`tooling-and-auth.md`, section 6), not steps an agent takes while diagnosing.
+
+**Run history retention.** `flowrun` rows carry `ttlinseconds` 2,419,200 - 28 days - and the oldest
+row in the measured environment was 27 days old (measured). The row appeared about 2.5 minutes after
+the run ended, so a query made immediately after a failure can miss it; the flow API has the run at
+once. `flowrun.name` is the run id and `resourceid` the flow's API id, so the two join without a
+lookup (measured). Copy anything you must keep longer - into a run log table, for example - because it
+will not be there next month.
+
+**When to use Microsoft's flow MCP server instead.** Microsoft's Power Automate plugin ships an MCP
+server with run history, a one-call run diagnosis, loop repetitions, resubmit, cancel and editing.
+Use it for interactive work on flows that live **outside** a solution, for desktop flows, or to edit
+and re-run in one tool. Two cautions under this method: an edit made there to a **solution** flow is
+drift against the repo (section 8) - make the change in the repo and ship it; and its run and
+resubmit tools send real messages, so the recipient rules above apply to them too. It authenticates
+through the Azure CLI; `flow-runs.py` also works with Az PowerShell alone and cannot change anything.

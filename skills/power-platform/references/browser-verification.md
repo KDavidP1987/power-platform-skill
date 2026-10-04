@@ -19,6 +19,7 @@
 15. Writing a scenario
 16. Screenshots for documentation
 17. What browser verification does not prove
+18. From the request to the walk: the acceptance contract
 
 ---
 
@@ -601,3 +602,55 @@ and a stale date nothing else read.
 
 Report results in those terms: what was performed, as whom, on which build, what the database
 showed, what was restored, and what remains unverified.
+
+## 18. From the request to the walk: the acceptance contract
+
+A walk proves what it was written to try. Written after the build, it tries what the builder
+remembers, and the request's awkward clauses - the refusal, the second press, the rule that only
+bites at a boundary - are the ones nobody remembers. Write down what "done" means **before the
+first screen**, in a form a script can check, and generate the walks from it.
+
+**The contract** (`assets/templates/acceptance-contract.md`) is five small tables:
+
+| Table | One row per | Holds |
+|---|---|---|
+| Requirements | clause of the request, in the requester's words | the action ids that satisfy it |
+| Actions | thing a person does | precondition, trigger (screen > control), write set (`none` or `table: columns`), what the screen shows after |
+| Refusals | thing the app must refuse | which action, when, and the exact message |
+| Confirms | action or refusal | entity set, OData filter, expected column values: where the write lands, or what must be unchanged after a refusal |
+| Scenarios | test | what it covers, its kind (`success`, `refusal`, `invalid`, `boundary`, `twice`), Given, When, Then |
+
+`node scripts/contract-to-walk.mjs <contract.md> --out scripts/browser/scenarios` checks the
+contract and writes one walk scenario per scenario row (`--check` checks only). It fails (exit 1)
+on a requirement with no action, an action with no success scenario, a refusal nobody attempts, a
+write or refusal with no Confirms row, an id that points nowhere, and a Then that asserts nothing;
+it notes a writing action with no `twice` scenario. When and Then written as `click "..."`,
+`type "..." into "..."`, `select "..."`, `expect "..."` and `absent "..."` become walk steps;
+anything else becomes a `todo` step that `canvas-browser.mjs lint` refuses, so a skeleton cannot
+run until every step is written against the real controls. A writing scenario gets its Confirms
+row as the `confirm` check (changed during this run); a refusal gets it with
+`changedThisRun: false`, so the walk proves the row was left as it was, plus a dead-click sweep of
+the trigger screen; a `twice` scenario confirms exactly one row. Each skeleton still needs its build
+stamp and, when it writes, its restore.
+
+**The rule this serves: every requirement is performed in the published app, not only traced in
+source.** A requirement whose only evidence is "the formula does it" is unverified. Static tracing
+is still worth having - it is cheap and finds a missing branch before a ship - but the verdict for
+a requirement is a walk that passed on the stamped build, with its Dataverse confirmation.
+
+**Measured on a real feature** (a change-request stage machine: six moves, six refusals, a freeze
+window). Its contract, written from the design after the feature shipped, passed the coverage
+check and produced twelve scenarios that pass the walk lint except for one `todo` each: the stage
+picker, a combo box whose step had not been written in the walk vocabulary. The check also listed
+six writing moves with no `twice` scenario - the hand verification of that feature never pressed a
+move twice.
+
+**With a generator.** Microsoft's canvas planner (`microsoft/power-platform-skills`, canvas plugin)
+writes a fuller static contract - requirement coverage, action contracts with write and proof
+sets, a Given/When/Then matrix - and checks it by tracing formulas; its acceptance report records
+that runtime evaluation was not run. When it generates the app, keep its matrix as the static half:
+carry each row into this contract's Scenarios table (its Then becomes `expect` steps, its write set
+a Confirms row) and let the walks be the runtime half. Neither half replaces the other.
+
+**Keep it light.** Five tables, short ids, the requester's words. If the contract takes longer to
+write than the first screen, it has become a specification; cut it back to what a walk can check.

@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.14.0](https://img.shields.io/badge/plugin-0.14.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.15.0](https://img.shields.io/badge/plugin-0.15.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.14.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.15.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -108,6 +108,14 @@ npx skills add KDavidP1987/power-platform-skill
 **Manually:** copy `skills/power-platform/` to `~/.claude/skills/power-platform/`, or to the
 equivalent skills folder for your agent.
 
+**Updating.** Plugin: `/plugin marketplace update power-platform-skill`, or turn on auto-update for
+the marketplace in `/plugin`. `npx skills`: run the same `add` command again. Manual copy: replace the
+folder. Then re-run `setup-harness.mjs` (plan first) in each project so its hooks and tools match.
+Projects with the harness installed are told at session start, at most once a day, when a newer
+release exists.
+
+**Something wrong, or a lesson to add?** Open an issue with the defect or lesson template.
+
 ### Requirements
 
 The method and references need nothing installed. The tools need:
@@ -115,7 +123,9 @@ The method and references need nothing installed. The tools need:
 | Need | For | Notes |
 |---|---|---|
 | **Node 20+** | Hooks, flow linter, browser driver | No npm dependencies for the hooks or the linter |
-| **Python 3** | `inspect-artifact.py` | Standard library only |
+| **Python 3** | `ship-canvas.py`, `inspect-artifact.py`, `check-drift.py`, `deploy-tables.py`, `canvas-mcp.py`, `flow-runs.py`, `audit-pages-permissions.py`, `check-published-order.py` | Standard library only |
+| **.NET 10 SDK** | The canvas authoring server (`canvas-mcp.py`) | Started with `dnx`; nothing else to install |
+| **PowerShell** (optional) | `dv-token.ps1`, owner scripts | Windows PowerShell 5.1 or PowerShell 7 |
 | **Power Platform CLI** (`pac`) | Packing, importing, environment checks | `pac org who` is part of every pre-flight |
 | **Playwright** (optional) | Browser verification | `npm i -D playwright`; drives the Chrome or Edge you already have. See [below](#if-playwright-is-not-installed) |
 | **Playwright MCP server** (optional) | Interactive browser investigation | Used when present; not required |
@@ -128,8 +138,11 @@ The method and references need nothing installed. The tools need:
    - *"Add a vendor picker to `src/Screens/scrOrders.pa.yaml` over a 3,500-row Dataverse table."*
    - *"Write the solution flow JSON that locks a request row after it is submitted."*
    - *"Set up this repo for canvas app and Dataverse work: layout, hooks, ship checks."*
-3. **Wire the hooks** (optional, recommended). Copy `skills/power-platform/scripts/hooks/` to
-   `.claude/hooks/` and merge `assets/settings.snippet.json` into `.claude/settings.json`.
+3. **Install the harness** (optional, recommended; the agent offers it). From the project folder:
+   `node <skill>/scripts/setup-harness.mjs .` shows the plan and `--apply` installs the hooks (wired
+   into `.claude/settings.json`, existing entries kept), the tools under `scripts/`, the config and
+   the continuity documents. Re-run it after updating the skill; the session pre-flight tells you
+   when a newer release exists.
 4. **Describe your app once** for the browser driver. Copy
    `assets/canvas-app.example.json` to `scripts/canvas-app.json` and fill in the environment id and
    URL, app id, app name, and a command that prints a Dataverse token. Nothing about your app is ever
@@ -479,21 +492,22 @@ touches it, it points there rather than repeating it.
 | | [`manifest-caches`](skills/power-platform/references/manifest-caches.md) | Why the published app disagrees with Dataverse: cached choice members, column types, entity set names, column lists |
 | | [`power-fx-and-pa-yaml`](skills/power-platform/references/power-fx-and-pa-yaml.md) | Silent formula abandonment, `App.OnStart` races, choice and Yes/No types, delegation and the row limit, "no parent" (blank-lookup) filters that stay delegable, `.pa.yaml` syntax that fails the compile |
 | | [`canvas-controls-and-patterns`](skills/power-platform/references/canvas-controls-and-patterns.md) | TextInput, ComboBox, DropDown, gallery and timer behaviour; one picker for "All", "None" and real records; read models; save handlers, concurrency and partial failure |
-| | [`canvas-layout`](skills/power-platform/references/canvas-layout.md) | Measured text width, wrap and clipping, galleries, z-order, unclickable controls, geometry audits |
-| | [`browser-verification`](skills/power-platform/references/browser-verification.md) | Playwright against Studio and the player, the stale player cache, proving a save or publish, scenario design, negative tests |
+| | [`canvas-layout`](skills/power-platform/references/canvas-layout.md) | Responsive screens (computed geometry or auto-layout containers, verified at three widths), measured text width, wrap and clipping, galleries, z-order, unclickable controls, geometry audits, accessibility and contrast |
+| | [`browser-verification`](skills/power-platform/references/browser-verification.md) | Playwright against Studio and the player, the stale player cache, proving a save or publish, scenario design, negative tests, the acceptance contract that turns a request into walks |
 | Power Pages | [`power-pages`](skills/power-platform/references/power-pages.md) | Choosing the app type by audience and licence; a site in git with hand-written records; table permissions plus the Web API column allow-list; Append and Append To on both sides of a lookup; Private-site sign-in, consent and claims; Liquid reads and Web API writes; the site cache; proving the refusals; designing the site in the organisation's identity (with the impeccable design skill), with phone-first forms |
 | Dataverse | [`dataverse`](skills/power-platform/references/dataverse.md) | Solution shape, asserting on the artifact, schema hygiene, attribute types and table shapes (a team of one, membership with allocation), connection references, safe data writes |
 | | [`dataverse-web-api`](skills/power-platform/references/dataverse-web-api.md) | Tokens, names, idempotent provisioning, eventual consistency, choice members, alternate keys, dependency checks, paging |
 | | [`security-and-access`](skills/power-platform/references/security-and-access.md) | Roles kept out of the solution, roles as code, impersonation, sharing, column security, onboarding |
 | | [`data-migration`](skills/power-platform/references/data-migration.md) | Profiling, crosswalk keys, spreadsheet loads, backfills on watched tables, read models, cut-over |
-| | [`model-driven-and-docs`](skills/power-platform/references/model-driven-and-docs.md) | Model-driven forms by script, guides generated from the running product, licensing as a dependency |
-| Power Automate | [`power-automate`](skills/power-platform/references/power-automate.md) | Solution flow JSON, `runtimeSource`, SDK message codes, trigger loops and sentinel guards, activation as the only compile, notification safety |
+| | [`documentation-set`](skills/power-platform/references/documentation-set.md) | The documentation set for a finished app: user, manager, administrator and developer guides, screenshots per role, the doc kit |
+| | [`model-driven-and-docs`](skills/power-platform/references/model-driven-and-docs.md) | Model-driven apps (when they fit, the schema and shared-table rules, Microsoft's app builder, browser verification), forms by script, guides generated from the running product, licensing as a dependency |
+| Power Automate | [`power-automate`](skills/power-platform/references/power-automate.md) | Solution flow JSON, `runtimeSource`, SDK message codes, trigger loops and sentinel guards, activation as the only compile, notification safety, diagnosing a failed run |
 | Reporting | [`reporting`](skills/power-platform/references/reporting.md) | History first (an append-only event table, baseline, labelled demo history, commitment fields); a change log for plan-vs-actual variance, planned against unplanned; in-app charts from galleries and their compile traps; metric definitions (burn-down, burn-up, velocity, say/do, throughput, cycle time, aging, flow, mix); Power BI over a Fabric medallion, embedded in the app or linked with a filter; viewer licensing |
 | Process | [`audits`](skills/power-platform/references/audits.md) | Proving a check can fail, floors against vacuous passes, stale-input detection, comparing the published app with the repo, the audits worth having |
-| | [`project-setup`](skills/power-platform/references/project-setup.md) | Repository layout, bootstrapping with `pac`, hooks, continuity documents |
+| | [`project-setup`](skills/power-platform/references/project-setup.md) | Repository layout, bootstrapping with `pac`, the harness (hooks, tools, config and docs installed by `setup-harness.mjs`), generated screens, owner scripts, continuity documents |
 | | [`shared-environments`](skills/power-platform/references/shared-environments.md) | Several apps in one environment: ownership, shared tables, change protocol |
 | | [`alm-pipelines`](skills/power-platform/references/alm-pipelines.md) | CI/CD with `pac` in GitHub Actions and Azure DevOps: service principals, Solution Checker, managed vs unmanaged, deployment settings, activating flows, the skill's tools as gates. Each statement marked documented, observed or untested |
-| | [`first-run`](skills/power-platform/references/first-run.md) | From nothing to a working agent: rights, machine, pac, a self-renewing token, a browser that signs in by itself, Studio, the app config, the hand-back pattern, the smoke test |
+| | [`first-run`](skills/power-platform/references/first-run.md) | From nothing to a working agent: rights, machine, pac, a self-renewing token, a browser that signs in by itself, Studio, the app config, the hand-back pattern, the smoke test, every identity signed in once |
 | | [`tooling-and-auth`](skills/power-platform/references/tooling-and-auth.md) | `pac`, tokens, the TDS endpoint, MCP servers, Windows and PowerShell traps |
 
 ## Rules the skill will not bend
@@ -580,12 +594,13 @@ inputs and harness are in [`evals/`](evals/).
 .claude-plugin/                 plugin and marketplace manifests
 .github/workflows/validate.yml  CI: validator, manifests, versions, every self-test
 .github/workflows/upkeep.yml    monthly: self-tests and Playwright version drift, opens an issue
+.github/ISSUE_TEMPLATE/        defect and lesson templates
 docs/evaluation.html            the evaluation report (served by GitHub Pages)
 evals/                          the evaluation tasks, inputs, harness and results
 scripts/                        repo validator and its version-agreement tests
 skills/power-platform/
   SKILL.md                      the method, the non-negotiables, where to look
-  references/                   19 self-contained guides (see Reference library)
+  references/                   22 self-contained guides (see Reference library)
   scripts/ship-canvas.py        the ship pipeline: live baseline, reconcile, stamp, pack, assert
   scripts/check-drift.py        cached app metadata vs live Dataverse, read-only
   scripts/deploy-tables.py      Dataverse schema from a manifest: plan, apply, references, read-back
@@ -594,7 +609,14 @@ skills/power-platform/
   scripts/lint-flows.mjs        static checks on cloud-flow definitions
   scripts/check-canvas-format.mjs  long data-bound text and theme tokens in canvas source
   scripts/check-canvas-overlap.mjs controls drawn over other controls, across Visible conditions
-  scripts/hooks/                preflight, check-pa-yaml, check-standards, audit-stop, lib
+  scripts/setup-harness.mjs     installs the hooks, tools, config and docs into a project
+  scripts/canvas-mcp.py         direct client for the canvas authoring server: compile, hold, sync
+  scripts/check-published-order.py  published control order against the repo
+  scripts/contract-to-walk.mjs  acceptance contract to walk scenarios, with coverage checks
+  scripts/flow-runs.py          why a flow run failed, read only
+  scripts/audit-pages-permissions.py  Power Pages permissions, allow-lists and headers
+  scripts/dv-token.ps1          a Dataverse token with one sign-in
+  scripts/hooks/                preflight, check-pa-yaml, check-standards, shared-guard, audit-stop, lib
   assets/                       hook wiring, config examples, selectors, tested versions, templates
   tests/prompts.md              should-trigger and should-not-trigger prompts
 CHANGELOG.md                    every change, newest first

@@ -1,0 +1,23 @@
+name: A lesson for the skill
+description: Something you paid for building on Power Platform that the skill does not say yet.
+labels: [lesson]
+body:
+  - type: textarea
+    id: lesson
+    attributes:
+      label: The lesson
+      description: The trap or the approach that worked, in one or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: What you observed and how often (measured, observed once, from documentation). Anonymise first.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where it belongs
+      description: The reference file and section, if you know.

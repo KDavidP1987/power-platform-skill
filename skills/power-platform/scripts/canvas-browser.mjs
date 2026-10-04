@@ -120,7 +120,9 @@ const SELECTOR_DEFAULTS = {
     { kind: 'css', value: 'button:has-text("Got it")' }] },
 };
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SELECTORS_PATH = resolve(String(flag('selectors', join(SKILL_DIR, 'assets', 'selectors.json'))));
+// In the skill: assets/selectors.json. Installed into a project by setup-harness.mjs: next to this script.
+const SELECTORS_PATH = resolve(String(flag('selectors', [join(SKILL_DIR, 'assets', 'selectors.json'),
+  join(dirname(fileURLToPath(import.meta.url)), 'selectors.json')].find((p) => existsSync(p)) || join(SKILL_DIR, 'assets', 'selectors.json'))));
 const SPEC_FIELDS = ['surface', 'kind', 'value', 'pattern', 'flags', 'role', 'name', 'anyOf', 'check'];
 function loadSelectors(file = SELECTORS_PATH) {
   const table = {}; const notes = [];

@@ -3,7 +3,8 @@
 A Power Pages site is a website over Dataverse: its own address, its own sign-in, and security by
 web roles and table permissions instead of Dataverse security roles. This reference covers when to
 choose one, how to keep it in git, how to secure it, how to build pages that read and write, and how
-to prove it works. Everything here was observed on a real site (enhanced data model, 2026).
+to prove it works. Everything here was observed on a real site (enhanced data model, 2026) unless
+it is marked as coming from documentation.
 
 ## 1. Choose the app type before the first screen
 
@@ -174,7 +175,80 @@ content. Authentication settings can need a site restart from the admin centre.
 5. **Phone width**: at 390 px, `document.documentElement.scrollWidth` must equal `clientWidth` on
    every page, and the forms must stack.
 
-## 8. Designing the site: the organisation's identity, not the platform's
+## 8. Security review before release
+
+Table permissions and the column allow-list (section 3) are the two guards that matter most, but
+they are not the whole surface. Run this list before a site goes to more people, and again after
+any change to permissions, settings or page code. Each item says whether it was **measured** on a
+real site (a Private trial on the enhanced data model) or comes **from documentation** - confirm
+those in your tenant.
+
+1. **Run the permissions audit on the downloaded source** (measured):
+   `python scripts/audit-pages-permissions.py site/ [--url https://<site>/]`. Download first
+   (`pac pages download`), because it reads files only. It inventories every table permission
+   (table, scope, privileges, parent, roles - a child permission inherits its parent's roles) and
+   every Liquid `fetchxml` and `/_api` call in the page copies, templates, snippets and JavaScript,
+   then reports: a table the code uses with no permission; a privilege the code needs and nobody
+   grants (the call will be refused); Create, Write or Delete granted that no code uses; Global
+   access for the anonymous or the authenticated role; a column the code writes that the allow-list
+   lacks; allow-listed columns nothing uses; process columns (stage, owner, decision, score) in an
+   allow-list; Web API enabled with `*`, with no fields, with no permission, or with no caller.
+   Exit 0 clean, 1 findings, 2 nothing examined. On the real site it read three permissions, 57
+   settings and 68 code files and found nothing above info. What it cannot see: column
+   permissions, the "Power Pages Web API Columns" view, basic forms and lists that use a table
+   without code, and anything changed in the studio since the download.
+2. **Web API allow-lists** (from documentation, wildcard behaviour matches the platform's own
+   notice): `Webapi/<table>/enabled`, `Webapi/<table>/fields` as logical names, optionally
+   `Webapi/<table>/UseFieldsFromView` (a system view named "Power Pages Web API Columns"; combined
+   with the fields list when both are set). **`*` is deprecated and requests to a table configured
+   with it now fail** - list the columns. Keep `Webapi/error/innererror` false outside development:
+   it returns server error detail to the browser.
+3. **The built-in roles** (measured): "Anonymous Users" applies to every visitor who has not signed
+   in, "Authenticated Users" to everyone who has. Never give either one Global scope with Write or
+   Delete; Global Read for Authenticated Users shows every row to every signed-in person - use
+   Contact, Account, Self or Parent scope. A permission with no role (and no parent) grants nothing.
+4. **Headers** (setting names from documentation; live values measured). Read what the site
+   actually sends - `--url` does one anonymous GET without following the sign-in redirect:
+   - `HTTP/Content-Security-Policy` (and `HTTP/Content-Security-Policy-Report-Only` to test a policy
+     first). Sites created since late 2025 send a default policy with the setting unset; older
+     sites send none until it is set. **Measured on a 2026 site with the setting unset:** the live
+     policy was `script-src 'self'` plus the platform content hosts, a per-request nonce,
+     `'unsafe-eval'`, `'unsafe-hashes'` and an inline-handler hash, and `style-src 'unsafe-inline'
+     https:` - broader than the documented default (no `'unsafe-eval'` there). To disable CSP, the
+     setting is cleared, not deleted. Add `frame-ancestors 'self'` and `object-src 'none'` when you
+     own the policy; add third-party script hosts one by one, never `https:` for scripts, never
+     `'unsafe-inline'` for scripts (the nonce covers Liquid-rendered inline scripts).
+   - `HTTP/X-Frame-Options` - `SAMEORIGIN` on the measured site, and sent on every response.
+   - `HTTP/SameSite/Default` - `Lax` on the measured site; the platform's own sign-in nonce and
+     affinity cookies are `SameSite=None; Secure` regardless.
+   - `HTTP/Access-Control-Allow-Origin` - leave unset unless another origin must call the site;
+     never `*`.
+   - Measured as sent by the platform: `Strict-Transport-Security` (one year, preload). Not sent:
+     `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
+5. **Web application firewall** (from documentation): **production sites only - a trial site
+   cannot use it**, and it is not offered in some sovereign regions. An administrator turns it on
+   in the admin centre (Performance and protection); it is on by default when a trial is converted.
+   On a trial, record "WAF: not available (trial)" rather than leaving it blank.
+6. **The studio's security scan** (from documentation): Security workspace > Run Deep Scan. It scans
+   anonymous pages by default; authenticated pages need a username and password typed into the scan,
+   which a single-sign-on Entra account may not be able to provide (not tested). The report arrives
+   by email (English only, downloadable as PDF). On a Private site an anonymous scan sees only the
+   sign-in redirect - plan an authenticated scan before going Public.
+7. **Visibility** (measured, documentation for the limits): a Private site sends every anonymous
+   request - pages and `/_api` alike - to the Entra sign-in (302); only makers, System
+   Administrators and up to 50 people granted access can enter. Going Public is an administrator
+   decision and restarts the site; a site in a developer environment cannot go Public. Private is
+   the gate, not the security: table permissions still decide what each signed-in person sees.
+   `/_services/about` answers anonymously even on a Private site (measured: a page titled "Portals",
+   nothing else).
+8. **Prove the refusals** in the running site as in section 7, step 4. The audit says what the
+   configuration allows; only a refused call from a signed-in browser proves it.
+
+**Code sites (single-page React, Angular, Vue or Astro sites) are a different build model** - use
+Microsoft's Power Pages plugin (`microsoft/power-platform-skills`) for those; the audit here reads
+Liquid and page JavaScript and has not been run on a code site's bundle.
+
+## 9. Designing the site: the organisation's identity, not the platform's
 
 The default site is a grey Bootstrap portal with a placeholder header and "Company name". A site
 staff will trust looks like the organisation.

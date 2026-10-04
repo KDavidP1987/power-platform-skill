@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.14.0"
+  version: "0.15.0"
 ---
 
 # Power Platform development
@@ -87,9 +87,16 @@ user unproven.
 1. **Pre-flight.** Correct branch, clean tree, `pac org who` names the right environment. Read
    the project's state file (`docs/STATE.md` or equivalent) before touching anything. **On a new
    project, offer version control on GitHub** (optional; personal or organisation account) before
-   the first change: `references/project-setup.md` section 12.
+   the first change: `references/project-setup.md` section 12. **Offer the harness** too - the
+   hooks and tools this method runs every cycle - and install it with `scripts/setup-harness.mjs`
+   when the person agrees (plan first; `references/project-setup.md` section 4). When a sign-in
+   prompt appears, fix its cause rather than repeating it (`references/first-run.md` section 13).
 2. **Specify.** A written spec for anything non-trivial - an issue, or a backlog entry. Include
    who uses it, what proves it works, and what it touches (consult the dependency register).
+   For an app or feature with several actions, write the acceptance contract
+   (`assets/templates/acceptance-contract.md`) and generate its walks with `contract-to-walk.mjs`,
+   so every requirement is performed in the published app (`references/browser-verification.md`
+   section 18).
    **For a new app, take the theme first**: the organisation's palette and restrictions, fonts,
    logo and imagery, icons and symbolism, the landing page, tone, contrast and light/dark. Record
    it as `canvas/theme.json`, define it once as tokens in `App.pa.yaml`, and build every screen on
@@ -104,7 +111,7 @@ user unproven.
    `node scripts/lint-flows.mjs <flows>` over every flow. **Every label bound to
    data must fit the longest value it can show, or clamp with an ellipsis and a tooltip** -
    `scripts/check-canvas-format.mjs` checks it, with lengths from Dataverse metadata, and also
-   fails literal colours once the theme exists (`references/canvas-layout.md` sections 8 and 9).
+   fails literal colours once the theme exists (`references/canvas-layout.md` sections 8 and 10).
    **No control may sit over another that can be on screen at the same time** - a new button over
    a label that only shows under some condition is the commonest layout defect an agent makes.
    `scripts/check-canvas-overlap.mjs` compares every pair across all their `Visible` conditions
@@ -154,27 +161,27 @@ points there.
 | "Works in Studio, fails in the published app"; a new column/choice/table the app cannot see; option-set members, column types, entity set names, data sources the player never initialises, the Data pane | `references/manifest-caches.md` |
 | Writing or debugging Power Fx or `.pa.yaml`: silent no-op buttons, `App.OnStart`, collections, types, lookups in queries, "no parent" (blank-lookup) filters, delegation and the row limit, chunked large-table reads, identity, compile output | `references/power-fx-and-pa-yaml.md` |
 | Building or debugging a screen: TextInput/NumberInput/CheckBox/ComboBox/DropDown/Gallery/Timer quirks, OnChange firing on render, Default/Reset, "All"/"None" picker rows, edit screens and concurrency, permission gates, overlays, read-model tables, honest UX, list filters/search/grouping, communication history and resend, template guides with live preview | `references/canvas-controls-and-patterns.md` |
-| Layout: text width and clipping, long data-bound text (the fit rule and its four remedies), gallery row slicing, scrollbars, z-order, unclickable controls, geometry audits, theme tokens | `references/canvas-layout.md` |
-| Driving Studio or the published app with Playwright: scenarios, iframes, committing input, dropdowns, stale player cache (IndexedDB), save/publish proof, MCP startup timeouts, scenario design and negative tests, dead-click and clip sweeps, OData trace instead of Monitor | `references/browser-verification.md` |
+| Layout: responsive screens (computed geometry against auto-layout containers, verified at three widths), text width and clipping, long data-bound text (the fit rule and its four remedies), gallery row slicing, scrollbars, z-order, unclickable controls, geometry audits, theme tokens | `references/canvas-layout.md` |
+| Driving Studio or the published app with Playwright: scenarios, iframes, committing input, dropdowns, stale player cache (IndexedDB), save/publish proof, MCP startup timeouts, scenario design and negative tests, dead-click and clip sweeps, OData trace instead of Monitor, the acceptance contract that turns a request into walks | `references/browser-verification.md` |
 | **Power Pages** | |
-| Choosing canvas, Power Pages or model-driven by audience and licence; a site in git (`pac pages download/upload`, hand-written records); table permissions and the Web API column allow-list; Append and Append To on both sides of a lookup; Private-site sign-in vs site session; Entra consent and claims; Liquid `fetchxml` and Web API writes; Liquid traps; clearing the site cache; proving refusals; the organisation's brand on the site (recommend and install the impeccable design skill first; own header and footer, the platform theme's overrides, auto-linked CSS, artwork kept out of git), phone-first forms, echoing the person's own words | `references/power-pages.md` |
+| Choosing canvas, Power Pages or model-driven by audience and licence; a site in git (`pac pages download/upload`, hand-written records); table permissions and the Web API column allow-list; Append and Append To on both sides of a lookup; Private-site sign-in vs site session; Entra consent and claims; Liquid `fetchxml` and Web API writes; Liquid traps; clearing the site cache; proving refusals; the security review before release (permissions audit script, allow-lists, built-in roles, headers, firewall, scan); the organisation's brand on the site (recommend and install the impeccable design skill first; own header and footer, the platform theme's overrides, auto-linked CSS, artwork kept out of git), phone-first forms, echoing the person's own words | `references/power-pages.md` |
 | **Dataverse** | |
 | Solutions and schema: pack/unpack, asserting on the artifact, imports that never remove, what cannot change after creation, solution membership and shared tables, retiring components, column types and table shapes (a team of one, many-to-many membership), schema hygiene, delete behaviour, effective dating | `references/dataverse.md` |
 | Scripting the Web API: idempotent provisioning, payload ordering, which errors to retry, metadata PUTs, choice members, alternate keys, solution components, dependencies, paging and counts, `systemuser`, PowerShell 5.1 traps | `references/dataverse-web-api.md` |
 | Who can read or write: roles kept out of solutions, `ReplacePrivilegesRole`, depth and record sharing, Append/AppendTo, impersonation, column security, SharePoint virtual tables, onboarding users | `references/security-and-access.md` |
 | Writing live data: migrations, backfills, spreadsheet loads, crosswalks, agreement audits, purges, rollup rebuilds, cutover | `references/data-migration.md` |
 | **Power Automate** | |
-| Cloud flows: definition shape, triggers and message codes, `runtimeSource`, loops and sentinels, activation-only defects, dates and nulls, imports changing flow on/off state, run-as identity, notifications and safety caps, bulk writes, FetchXML, run history, the communication log and resend, documents and templates (link, stored file, generated), attachment encoding | `references/power-automate.md` |
+| Cloud flows: definition shape, triggers and message codes, `runtimeSource`, loops and sentinels, activation-only defects, dates and nulls, imports changing flow on/off state, run-as identity, notifications and safety caps, bulk writes, FetchXML, run history and diagnosing a failed run (the deepest failing action and loop iteration, side effects before a resubmit), the communication log and resend, documents and templates (link, stored file, generated), attachment encoding | `references/power-automate.md` |
 | **Reporting** | |
 | Reports for an app: the append-only history table every trend chart needs (start it first), baseline and labelled demo history, commitment fields, the change log and plan-vs-actual variance (planned vs unplanned), in-app charts from galleries (burn-down, burn-up, velocity, throughput, cycle time, aging, mix) and their compile traps, metric definitions, Power BI over a Fabric medallion (bronze, silver daily snapshot, gold facts, Direct Lake model), Power BI embedded in a canvas app or linked with a URL filter, viewer licensing | `references/reporting.md` |
 | **Process and environment** | |
 | Writing or trusting an audit; stale inputs; vacuous passes; comparing the published app with the repo; reusable tool designs | `references/audits.md` |
-| Starting from nothing: what the person needs, the machine, pac, a self-renewing token, a browser that signs in by itself, Studio and the authoring server, the app config, what the agent hands back, and the smoke test to run before the first change | `references/first-run.md` |
-| Starting a repo or a new app: theme intake (palette, fonts, logo, imagery, symbolism, landing page) before the first screen, layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights, offering GitHub version control (what it is, personal against organisation accounts, commit identity, releases) | `references/project-setup.md` |
+| Starting from nothing: what the person needs, the machine, pac, a self-renewing token, a browser that signs in by itself, every identity signed in once (no repeated prompts), Studio and the authoring server, the app config, what the agent hands back, and the smoke test to run before the first change | `references/first-run.md` |
+| Starting a repo or a new app: offering and installing the harness (hooks, tools, config, continuity docs, update notice), theme intake (palette, fonts, logo, imagery, symbolism, landing page) before the first screen, layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights, offering GitHub version control (what it is, personal against organisation accounts, commit identity, releases) | `references/project-setup.md` |
 | CI/CD: service-principal pac auth, export/unpack on a branch, pack + Solution Checker, managed vs unmanaged and upgrade, deployment settings for connection references and environment variables, importing flows off then activating, powerplatform-actions / Build Tools, the skill's tools as pipeline gates | `references/alm-pipelines.md` |
 | Several apps sharing one environment or a shared reference solution | `references/shared-environments.md` |
 | pac, tokens, the TDS endpoint, MCP servers, Windows/OneDrive/PowerShell failures, and production actions Claude Code must hand to a person | `references/tooling-and-auth.md` |
-| Model-driven forms by script, user guides/SOPs from the running app, licensing, weekly reporting from git, replacing a spreadsheet tool | `references/model-driven-and-docs.md` |
+| Model-driven apps (when they fit, how the schema and shared-table rules apply, Microsoft's app builder, browser verification), model-driven forms by script, user guides/SOPs from the running app, licensing, weekly reporting from git, replacing a spreadsheet tool | `references/model-driven-and-docs.md` |
 | The documentation set for a finished app: user, manager, administrator and developer guides, chapter skeletons, screenshots per role, the doc kit, the inventory check | `references/documentation-set.md` |
 
 ## Bundled tools
@@ -190,10 +197,17 @@ than carrying an id. Run any of them with `--help`.
 | `scripts/deploy-tables.py` | Dataverse schema from a JSON manifest (`assets/tables.example.json`): publisher, solution, tables, columns (text, memo, whole number, decimal, currency, yes/no, date, date and time, choice, autonumber, file), lookups, publish, then every table owned by another solution that a lookup pulled in WITH its schema turned back into a reference, then a read-back of every table, column, option and lookup. `--plan` prints every change and writes nothing. Idempotent; never renames, retypes or deletes; choice options append-only; a manifest error is refused before any call. Exit 0 deployed and read back, 1 conflict or missing on read-back, 2 could not run. Python 3 standard library only. |
 | `scripts/ship-canvas.py` | The solution-import ship: build on the LIVE manifest, reconcile the caches, stamp the build, strip roles, repair the player list, pack with pac, then assert on the finished zip (inspect-artifact + check-drift). `--dry-run` writes nothing and runs no pac; it never imports without `--import`. Reads `scripts/canvas-app.json`. Python 3 standard library only. |
 | `scripts/lint-flows.mjs` | Static checks on cloud-flow definition JSON: invoker runtime on non-app triggers, self-writes whose path conditions are not FALSE after the write (it parses the expressions and follows one level of Compose/variable indirection; warns when a guard holds only if a run-time value is non-blank), apostrophes in expression literals, references outside the `runAfter` path, trigger message codes, sends chained after `Failed`, single-`@` property names, multiple triggers, date-only columns used as instants (`--date-only`), cross-flow cycles. Node 18+. |
-| `scripts/check-canvas-format.mjs` | Formatting rules no compile enforces, from canvas source: every data-bound text control must fit the widest value its expression can produce (lengths from a Dataverse-metadata schema, choices by their labels, collections from the formulas that build them) or carry a remedy - clamp plus a tooltip that reads the same columns, a flexible-height row, a detail view, or a scrolling detail pane; and screens use theme tokens, not literal colours or fonts. `--hook` runs it as a PostToolUse hook. Prints what it examined; exit 2 when nothing was. Node 18+. |
+| `scripts/check-canvas-format.mjs` | Formatting rules no compile enforces, from canvas source: accessible names on inputs and click targets (a note at write time, not a block), WCAG text contrast against the real backdrop at desktop and phone width (unresolved counted, never passed), literal captions that clip, and every data-bound text control must fit the widest value its expression can produce (lengths from a Dataverse-metadata schema, choices by their labels, collections from the formulas that build them) or carry a remedy - clamp plus a tooltip that reads the same columns, a flexible-height row, a detail view, or a scrolling detail pane; and screens use theme tokens, not literal colours or fonts. `--hook` runs it as a PostToolUse hook. Prints what it examined; exit 2 when nothing was. Node 18+. |
 | `scripts/check-canvas-overlap.mjs` | Controls drawn over other controls, from canvas source: every pair of text-bearing or interactive controls in the same coordinate space (screen, container, gallery row) whose boxes overlap and whose `Visible` conditions - their own and every ancestor's - are not provably exclusive; decoration declared after a button (dead click) or a label (hidden text); controls off the design surface or outside their gallery row. Geometry from literals, `App.OnStart` globals, `Parent`, other controls and every `If`/`Switch` branch, each branch compared only with the conditions it holds under. Modal backdrops, empty states over their own gallery and text-less click pads are exempt; `--explain` lists every exemption. `--hook` runs it at write time. Prints how many controls it resolved; exit 2 when none. Node 18+. |
+| `scripts/setup-harness.mjs` | Installs this method's harness into a project: the hooks wired with `$CLAUDE_PROJECT_DIR`, the tools, the config and continuity documents, `.gitignore` entries and the version record the pre-flight's update notice reads. Plan by default, `--apply` to install; never overwrites a changed file or removes anything; merges into an existing `settings.json`. |
+| `scripts/canvas-mcp.py` | Direct stdio client for the canvas authoring server: `tools` (the argument names it accepts now), `compile`, `hold` (push, refuse unless clean, hold the session until a release file appears), `sync` (never into `Src`), `sources`, `schema`, `describe`, `a11y`, `checker`, `accounts`. Sends `login_hint` so connect never prompts; always releases the session and kills the server tree. |
+| `scripts/check-published-order.py` | Compares control (z-)order in a downloaded published app with the repo; catches a push that drew a card over its gallery while every property matched. |
+| `scripts/contract-to-walk.mjs` | Checks an acceptance contract's coverage (requirement without action, action without scenario, write or refusal without a Dataverse confirm) and writes one walk scenario skeleton per row. |
+| `scripts/flow-runs.py` | Read-only flow run diagnosis: `list`, `runs <flow>`, `why <flow> [run]` walks to the deepest specific error (inside nested loops, on the failing iteration), prints its inputs and outputs and the side effects a resubmit would repeat. |
+| `scripts/audit-pages-permissions.py` | Audits a downloaded Power Pages site: table permissions, Web API allow-lists and header settings against the Liquid and `/_api` calls in its code; optional anonymous live-header read. |
+| `scripts/dv-token.ps1` | A Dataverse token with one sign-in: device code once, then a rotating cached refresh token; prints the token for `dataverseTokenCommand`, `-WhoAmI` to prove it. |
 | `scripts/hooks/check-pa-yaml.mjs` | Claude Code PostToolUse hook: flags the `.pa.yaml` faults that fail a whole-app compile, at write time. |
-| `scripts/hooks/check-standards.mjs`, `audit-stop.mjs`, `preflight.mjs` | Optional output-standards hook, end-of-turn audit, and session pre-flight. Wiring in `assets/settings.snippet.json`. |
+| `scripts/hooks/check-standards.mjs`, `shared-guard.mjs`, `audit-stop.mjs`, `preflight.mjs` | Optional output-standards hook, shared-table reminder, end-of-turn audit, and session pre-flight (with a once-a-day update notice). Wiring in `assets/settings.snippet.json`; `setup-harness.mjs` installs them. |
 
 **Playwright, two ways.** For an interactive investigation, use the Playwright MCP server's
 browser tools (navigate, snapshot, click, evaluate) directly - they are the fastest way to look.
@@ -216,6 +230,17 @@ steps to perform in the published app and the Web API query that would confirm t
 or whenever the driver stops finding something, and fix stale entries in `assets/selectors.json`.
 A monthly upkeep workflow re-runs every self-test and flags new Playwright versions against
 `assets/tested-versions.json`.
+
+## Alongside Microsoft's official plugins
+
+Microsoft publishes Power Platform plugins (`microsoft/power-platform-skills`) that generate:
+canvas screens through the same authoring server this skill drives, model-driven apps, code apps,
+Power Pages code sites, flows through their own server, and mobile apps. They stop where this skill
+starts - their canvas skill ends at a clean compile, with no save, publish or test in the published
+app. Use both: theirs to generate where it has a generator (and for code apps, code sites, mobile and
+PCF, which this skill does not cover); this skill for the schema, the shared-environment rules, the
+ship, the proof in the published app, and the guards. When their planner writes a requirements
+matrix, turn it into this skill's acceptance contract and walk it.
 
 ## How to behave
 

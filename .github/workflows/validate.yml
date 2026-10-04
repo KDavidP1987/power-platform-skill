@@ -34,6 +34,13 @@ jobs:
       - run: python skills/power-platform/scripts/deploy-tables.py --selftest
       - run: python skills/power-platform/scripts/ship-canvas.py --selftest
       - run: node --check skills/power-platform/scripts/canvas-browser.mjs
+      - run: python skills/power-platform/scripts/canvas-mcp.py --selftest
+      - run: python skills/power-platform/scripts/check-published-order.py --selftest
+      - run: python skills/power-platform/scripts/flow-runs.py --selftest
+      - run: python skills/power-platform/scripts/audit-pages-permissions.py --selftest
+      - run: node skills/power-platform/scripts/contract-to-walk.mjs --selftest
+      - run: node skills/power-platform/scripts/setup-harness.mjs --selftest
+      - run: node skills/power-platform/scripts/hooks/shared-guard.mjs --selftest
       - run: node skills/power-platform/scripts/canvas-browser.mjs --selftest
       - run: pip install python-docx pillow
       - run: python skills/power-platform/assets/doc-kit/doc_kit.py --selftest

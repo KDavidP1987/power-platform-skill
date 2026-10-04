@@ -14,6 +14,7 @@ thing is replacing.
 5. Licensing is a deployment dependency
 6. Weekly reporting from git
 7. Replacing a spreadsheet tool
+8. Model-driven apps: when they fit, how this method applies, and verifying them
 
 ## 1. Customising model-driven forms by script
 
@@ -345,3 +346,82 @@ and ship the admin screen so the business finishes the mapping.
   every visual state shows (over and under capacity, positive and negative variance) and give every
   record child data - testers filed records with no children as bugs.
 - **Keep source workbooks out of git.**
+
+## 8. Model-driven apps: when they fit, how this method applies, and verifying them
+
+### When model-driven fits better than canvas
+
+- **Back-office maintenance over many related tables**: administrators editing reference data,
+  rows with several child lists, bulk edit, views, Excel export, audit history and record sharing,
+  all with no screens to build. A canvas app earns its cost where the task is a guided flow, the
+  layout is the product, or people use it on a phone.
+- **The licence is the same.** Both are premium when they use Dataverse; a model-driven companion
+  for administrators adds no licence beside the canvas app.
+- **Many teams end up with both**: a canvas app for the people doing the work and a model-driven
+  app for the people maintaining it. Section 2 applies then - the model-driven app is a second write
+  path that bypasses every canvas gate.
+
+### How this skill's rules apply
+
+None of these change because the app is model-driven:
+
+- **Schema first, as a manifest in git** (`dataverse.md`, `deploy-tables.py --plan`). A generator
+  that creates tables from a prompt is fine for a prototype; for anything that will ship, keep the
+  tables in the manifest so they can be planned, reviewed and redeployed, and let the generator
+  build on them.
+- **Shared and reference tables stay read-only** (`shared-environments.md`). A model-driven app
+  makes writing to a shared table one click away: leave shared tables off the sitemap, or give the
+  app's role Read only on them, and check the role rather than the navigation.
+- **Security roles by script**, with a `-Report` mode and a live read-back
+  (`security-and-access.md`). The model-driven app shows exactly what the role allows; that is the
+  point, so the role is the design.
+- **Solution-aware from the start**: the app module, sitemap, forms and views all belong in the
+  project's solution, or a later export ships without them (`alm-pipelines.md`).
+- **Forms by script, append-only** (section 1), and every form and view in the dependency register.
+
+### Microsoft's app builder (not measured here)
+
+Microsoft's official `model-apps` plugin (`microsoft/power-platform-skills`) builds a whole
+model-driven app from a description: tables, relationships, forms with sub-grids, views, charts,
+dashboards, security roles, the app module and sitemap, and generative pages (React pages inside the
+app). It works from an app specification you approve, applies it idempotently, can verify the
+deployed app against the specification, download a deployed app back into a specification, and tear
+down only what it built (dry run by default). This skill has not run it; the pairing that follows
+from the rules above:
+
+1. Deploy the tables from your manifest first, then let the builder build on them as existing
+   tables (it skips tearing down tables it did not create).
+2. Keep its specification in git beside the manifest, as the source for forms, views and sitemap.
+3. Review its plan against the shared-table rule before approving: no shared table on the sitemap
+   with write access, no role with more than Read on reference data.
+4. Verify in the browser as below, as a person with the app's role - not as the maker.
+
+### Verifying a model-driven app in the browser (documented; confirm in your tenant)
+
+The same standard as canvas: perform the task in the running app and confirm the effect in
+Dataverse. What differs:
+
+- **The URL shape.** `https://<org>.crm.dynamics.com/main.aspx?appid=<app id>` opens the app;
+  add `&pagetype=entitylist&etn=app_order` for a table's list,
+  `&pagetype=entityrecord&etn=app_order&id=<row id>` for one record, or
+  `&pagetype=entityrecord&etn=app_order` for a new one. Read the app id from the `appmodules` table
+  (`appmoduleid`, filtered by `uniquename`).
+- **No player iframe.** Unlike a canvas app, list and form controls are in the page itself;
+  generative pages and embedded canvas or Power BI content are in frames of their own.
+- **Wait for the form, not the page.** The shell renders before the record loads. Wait for a named
+  field control to be visible, then for the record title, before reading anything. Generative pages
+  can take several seconds longer.
+- **Find fields by their label.** Field controls expose the column's display name as their
+  accessible name; read values through the accessibility tree (`getByRole('textbox', {name:
+  'Order Name'})`, `getByLabel(...)`), and snapshot before every click because references go stale
+  when the form re-renders.
+- **The command bar is per table and per role.** Locate Save, New and custom commands by name
+  (`getByRole('menuitem', {name: 'Save'})` or the button's `aria-label`); an overflow menu
+  ("More commands") hides commands at narrow widths. A missing command is a role or ribbon finding,
+  not a selector failure - check the role before the selector.
+- **Save, then prove it.** After Save, wait for the unsaved-changes marker to clear, then read the
+  row back over the Web API and compare the values you typed. A business rule or plugin can change
+  them; the read-back is the evidence, not the form.
+- **Test as the role.** Open the app in a browser profile signed in as a person who holds only the
+  app's role, or impersonate with `MSCRMCallerID` for the read-back. A maker sees everything, so a
+  pass as the maker proves nothing about access.

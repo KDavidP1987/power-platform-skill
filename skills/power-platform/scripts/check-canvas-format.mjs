@@ -17,6 +17,17 @@
 //    table (not a literal or a small fixed collection), and always when the schema shows the table
 //    has a choice column a user would scan by. Nested galleries and literal tables are skipped.
 //    The intake question and the patterns: references/canvas-controls-and-patterns.md, "Lists".
+// 4. ACCESSIBLE NAMES. An input, or a control people click that shows no text of its own (an icon,
+//    an image, a shape used as a click target, a button with no text), is announced by a screen
+//    reader as "button" or "edit" with no name unless AccessibleLabel is set. A visible label beside
+//    an input is not associated with it in canvas. Buttons and labels with text are named by it.
+// 5. TEXT CONTRAST. Text colour against what is actually behind it (its own Fill, else the nearest
+//    earlier sibling shape or container that covers it, else the parent's fill, else the screen),
+//    resolved through RGBA, ColorValue, ColorFade, Color.* and the app's colour tokens, at the
+//    configured screen width and at phone width. Below 4.5:1 (3:1 for large text) is an error.
+//    Anything it cannot resolve is counted as not examined - never as a pass.
+// 6. LITERAL TEXT FIT. A literal caption or hint is measured like data: a two-line hint in a
+//    one-line box clips just the same.
 //
 // Usage:
 //   node check-canvas-format.mjs <Src folder or .pa.yaml files>... [--schema cols.json]
@@ -26,6 +37,7 @@
 //
 // Exit: 0 clean, 1 findings, 2 nothing examined (no files, or no data-bound text control) - NOT a pass.
 // The formula, its error direction and the four remedies: references/canvas-layout.md, "Long text".
+// Names and contrast: references/canvas-layout.md, "Accessible names and contrast".
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -206,13 +218,15 @@ function numEval(n, ctx, depth = 0) {
   if (!n || depth > 20) return null;
   switch (n.t) {
     case 'num': return n.v;
-    case 'un': { const v = numEval(n.x, ctx, depth + 1); return v === null ? null : n.op === '-' ? -v : null; }
+    case 'un': { const v = numEval(n.x, ctx, depth + 1); return v === null ? null : n.op === '-' ? -v : n.op === '!' ? (v ? 0 : 1) : null; }
     case 'bin': {
       const a = numEval(n.l, ctx, depth + 1), b = numEval(n.r, ctx, depth + 1);
       if (a === null || b === null) return null;
-      return { '+': a + b, '-': a - b, '*': a * b, '/': b === 0 ? null : a / b }[n.op] ?? null;
+      const v = { '+': a + b, '-': a - b, '*': a * b, '/': b === 0 ? null : a / b, '<': a < b, '>': a > b, '<=': a <= b, '>=': a >= b,
+        '=': a === b, '<>': a !== b, '&&': !!a && !!b, and: !!a && !!b, '||': !!a || !!b, or: !!a || !!b }[n.op];
+      return v === undefined || v === null ? null : typeof v === 'boolean' ? (v ? 1 : 0) : v;
     }
-    case 'id': return ctx.consts.has(n.v) ? ctx.consts.get(n.v) : null;
+    case 'id': return ctx.consts.has(n.v) ? ctx.consts.get(n.v) : !n.q && /^(true|false)$/i.test(n.v) ? (/^true$/i.test(n.v) ? 1 : 0) : null;
     case 'mem': {
       const root = n.o.t === 'id' ? n.o.v : null;
       if (!ctx.parentProp) return null;
@@ -225,8 +239,24 @@ function numEval(n, ctx, depth = 0) {
       const f = n.name.toLowerCase();
       const a = n.args.map((x) => numEval(x, ctx, depth + 1));
       if (['min', 'max'].includes(f)) return a.some((x) => x === null) ? null : Math[f](...a);
-      if (['rounddown', 'roundup', 'round'].includes(f)) return a[0];
+      if (['rounddown', 'roundup', 'round'].includes(f)) {
+        if (a[0] === null) return null;
+        const d = 10 ** (a[1] ?? 0);
+        return f === 'round' ? Math.round(a[0] * d) / d : f === 'rounddown' ? Math.trunc(a[0] * d) / d : Math.sign(a[0]) * Math.ceil(Math.abs(a[0]) * d) / d;
+      }
+      if (f === 'mod') return a[0] === null || !a[1] ? null : ((a[0] % a[1]) + a[1]) % a[1];
+      if (f === 'int' || f === 'trunc') return a[0] === null ? null : f === 'int' ? Math.floor(a[0]) : Math.trunc(a[0]);
       if (f === 'abs') return a[0] === null ? null : Math.abs(a[0]);
+      // A condition that resolves (a layout constant such as a phone breakpoint) picks its branch.
+      if (f === 'if') {
+        for (let k = 0; k + 1 < n.args.length; k += 2) {
+          const cv = numEval(n.args[k], ctx, depth + 1);
+          if (cv === null) break;
+          if (cv) return numEval(n.args[k + 1], ctx, depth + 1);
+          if (k + 2 === n.args.length - 1) return numEval(n.args[k + 2], ctx, depth + 1);
+          if (k + 2 >= n.args.length) return null;
+        }
+      }
       // An unknown condition: the box is the SMALLER branch, so a fit check stays conservative.
       if (f === 'if' || f === 'switch') {
         const vals = f === 'if' ? n.args.filter((_, k) => k % 2 === 1 || (k === n.args.length - 1 && n.args.length % 2 === 1))
@@ -484,13 +514,101 @@ export function readConstants(appText) {
   for (const m of appText.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(-?\d+(?:\.\d+)?)\s*;/gm)) consts.set(m[1], Number(m[2]));
   return consts;
 }
+// Named Formulas statements (App.Formulas), split at top-level semicolons; user-defined functions skipped.
+export function formulaStatements(appText) {
+  let src = '';
+  try { src = parseYaml(appText).App?.Properties?.Formulas?.v || ''; } catch { return []; }
+  src = src.replace(/^\s*=/, '');
+  const out = []; let depth = 0, cur = '', q = null;
+  for (const ch of src) {
+    if (q) { cur += ch; if (ch === q) q = null; continue; }
+    if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+    if (ch === '(' || ch === '{' || ch === '[') depth++;
+    if (ch === ')' || ch === '}' || ch === ']') depth--;
+    if (ch === ';' && depth === 0) { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur);
+  return out.map((x) => x.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\s\S]+)$/)).filter(Boolean).map((m) => ({ name: m[1], src: m[2] }));
+}
+// Layout constants defined as Named Formulas over App.Width (lyW = Max(App.Width - 18, 320)),
+// evaluated at the given screen size. Only numbers and booleans; anything else stays unknown.
+export function evalFormulaConstants(appText, consts, screenWidth, screenHeight) {
+  const out = new Map(consts);
+  const stmts = formulaStatements(appText).map((x) => ({ ...x, ast: safeParse('=' + x.src) })).filter((x) => x.ast);
+  const ctx = { consts: out, parentProp: (name, root) => (root === 'App' ? (name === 'Width' ? screenWidth : name === 'Height' ? screenHeight : null) : null) };
+  for (let pass = 0; pass < 6; pass++) {
+    let changed = false;
+    for (const x of stmts) { if (out.has(x.name)) continue; const v = numEval(x.ast, ctx); if (v !== null && Number.isFinite(v)) { out.set(x.name, v); changed = true; } }
+    if (!changed) break;
+  }
+  return out;
+}
+// ---------- colour: resolve, composite, contrast ----------
+const NAMED_COLOURS = { White: [255, 255, 255, 1], Black: [0, 0, 0, 1], Transparent: [0, 0, 0, 0], Red: [255, 0, 0, 1], Blue: [0, 0, 255, 1],
+  Green: [0, 128, 0, 1], Gray: [128, 128, 128, 1], Grey: [128, 128, 128, 1], LightGray: [211, 211, 211, 1], DarkGray: [169, 169, 169, 1],
+  Silver: [192, 192, 192, 1], Yellow: [255, 255, 0, 1], Orange: [255, 165, 0, 1], Navy: [0, 0, 128, 1], DarkBlue: [0, 0, 139, 1],
+  LightBlue: [173, 216, 230, 1], WhiteSmoke: [245, 245, 245, 1], Gainsboro: [220, 220, 220, 1] };
+function hexColour(str) {
+  const h = String(str).trim().replace(/^#/, '');
+  if (!/^([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(h)) return NAMED_COLOURS[String(str).trim()] || null;
+  const x = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  return [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2, 4), 16), parseInt(x.slice(4, 6), 16), x.length === 8 ? parseInt(x.slice(6, 8), 16) / 255 : 1];
+}
+// The colours an expression can produce: [{ rgba, tag }] (tag = { cond, i } for an If/Switch branch),
+// or null when any part cannot be resolved.
+export function colourOptions(n, cmap, depth = 0) {
+  if (!n || depth > 25) return null;
+  if (n.t === 'id') return cmap.has(n.v) ? [{ rgba: cmap.get(n.v) }] : null;
+  if (n.t === 'mem' && n.o.t === 'id' && n.o.v === 'Color') return NAMED_COLOURS[n.name] ? [{ rgba: NAMED_COLOURS[n.name] }] : null;
+  if (n.t !== 'call') return null;
+  const f = n.name.toLowerCase();
+  const num = (a) => (a && a.t === 'num' ? a.v : a && a.t === 'un' && a.op === '-' && a.x.t === 'num' ? -a.x.v : null);
+  if (f === 'rgba') { const v = n.args.map(num); return v.length === 4 && v.every((x) => x !== null) ? [{ rgba: v }] : null; }
+  if (f === 'colorvalue') { const c = n.args[0] && n.args[0].t === 'str' ? hexColour(n.args[0].v) : null; return c ? [{ rgba: c }] : null; }
+  if (f === 'colorfade') {
+    const base = colourOptions(n.args[0], cmap, depth + 1), k = num(n.args[1]);
+    if (!base || k === null) return null;
+    return base.map((o) => ({ ...o, rgba: [0, 1, 2].map((j) => (k >= 0 ? o.rgba[j] + (255 - o.rgba[j]) * k : o.rgba[j] * (1 + k))).concat(o.rgba[3]) }));
+  }
+  if (f === 'if' || f === 'switch') {
+    const vals = f === 'if' ? n.args.filter((_, k) => k % 2 === 1 || (k === n.args.length - 1 && n.args.length % 2 === 1))
+      : n.args.slice(2).filter((_, k) => k % 2 === 0 || k === n.args.length - 3);
+    const cond = fxKey(f === 'if' ? n.args.filter((_, k) => k % 2 === 0 && k < n.args.length - 1) : n.args.slice(0, 1));
+    const out = [];
+    for (const [i, v] of vals.entries()) { const o = colourOptions(v, cmap, depth + 1); if (!o) return null; out.push(...o.map((x) => ({ rgba: x.rgba, tag: x.tag || { cond, i } }))); }
+    return out;
+  }
+  return null;
+}
+// Colour tokens: Set(name, <colour>) in App.OnStart and Named Formulas "name = <colour>;".
+export function readColourMap(appText) {
+  const cmap = new Map();
+  if (!appText) return cmap;
+  const defs = formulaStatements(appText);
+  for (const m of appText.matchAll(/Set\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*((?:RGBA|ColorValue|ColorFade)\s*\([^\n]*?\)|Color\.[A-Za-z]+)\s*\)/g)) defs.push({ name: m[1], src: m[2] });
+  for (let pass = 0; pass < 4; pass++) {
+    for (const d of defs) {
+      if (cmap.has(d.name)) continue;
+      const o = colourOptions(safeParse('=' + d.src), cmap);
+      if (o && o.length === 1) cmap.set(d.name, o[0].rgba);
+    }
+  }
+  return cmap;
+}
+const over = (top, under) => { const a = top[3]; return [0, 1, 2].map((j) => top[j] * a + under[j] * (1 - a)).concat(1); };
+const lum = (c) => { const ch = c.slice(0, 3).map((v) => { const x = Math.max(0, Math.min(255, v)) / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]; };
+export function contrastRatio(a, b) { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+const rgbaText = (c) => `RGBA(${c.slice(0, 3).map((v) => Math.round(v)).join(', ')}, ${+(+c[3]).toFixed(2)})`;
+
 // Theme tokens: names set (or defined as Named Formulas) to a colour or a font in App.pa.yaml.
 export function readThemeTokens(appText) {
   const tokens = new Set();
   if (!appText) return tokens;
   const COLOURISH = /^(RGBA|ColorValue|ColorFade|Color\.|Font\.|"#)/;
   for (const m of appText.matchAll(/Set\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([^\n]+?)\)\s*;?\s*$/gm)) if (COLOURISH.test(m[2].trim())) tokens.add(m[1]);
-  for (const m of appText.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n;]+);/gm)) if (COLOURISH.test(m[2].trim())) tokens.add(m[1]);
+  for (const m of appText.matchAll(/^\s*=?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n;]+);/gm)) if (COLOURISH.test(m[2].trim())) tokens.add(m[1]);
   return tokens;
 }
 
@@ -501,11 +619,13 @@ const LITERAL_FONT = /\bFont\.('[^']+'|[A-Za-z]+)|^="[^"]+"$/;
 
 export function analyse(files, { schema = null, screenWidth = 1366, screenHeight = 768, galleriesOnly = false, theme = true } = {}) {
   const findings = [];
-  const stats = { files: 0, textControls: 0, bound: 0, measured: 0, unparsed: 0, collections: 0, literalColours: 0, literalFonts: 0, galleries: 0, listsWithoutFilter: 0 };
+  const stats = { files: 0, textControls: 0, bound: 0, measured: 0, unparsed: 0, collections: 0, literalColours: 0, literalFonts: 0, galleries: 0, listsWithoutFilter: 0,
+    literalMeasured: 0, nameChecked: 0, unnamed: 0, contrastExamined: 0, contrastUnexamined: 0, lowContrast: 0 };
   const appFile = files.find((f) => /(^|[\\/])App\.pa\.yaml$/i.test(f.path));
   const appText = appFile ? appFile.text : '';
-  const consts = readConstants(appText);
+  const consts = evalFormulaConstants(appText, readConstants(appText), screenWidth, screenHeight);
   const tokens = readThemeTokens(appText);
+  const cmap = readColourMap(appText);
   const toMap = (obj) => new Map(Object.entries(obj || {}).flatMap(([k, v]) => { const c = columnInfo(v); return c ? [[k, c], [k.toLowerCase(), c]] : []; }));
   const flatCols = schema ? (schema.columns || (schema.tables ? {} : schema)) : null;
   const schemaMap = flatCols ? toMap(flatCols) : new Map();
@@ -592,8 +712,10 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
     if (galleriesOnly && !gal) continue;
     let ast; try { ast = parseFx(textSrc); } catch { stats.unparsed++; continue; }
     const L = textLen(ast, { ...baseCtx, table: gal ? firstTable(safeParse(gal.props.Items?.v), baseCtx) : null, inGallery: !!gal });
-    if (!L.data) continue;
-    stats.bound++;
+    const literal = !L.data && isLiteralText(ast);
+    if (!L.data && !literal) continue;
+    if (literal && (!Number.isFinite(L.n) || L.n === 0 || /^=?\s*false\s*$/i.test(c.props.Visible?.v || ''))) continue;
+    if (!literal) stats.bound++;
     const d = DEFAULTS[/^Text/i.test(c.control) ? 'Text' : 'Label'];
     const val = (k) => { const v = prop(c, k); return v === null || v === undefined ? d[k] ?? null : v; };
     const W = prop(c, 'Width'), H = prop(c, 'Height');
@@ -613,11 +735,12 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
     const tipMissing = [...new Set(L.cols)].filter((col) => !tipCols.has(col));
     const fullTextReachable = !!c.props.OnSelect?.v || (!!tipAst && tipMissing.length === 0);
     if (W === null || H === null || !size) {
+      if (literal) continue;
       findings.push({ level: 'info', code: 'unmeasured', file: c.file, line: c.line, control: c.name,
         msg: `${where}: Width/Height/Size could not be resolved to numbers; fit not checked. Pass --screen-width or define the constant in App.pa.yaml.` });
       continue;
     }
-    stats.measured++;
+    if (literal) stats.literalMeasured++; else stats.measured++;
     const px = size * MODEL.pxPerPt;
     const innerW = W - val('PaddingLeft') - val('PaddingRight');
     const innerH = H - val('PaddingTop') - val('PaddingBottom');
@@ -642,12 +765,174 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
     if (auto && !fixedRow) continue;                        // remedy b: grows (flexible-height gallery, or free layout)
     if (overflowScroll && !gal && wrap) continue;            // remedy d: a detail pane that scrolls
     const suggest = Math.max(4, capacity);
+    if (literal) {
+      findings.push({ level: 'error', code: 'literal-text-overflow', file: c.file, line: c.line, control: c.name, gallery: !!gal,
+        msg: `${where}: the literal text (${L.n} characters) does not fit: the box has room for about ${capacity} characters ` +
+          `(${lines} line${lines === 1 ? '' : 's'}, ${W}x${H} at size ${size}${wrap ? '' : ', no wrap'}, at ${screenWidth} px wide). Widen or heighten the box, allow wrap, or shorten the text.` });
+      continue;
+    }
     findings.push({ level: 'error', code: auto && fixedRow ? 'autoheight-in-fixed-row' : 'text-overflow', file: c.file, line: c.line, control: c.name,
       msg: `${where}: has room for about ${capacity} characters (${lines} line${lines === 1 ? '' : 's'}, ${W}x${H} at size ${size}${wrap ? '' : ', no wrap'}) ` +
         `but can receive ${lenTxt} (${cols || 'data'}${L.heuristic ? '; a length was guessed from a column name - pass --schema' : ''}).` +
         (auto && fixedRow ? ' AutoHeight does not help in a fixed-height gallery: the row still clips.' : '') +
         ` Fix: Text: =With({v: <text>}, If(Len(v) > ${suggest}, Left(v, ${suggest - 3}) & "...", v)) with Tooltip: =<text>, or a flexible-height gallery with AutoHeight.`,
       capacity, maxLength: L.n, gallery: !!gal, guessed: !!L.heuristic });
+  }
+  // ---- accessible names ----
+  const kids = new Map();
+  for (const c of all) if (c.parent) { if (!kids.has(c.parent)) kids.set(c.parent, []); kids.get(c.parent).push(c); }
+  const hidden = (c) => /^=?\s*false\s*$/i.test(c.props.Visible?.v || '');
+  const labelOf = (c) => { const v = (c.props.AccessibleLabel?.v || '').trim().replace(/^=/, '').trim(); return v && v !== '""' ? v : ''; };
+  const acts = (c) => { const v = (c.props.OnSelect?.v || '').trim().replace(/^=/, '').trim(); return !!v && !/^(false|true|""|0)$/i.test(v); };
+  const textOf = (c) => { const v = (c.props.Text?.v || '').trim().replace(/^=/, '').trim(); return v && v !== '""' ? v : ''; };
+  for (const c of all) {
+    if (c.control === 'Screen' || hidden(c)) continue;
+    let why = null;
+    if (A11Y_INPUTS.test(c.control)) why = 'an input';
+    else if (CLICK_SHAPES.test(c.control) && acts(c) && !/^=?\s*-1\s*$/.test(c.props.TabIndex?.v || '')) why = `a clickable ${c.control.replace(/^Classic\//, '').toLowerCase()} with no text`;
+    else if (/^(Button|Classic\/Button|ModernButton)(@|$)/i.test(c.control) && !textOf(c)) why = 'a button with no text';
+    else continue;
+    stats.nameChecked++;
+    if (labelOf(c)) continue;
+    stats.unnamed++;
+    findings.push({ level: 'error', code: 'no-accessible-name', file: c.file, line: c.props.AccessibleLabel?.line || c.line, control: c.name,
+      msg: `${c.name} is ${why} and has no AccessibleLabel${c.props.AccessibleLabel ? ' (it is empty)' : ''}: a screen reader announces it with no name. ` +
+        `Set AccessibleLabel to what it does or asks for ("Search requests", "Close", "Due date").` +
+        (CLICK_SHAPES.test(c.control) ? ' A shape that only repeats the click of a labelled control can leave the tab order instead (TabIndex: =-1).' : '') });
+  }
+  // ---- text contrast ----
+  const WIDTHS = [...new Set([screenWidth, 390])];
+  const constsAt = new Map(WIDTHS.map((w) => [w, evalFormulaConstants(appText, readConstants(appText), w, screenHeight)]));
+  const geoAt = new Map();
+  function gnum(c, k, w) {
+    const key = `${w}|${c.name}.${k}`;
+    if (geoAt.has(key)) return geoAt.get(key);
+    geoAt.set(key, null);
+    const src = c.props[k]?.v;
+    let v = null;
+    if (src !== undefined && src !== '') {
+      const ctx = { consts: constsAt.get(w),
+        parentProp: (name, root) => {
+          if (root === 'App' || !c.parent || c.parent.control === 'Screen') return name === 'Width' ? w : name === 'Height' ? screenHeight : null;
+          if (/^Gallery/i.test(c.parent.control)) { if (name === 'TemplateWidth' || name === 'Width') return gnum(c.parent, 'Width', w); if (name === 'TemplateHeight') return gnum(c.parent, 'TemplateSize', w); }
+          return gnum(c.parent, name, w);
+        },
+        selfProp: (name) => (name === k ? null : gnum(c, name, w)),
+        controlProp: (cn, name) => (byName.has(cn) ? gnum(byName.get(cn), name, w) : null) };
+      try { v = numEval(parseFx(src), ctx); } catch { v = null; }
+    } else if (k === 'X' || k === 'Y') v = 0;
+    else if (k === 'Visible') v = 1;
+    geoAt.set(key, v);
+    return v;
+  }
+  const boxAt = (c, w) => { const b = ['X', 'Y', 'Width', 'Height'].map((k) => gnum(c, k, w)); return b.every((x) => x !== null) ? b : null; };
+  const opts = (c, k) => { const src = c.props[k]?.v; if (!src) return undefined; return colourOptions(safeParse(src), cmap); };
+  const UNKNOWN = () => ({ opts: [{ rgba: null }], sure: false });
+  // What is drawn behind control x at width w: { opts: [{rgba, tag}], sure }. Unknown paint has rgba null.
+  // A sibling whose Visible formula is one the text control (or an ancestor) also requires is shown whenever the text is.
+  const conj = (src) => { const t = String(src || '').replace(/^\s*=/, '').replace(/\s+/g, ' ').trim(); return t ? t.split(/\s*&&\s*|\s+And\s+/) : []; };
+  let shownWith = new Set();
+  function behind(x, w, me, depth = 0) {
+    if (depth > 12) return UNKNOWN();
+    const p = x.parent;
+    let maybes = [];
+    const sibs = p ? (kids.get(p) || []) : [];
+    for (let j = sibs.indexOf(x) - 1; j >= 0; j--) {
+      const sb = sibs[j];
+      if (!PAINTS.test(sb.control) && !(TEXT_CONTROLS.test(sb.control) && sb.props.Fill)) continue;
+      let vis = gnum(sb, 'Visible', w);
+      if (vis === 0) continue;
+      if (vis === null && conj(sb.props.Visible?.v).every((t) => shownWith.has(t))) vis = 1;
+      const b = boxAt(sb, w);
+      const cx = me ? me[0] + me[2] / 2 : null, cy = me ? me[1] + me[3] / 2 : null;
+      const covers = b && me ? (cx >= b[0] && cx <= b[0] + b[2] && cy >= b[1] && cy <= b[1] + b[3]) : null;
+      if (covers === false) continue;
+      const paint = paintOf(sb, w, depth);
+      if (paint === 'clear') continue;
+      if (covers && vis === 1) return { opts: paint.opts.concat(maybes), sure: paint.sure && maybes.length === 0 };
+      maybes = maybes.concat(paint.opts);
+    }
+    const base = parentPaint(p, w, me, depth);
+    return { opts: base.opts.concat(maybes), sure: base.sure && maybes.length === 0 };
+  }
+  function blend(o, ctl, w, depth) {
+    if (o.every((x) => x.rgba[3] >= 1)) return { opts: o, sure: true };
+    const below = behind(ctl, w, boxAt(ctl, w), depth + 1);
+    const out = [];
+    for (const t of o) for (const u of below.opts) out.push({ rgba: t.rgba[3] >= 1 ? t.rgba : u.rgba ? over(t.rgba, u.rgba) : null, tag: t.tag });
+    return { opts: out, sure: below.sure };
+  }
+  function paintOf(sb, w, depth) {
+    if (/^(Image|Classic\/Image|Icon|Classic\/Icon|HtmlViewer|Classic\/HtmlViewer|Button|Classic\/Button|ModernButton)(@|$)/i.test(sb.control)) return UNKNOWN();
+    const o = opts(sb, /^Gallery/i.test(sb.control) && sb.props.TemplateFill ? 'TemplateFill' : 'Fill');
+    if (o === undefined) return /^(Rectangle|Classic\/Rectangle|Circle|Classic\/Circle)(@|$)/i.test(sb.control) ? UNKNOWN() : 'clear';
+    if (!o) return UNKNOWN();
+    if (o.every((x) => x.rgba[3] === 0)) return 'clear';
+    return blend(o, sb, w, depth);
+  }
+  function parentPaint(p, w, me, depth) {
+    if (!p) return { opts: [{ rgba: [255, 255, 255, 1] }], sure: true };
+    if (p.control === 'Screen') { const o = opts(p, 'Fill'); return o === undefined ? { opts: [{ rgba: [255, 255, 255, 1] }], sure: true } : o && o.every((x) => x.rgba[3] >= 1) ? { opts: o, sure: true } : UNKNOWN(); }
+    if (/^(Group|Classic\/Group)(@|$)/i.test(p.control)) return behind(p, w, me, depth + 1);
+    for (const k of /^Gallery/i.test(p.control) ? ['TemplateFill', 'Fill'] : ['Fill']) {
+      const o = opts(p, k);
+      if (o === undefined) continue;
+      if (!o) return UNKNOWN();
+      if (o.every((x) => x.rgba[3] === 0)) continue;
+      return blend(o, p, w, depth);
+    }
+    if (/^Gallery/i.test(p.control) || CONTAINERS.test(p.control)) return behind(p, w, boxAt(p, w), depth + 1);
+    return UNKNOWN();
+  }
+  for (const c of all) {
+    if (!(TEXT_CONTROLS.test(c.control) || (c.props.Color && c.props.Fill && c.props.Text && !/^(Button|ModernButton)(@|$)/i.test(c.control)))) continue;
+    if (hidden(c) || !textOf(c) || /DisplayMode\.Disabled/.test(c.props.DisplayMode?.v || '')) continue;
+    const fg = opts(c, 'Color');
+    const own = opts(c, 'Fill');
+    const skip = (why) => { stats.contrastUnexamined++; findings.push({ level: 'info', code: 'contrast-unexamined', file: c.file, line: c.line, control: c.name, msg: `${c.name}: contrast not examined - ${why}.` }); };
+    if (!fg || own === null) { skip(!c.props.Color ? 'no Color set (the theme default is not known here)' : !fg ? 'Color does not resolve to a colour' : 'Fill does not resolve to a colour'); continue; }
+    const sizeV = gnum(c, 'Size', screenWidth) ?? gnum(c, 'FontSize', screenWidth) ?? (c.props.Size || c.props.FontSize ? null : DEFAULTS[/^Text/i.test(c.control) ? 'Text' : 'Label'].Size);
+    const bold = /FontWeight\.Bold/.test(c.props.FontWeight?.v || '');
+    const need = sizeV === null ? null : sizeV >= 18 || (bold && sizeV >= 14) ? 3 : 4.5;
+    let worst = null, unsure = null, seen = false;
+    shownWith = new Set();
+    for (let a = c; a; a = a.parent) for (const t of conj(a.props.Visible?.v)) shownWith.add(t);
+    for (const w of WIDTHS) {
+      if (gnum(c, 'Visible', w) === 0) continue;
+      seen = true;
+      let bg;
+      if (own && own.every((x) => x.rgba[3] >= 1)) bg = { opts: own, sure: true };
+      else if (own && !own.every((x) => x.rgba[3] === 0)) bg = blend(own, c, w, 0);
+      else bg = behind(c, w, boxAt(c, w));
+      // Pair branches of the same condition; two different conditions cannot be paired from source.
+      const fgTags = new Set(fg.map((x) => x.tag && x.tag.cond)), bgTags = new Set(bg.opts.map((x) => x.tag && x.tag.cond));
+      const shared = [...fgTags].find((t) => t && bgTags.has(t));
+      const crossUnknown = !shared && [...fgTags].some(Boolean) && [...bgTags].some(Boolean);
+      const pairs = [];
+      for (const a of fg) for (const b of bg.opts) {
+        if (shared && a.tag && b.tag && a.tag.cond === shared && b.tag.cond === shared && a.tag.i !== b.tag.i) continue;
+        pairs.push({ fg: a.rgba, bg: b.rgba, r: b.rgba ? contrastRatio(a.rgba[3] < 1 ? over(a.rgba, b.rgba) : a.rgba, b.rgba) : null });
+      }
+      const bad = (x) => x.r !== null && x.r < (need === null ? 3 : need);
+      const fails = pairs.filter(bad);
+      if (bg.sure && !crossUnknown) {
+        if (fails.length) { const f = fails.reduce((a, b) => (a.r < b.r ? a : b)); if (!worst || f.r < worst.r) worst = { ...f, w }; }
+        if (need === null && pairs.some((x) => x.r !== null && x.r >= 3 && x.r < 4.5)) unsure = 'its size does not resolve and a ratio is between 3:1 and 4.5:1';
+      } else if (pairs.length && pairs.every(bad)) {
+        const f = pairs.reduce((a, b) => (a.r < b.r ? a : b)); if (!worst || f.r < worst.r) worst = { ...f, w };
+      } else if (pairs.length && !crossUnknown && pairs.every((x) => x.r !== null && x.r >= (need === null ? 4.5 : need))) {
+        // every backdrop it could have passes: examined, not assumed
+      } else unsure = crossUnknown ? 'its Color and its backdrop depend on different conditions' : pairs.some((x) => x.r === null)
+        ? 'something behind it is an image, a button or a fill that does not resolve' : 'what is behind it depends on geometry or visibility that does not resolve';
+    }
+    if (!seen) continue;
+    if (worst) {
+      stats.contrastExamined++; stats.lowContrast++;
+      findings.push({ level: 'error', code: 'low-contrast', file: c.file, line: c.props.Color?.line || c.line, control: c.name, gallery: !!galleryOf(c),
+        msg: `${c.name}: text ${rgbaText(worst.fg)} on ${rgbaText(worst.bg)} is ${worst.r.toFixed(2)}:1 at ${worst.w} px wide; ` +
+          `${need === 3 ? 'large text needs 3:1' : 'text needs 4.5:1 (3:1 only from 18 pt, or 14 pt bold)'}. Use a darker ink token on light grounds, or a lighter one on dark grounds.` });
+    } else if (unsure) skip(unsure);
+    else stats.contrastExamined++;
   }
   // ---- lists: can the user narrow this gallery? ----
   const inputs = new Set(all.filter((c) => INPUT_CONTROLS.test(c.control)).map((c) => c.name));
@@ -679,7 +964,24 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
 // System choices (record state and status reason, ownership, component state) are not what a user scans a list by.
 const SYSTEM_CHOICES = /^(statecode|statuscode|status|status reason|componentstate|owneridtype|importsequencenumber)$/i;
 const INPUT_CONTROLS = /^(Dropdown|ComboBox|TextInput|Text ?input|Toggle|Checkbox|Radio|DatePicker|ListBox|Slider|Classic\/(Dropdown|ComboBox|TextInput|Toggle|CheckBox|Radio|DatePicker|ListBox|Slider)|ModernDropdown|ModernCombobox|ModernTextInput|ModernToggle|ModernCheckbox|ModernRadio|ModernDatePicker|TabList)(@|$)/i;
+// Inputs that need an AccessibleLabel (the DataField children of a ComboBox are not inputs themselves).
+const A11Y_INPUTS = /^(Dropdown|ComboBox|TextInput|NumberInput|Toggle|Slider|Rating|DatePicker|ListBox|Radio|Classic\/(Dropdown|ComboBox|TextInput|Toggle|DatePicker|ListBox|Slider|Radio|Rating)|ModernDropdown|ModernCombobox|ModernTextInput|ModernNumberInput|ModernToggle|ModernRadio|ModernDatePicker|ModernSlider)(@|$)/i;
+const CLICK_SHAPES = /^(Icon|Classic\/Icon|Image|Classic\/Image|Rectangle|Classic\/Rectangle|Circle|Classic\/Circle|Triangle|Classic\/Triangle|Pentagon|Hexagon|Octagon|Star|Arrow|Shape)(@|$)/i;
+const PAINTS = /^(Rectangle|Classic\/Rectangle|Circle|Classic\/Circle|Image|Classic\/Image|Icon|Classic\/Icon|HtmlViewer|Classic\/HtmlViewer|Button|Classic\/Button|ModernButton|Gallery|GroupContainer|Container|ManualLayoutContainer|HorizontalContainer|VerticalContainer|Form|Classic\/Form|ModernCard)(@|$)/i;
+const CONTAINERS = /^(GroupContainer|Container|ManualLayoutContainer|HorizontalContainer|VerticalContainer|Form|Classic\/Form|ModernCard)(@|$)/i;
 function safeParse(src) { try { return src ? parseFx(src) : null; } catch { return null; } }
+// Text the app writes itself: strings, joined with &, chosen by If/Switch (any condition), or cased.
+function isLiteralText(n) {
+  if (!n) return false;
+  if (n.t === 'str') return true;
+  if (n.t === 'bin' && n.op === '&') return isLiteralText(n.l) && isLiteralText(n.r);
+  if (n.t !== 'call') return false;
+  const f = n.name.toLowerCase();
+  if (f === 'if') return n.args.every((a, k) => (k % 2 === 0 && k < n.args.length - 1) || isLiteralText(a));
+  if (f === 'switch') return n.args.slice(1).every((a, k) => k % 2 === 0 || isLiteralText(a)) && isLiteralText(n.args[n.args.length - 1]);
+  if (['concatenate', 'upper', 'lower', 'proper', 'trim'].includes(f)) return n.args.every(isLiteralText);
+  return false;
+}
 
 // ---------- loading and CLI ----------
 function collect(paths) {
@@ -708,7 +1010,9 @@ function report(res, json) {
   console.log(`\n${stats.files} screen file(s); ${stats.textControls} text control(s), ${stats.bound} bound to data, ${stats.measured} measured` +
     `${unm ? `, ${unm} not measurable` : ''}${stats.unparsed ? `, ${stats.unparsed} formula(s) not parsed` : ''}; ${stats.collections} collection(s) measured; ` +
     `${stats.literalColours} literal colour(s), ${stats.literalFonts} literal font(s); ${stats.galleries} gallery(ies), ` +
-    `${stats.listsWithoutFilter} with no filter, search or grouping (advisory).`);
+    `${stats.listsWithoutFilter} with no filter, search or grouping (advisory); ${stats.literalMeasured} literal text control(s) measured; ` +
+    `${stats.nameChecked} control(s) needing a name, ${stats.unnamed} without one; text contrast: ${stats.contrastExamined} examined, ` +
+    `${stats.lowContrast} below the minimum, ${stats.contrastUnexamined} not examined (colour or backdrop unresolved - not a pass).`);
   console.log('Room is an estimate that errs toward "does not fit"; confirm a borderline case in the running app.');
 }
 
@@ -727,10 +1031,20 @@ function hookMode() {
   const res = analyse(files, { schema });
   // A write-time hook blocks only on what is known: a length guessed from a column name does not block
   // (configure textFitSchema in .claude/hooks/standards.config.json to check those too).
-  const bad = res.findings.filter((f) => f.level === 'error' && path.resolve(f.file) === path.resolve(file) && !(f.guessed && !schema));
-  if (!bad.length) process.exit(0);
-  console.error(`Formatting check failed for ${path.basename(file)} (text fit and theme tokens):\n\n  ` + bad.map((f) => `${f.code}: ${f.msg}`).join('\n  ') +
-    `\n\nSee references/canvas-layout.md, "Long text: the fit rule".`);
+  const mine = res.findings.filter((f) => f.level === 'error' && path.resolve(f.file) === path.resolve(file) && !(f.guessed && !schema));
+  // Two tiers (project-setup.md section 4): a missing accessible name is real but not fatal, and an
+  // existing app can have one on every screen - blocking would get the hook switched off. Note it.
+  const NOTE_ONLY = new Set(['no-accessible-name']);
+  const bad = mine.filter((f) => !NOTE_ONLY.has(f.code));
+  const notes = mine.filter((f) => NOTE_ONLY.has(f.code));
+  if (!bad.length) {
+    if (notes.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext:
+      `Accessibility note for ${path.basename(file)} (not blocking): ` + notes.map((f) => f.msg).join(' | ') +
+      ' Give each an AccessibleLabel, or TabIndex -1 for a purely decorative click target (canvas-layout.md, "Accessible names and contrast").' } }));
+    process.exit(0);
+  }
+  console.error(`Formatting check failed for ${path.basename(file)} (text fit, theme tokens, names and contrast):\n\n  ` + bad.map((f) => `${f.code}: ${f.msg}`).join('\n  ') +
+    `\n\nSee references/canvas-layout.md, "Long text: the fit rule" and "Accessible names and contrast".`);
   process.exit(2);
 }
 
@@ -812,10 +1126,71 @@ function selftest() {
   if (listCode(plain.replace('Items: =Requests', 'Items: =Table({Code: "A"}, {Code: "B"})')).length) fails.push('list: a literal table should not warn');
   if (listCode(plain.replace('Items: =Requests', 'Items: =Search(Requests, locQuery, Title)')).length) fails.push('list: a searched gallery should not warn');
 
+  // ---- accessible names, contrast and literal fit ----
+  // Free-standing controls on a screen: [name, control, {props}] in declaration order (later draws on top).
+  const free = (ctrls, screenProps = {}) => ['Screens:', '  scrA:', ...(Object.keys(screenProps).length ? ['    Properties:', ...Object.entries(screenProps).map(([k, v]) => `      ${k}: ${v}`)] : []),
+    '    Children:', ...ctrls.flatMap(([n, ctl, props]) => [`      - ${n}:`, `          Control: ${ctl}`, '          Properties:', ...Object.entries(props).map(([k, v]) => `            ${k}: ${v}`)])].join('\n');
+  const APP2 = ['App:', '  Properties:', '    Formulas: |-', '      =clrNavy = RGBA(25, 44, 83, 1);', '      clrOnNavy = ColorFade(clrNavy, 0.9);', '      clrInk = RGBA(27, 37, 51, 1);',
+    '      lyW = Max(App.Width - 18, 320);', '      lyPhone = lyW < 700;', '      lyPad = If(lyPhone, 14, 28);', '      lyCols = If(lyPhone, 2, 6);'].join('\n');
+  const expect = (name, text, want, extra) => {
+    const r = analyse([{ path: 'App.pa.yaml', text: APP2 }, { path: 'a.pa.yaml', text }]);
+    const got = [...new Set(r.findings.filter((f) => f.level !== 'info' && !['list-without-filter', 'literal-colour'].includes(f.code)).map((f) => f.code))].sort();
+    if (JSON.stringify(got) !== JSON.stringify([...want].sort())) fails.push(`${name}: expected [${want.join(', ')}], got [${got.join(', ')}]`);
+    if (extra) { const m = extra(r); if (m) fails.push(`${name}: ${m}`); }
+  };
+  const box = { X: '=20', Y: '=20', Width: '=300', Height: '=40', Size: '=11' };
+  // Names: inputs, clickable shapes and text-less buttons need one; text names buttons and labels.
+  expect('name: text input without a label', free([['txtSearch', 'TextInput', { ...box }]]), ['no-accessible-name']);
+  expect('name: text input with a label', free([['txtSearch', 'TextInput', { ...box, AccessibleLabel: '="Search requests"' }]]), []);
+  expect('name: empty label on a combo box', free([['cmbOwner', 'ComboBox', { ...box, AccessibleLabel: '=""' }]]), ['no-accessible-name']);
+  expect('name: clickable icon without a label', free([['icoClose', 'Classic/Icon', { ...box, OnSelect: '=Back()' }]]), ['no-accessible-name']);
+  expect('name: clickable icon with a label', free([['icoClose', 'Classic/Icon', { ...box, OnSelect: '=Back()', AccessibleLabel: '="Close"' }]]), []);
+  expect('name: click pad out of the tab order', free([['recPad', 'Rectangle', { ...box, OnSelect: '=Select(btnOpen)', TabIndex: '=-1', Fill: '=Color.Transparent' }]]), []);
+  expect('name: decorative image', free([['imgBand', 'Image', { ...box, AccessibleLabel: '=""' }]]), []);
+  expect('name: button named by its text', free([['btnSave', 'Button', { ...box, Text: '="Save"', OnSelect: '=Set(x, 1)' }]]), []);
+  expect('name: button with no text', free([['btnGo', 'Button', { ...box, Text: '=""', OnSelect: '=Set(x, 1)' }]]), ['no-accessible-name']);
+  expect('name: hidden input', free([['txtOld', 'TextInput', { ...box, Visible: '=false' }]]), []);
+  // Contrast: grey 150 on the default white screen is 2.96:1, grey 130 is 3.95:1 (fails normal, passes large).
+  expect('contrast: light grey on white', free([['lblHint', 'Label', { ...box, Text: '="Due"', Color: '=RGBA(150, 150, 150, 1)' }]]), ['low-contrast'],
+    (r) => (r.stats.lowContrast === 1 ? null : `lowContrast ${r.stats.lowContrast}`));
+  expect('contrast: mid grey, normal size', free([['lblHint', 'Label', { ...box, Text: '="Due"', Color: '=RGBA(130, 130, 130, 1)' }]]), ['low-contrast']);
+  expect('contrast: mid grey, 18 pt', free([['lblHint', 'Label', { ...box, Text: '="Due"', Color: '=RGBA(130, 130, 130, 1)', Size: '=18' }]]), []);
+  expect('contrast: mid grey, 14 pt bold', free([['lblHint', 'Label', { ...box, Text: '="Due"', Color: '=RGBA(130, 130, 130, 1)', Size: '=14', FontWeight: '=FontWeight.Bold' }]]), []);
+  expect('contrast: token ink on white', free([['lblHint', 'Label', { ...box, Text: '="Due"', Color: '=clrInk' }]]), [], (r) => (r.stats.contrastExamined === 1 ? null : 'not examined'));
+  expect('contrast: screen fill is the ground', free([['lblHint', 'Label', { ...box, Text: '="Due"', Color: '=clrNavy' }]], { Fill: '=clrNavy' }), ['low-contrast']);
+  const header = (color, extra = {}, labelExtra = {}) => free([['recHead', 'Rectangle', { X: '=0', Y: '=0', Width: '=App.Width', Height: '=60', Fill: '=clrNavy', ...extra }],
+    ['lblTitle', 'Label', { X: '=lyPad', Y: '=10', Width: '=400', Height: '=40', Size: '=14', Text: '="Orders"', Color: color, ...labelExtra }]]);
+  expect('contrast: faded token on a navy band', header('=clrOnNavy'), [], (r) => (r.stats.contrastExamined === 1 ? null : 'not examined'));
+  expect('contrast: navy text on a navy band', header('=RGBA(35, 58, 104, 1)'), ['low-contrast']);
+  expect('contrast: a band of unknown height is not a pass', header('=clrOnNavy', { Height: '=CountRows(colRows) * 20' }), [],
+    (r) => (r.stats.contrastUnexamined === 1 && r.stats.contrastExamined === 0 ? null : `examined ${r.stats.contrastExamined}, unexamined ${r.stats.contrastUnexamined}`));
+  expect('contrast: band shown on a tab the label shares', header('=clrOnNavy', { Visible: '=locTab = "a"' }, { Visible: '=locTab = "a"' }), [],
+    (r) => (r.stats.contrastExamined === 1 ? null : 'shared visibility not paired'));
+  expect('contrast: a half-transparent scrim is composited', free([['recScrim', 'Rectangle', { X: '=0', Y: '=0', Width: '=App.Width', Height: '=App.Height', Fill: '=RGBA(0, 0, 0, 0.5)' }],
+    ['lblMsg', 'Label', { ...box, Text: '="Saving"', Color: '=Color.White' }]]), ['low-contrast']);
+  expect('contrast: paired branches of one condition', free([['lblChip', 'Label', { ...box, Text: '="Open"', Fill: '=If(locSel, clrNavy, Color.White)', Color: '=If(locSel, Color.White, clrNavy)' }]]), [],
+    (r) => (r.stats.contrastExamined === 1 ? null : 'paired branches not examined'));
+  expect('contrast: one bad branch is a defect', free([['lblChip', 'Label', { ...box, Text: '="Open"', Fill: '=If(locSel, clrNavy, Color.White)', Color: '=If(locSel, Color.White, Color.White)' }]]), ['low-contrast']);
+  expect('contrast: two different conditions are not knowable', free([['lblChip', 'Label', { ...box, Text: '="Open"', Fill: '=If(locSel, clrNavy, Color.White)', Color: '=If(locHot, Color.White, clrNavy)' }]]), [],
+    (r) => (r.stats.contrastUnexamined === 1 ? null : 'cross-condition pairing should be unexamined'));
+  expect('contrast: colour from data is not examined', free([['lblChip', 'Label', { ...box, Text: '="Open"', Color: '=LookUp(colStage, L = "a").Fg' }]]), [],
+    (r) => (r.stats.contrastUnexamined === 1 && r.stats.contrastExamined === 0 ? null : 'data colour must be unexamined'));
+  // Literal fit: a long hint in a one-line 120 px box clips; a short caption fits; text with data is not literal.
+  const hint = '="Pick the vendor first, then the order lines, then confirm the delivery date."';
+  expect('literal: long hint clips', free([['lblHint', 'Label', { ...box, Width: '=120', Height: '=22', Size: '=10', Text: hint }]]), ['literal-text-overflow']);
+  expect('literal: hint with room', free([['lblHint', 'Label', { ...box, Width: '=600', Height: '=40', Size: '=10', Text: hint }]]), []);
+  expect('literal: If of captions', free([['lblHint', 'Label', { ...box, Width: '=60', Height: '=22', Size: '=10', Text: '=If(locNew, "New order for this vendor", "Edit")' }]]), ['literal-text-overflow']);
+  expect('literal: a count is not literal text', free([['lblN', 'Label', { ...box, Width: '=60', Height: '=22', Size: '=10', Text: '=CountRows(colRows)' }]]), []);
+  // Layout constants from Named Formulas: If on a resolved breakpoint, Mod and RoundDown.
+  const cst = evalFormulaConstants(APP2, new Map(), 1366, 768), cstP = evalFormulaConstants(APP2, new Map(), 390, 844);
+  if (cst.get('lyPad') !== 28 || cstP.get('lyPad') !== 14 || cst.get('lyCols') !== 6) fails.push(`formula constants: lyPad ${cst.get('lyPad')}/${cstP.get('lyPad')}, lyCols ${cst.get('lyCols')}`);
+  if (numEval(parseFx('=Mod(4, lyCols) * 10 + RoundDown(4 / lyCols, 0)'), { consts: cst }) !== 40) fails.push('Mod/RoundDown on constants');
+  if (Math.abs(contrastRatio([255, 255, 255, 1], [0, 0, 0, 1]) - 21) > 0.01) fails.push('contrast ratio of white on black should be 21');
+
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection and 4 list cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast and 4 literal-fit cases decided as expected`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }
