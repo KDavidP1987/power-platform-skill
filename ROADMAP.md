@@ -120,6 +120,49 @@ actually shipped.
   measured at each form factor, with the overlap and format checks extended to every breakpoint.
 - **Approvals in Teams and Outlook** from cloud flows, with the recipient pin kept.
 
+## Gaps found against Microsoft's official skills (evaluated 2026-10-03)
+
+Microsoft publishes eight plugins in `microsoft/power-platform-skills` (canvas, model-driven,
+code apps, Power Pages code sites, Power Automate, mobile, mobile extensions, MCP apps). They
+generate; this skill ships and verifies in a real tenant. Their canvas skill ends at a clean
+compile ("Runtime evaluation: NOT RUN"), with no save, publish or player verification - that is
+this skill's centre. The comparison found these gaps here, highest value first:
+
+- **Work alongside their plugins, and say so.** A "which skill for which job" table in `SKILL.md`
+  and the README: their canvas planner and screen builders (or app builder, code-site and
+  code-app skills) to generate, this skill to schema, ship, verify and guard. Prove the pairing
+  with an evaluation task run three ways (theirs alone, ours alone, both) and publish the result.
+- **Requirements to verification.** Their canvas planner turns a request into a requirement
+  coverage table, action contracts (precondition, event, write set, observable result) and a
+  Given/When/Then test matrix, checked statically. Add the same shape up front here, and generate
+  `canvas-browser.mjs walk` scenarios and `confirm` read-backs from it, so every requested action
+  is performed in the published app, not only traced in source.
+- **Responsive layout with containers.** Their layout rules require one auto-layout root sized to
+  the screen and check reflow, scroll traps, fill portions and minimum sizes. This skill's canvas
+  layout guidance is mostly absolute geometry driven by layout variables. Add the container
+  approach, when to use each, and extend the overlap and format checks to containers (joins the
+  responsive-app item above).
+- **Accessibility and contrast checks in the canvas scripts.** Their QA flags a missing
+  `AccessibleLabel`, low-contrast text, text that does not fit and actions that wrap. Add those
+  findings to `check-canvas-format.mjs` with self-tests.
+- **Power Pages security beyond table permissions.** Their plugin reviews security headers (CSP,
+  clickjacking, cookies), the web application firewall (production sites only), runs the
+  platform's site scan, and audits table permissions against the site's code into one report.
+  Add a release checklist and a permission audit script that reads the site source and the
+  permission records; record which parts a trial site cannot use.
+- **Power Automate run diagnosis.** This skill is strong on authoring and guards (loops,
+  recipients, trigger conditions) and thin on reading runs: run history, the failing action, the
+  failing loop iteration, resubmitting. Document the API route (or their flow MCP server) and the
+  order of diagnosis.
+- **Model-driven apps.** Their app builder creates forms, views, charts, sitemap and roles from a
+  request, and generative pages. Cover where this skill's schema and shared-environment rules
+  apply to it, and verify a model-driven app in the browser the way canvas is verified.
+- **Install and update.** Theirs installs with one command, auto-updates and has a report-issue
+  skill. Add an installer note per agent, a version check that tells the user a newer release
+  exists, and an issue template.
+- **Out of scope, stated rather than built:** code apps, Power Pages code sites (SPA), mobile apps
+  and PCF controls - point to Microsoft's plugins for these.
+
 ## 0.9: stabilise
 
 - Freeze the script interfaces: options, exit codes (0 clean, 1 findings, 2 nothing examined) and

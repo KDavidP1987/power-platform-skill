@@ -11,6 +11,25 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-03
+
+### Added
+
+- `power-pages.md` section 8: use a design skill for the design and this reference for the
+  platform. Recommends the third-party impeccable skill (install commands for Claude Code and other
+  agents, a manual fallback), and how to pair them: `init` for the product and design context, the
+  brand pack as input, impeccable owning the look while this reference owns the platform
+  constraints, then its critique or polish pass and an independent review. A site that followed
+  every platform rule looked like a stock portal until it was redesigned this way.
+- ROADMAP: the gaps found comparing this skill with Microsoft's official Power Platform plugins,
+  highest value first (working alongside them, requirements to verification, container layout,
+  accessibility and contrast checks, Power Pages security review, flow run diagnosis, model-driven
+  apps, install and update), and what is out of scope.
+
+### Changed
+
+- README: how this skill relates to Microsoft's plugins, under Limits.
+
 ## [0.13.0] - 2026-10-03
 
 ### Added
