@@ -11,6 +11,59 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-04
+
+### Added
+
+- `references/orchestration.md`: how to build a whole solution fast and cheaply. Schema and sample
+  data first, then the canvas app, flows and reporting in parallel helper agents (one helper per
+  screen), a lane contract with one owner per shared lock (Studio session, import, model refresh),
+  the lead running the acceptance walks, cost discipline (small lead context, batched checks, bundled
+  tools before new ones, no driver patching mid-build), a hands-off person (decisions only, this
+  build's own connections), browser hygiene, and a single verify-fix-confirm round. Drawn from a
+  measured comparison where a single-thread build took 1.6 times as long and re-read twice the
+  context of a build that delegated screens.
+- `canvas-browser.mjs`: `tabs` (list the held browser's tabs), `tidy` (close blank, new-tab and
+  crashed tabs; `--all`, `--studio`, `--dry-run`; never the last tab), `second-tab` (open the app's
+  edit address in a second tab of the held browser, refuse a new-blank address), `studio-has`
+  (are the named controls on the held Studio tab; exit 6 if not), `dirty` (make Save available
+  after a push left it disabled).
+- Walk steps `viewport: [w, h]` (phone and desktop in one walk), `radio: "<label>"`, and
+  `pick: "<option>", from: "<dropdown>"` for the classic DropDown the current player draws as a
+  button and a list; the scenario linter checks all three.
+- Six UI anchors in `assets/selectors.json` for the new commands.
+- Build tools a measured build had to write for itself mid-run, now bundled (plan by default,
+  `--apply` to write, offline `--selftest`, Python standard library): `seed-data.py` (sample rows,
+  idempotent, cleanup lists unless `--apply`), `deploy-flows.py` (solution flows and this build's
+  own connection references; refuses another prefix's connection), `fabric.py` (deploy items into a
+  workspace folder, run jobs and wait), `reconcile-report.py` (report figures against Dataverse),
+  `pbi-theme.py` (Power BI theme from the app's tokens), and the shared `_ppapi.py`.
+- `assets/templates/fabric-medallion/`: bronze dataflow, silver and gold notebooks, refresh
+  pipeline, Direct Lake model, a one-card report, reconcile checks and a theme example; plus
+  `seed.example.json` and `flows.example.json`.
+
+### Changed
+
+- The impeccable design skill is a **required step**, not a recommendation: `init` before the first
+  screen, tokens and the Power BI report theme from its `DESIGN.md`, `critique` on the published
+  screens at 1440 and 390 px and on the report (`project-setup.md` section 3). A measured build had
+  it installed and never called it, and shipped Power BI's default theme.
+- New rules from the defects both measured builds shipped: wrap names at phone width rather than
+  truncating them; use the width at desktop; one date format; offer an action only in the state that
+  allows it; show "Saving..."; rows open their detail on tap; no build stamp, diagnostics or
+  placeholder dates in front of users; remove the leftover `Screen1`; styled email tables; a report
+  theme from the design, never the default; this build's own connections.
+- `SKILL.md`: ask the person for decisions, never labour; leave the browser tidy; never call a sweep
+  clean that did not cover truncation, both widths and every role.
+- `save`, `publish` and `keys` act on the newest Studio tab (after a push blanks the first one);
+  `close-studio` leaves every Studio tab through Back.
+
+### Fixed
+
+- Leaving the editor picks the frame that holds Back or Leave, not an empty prefetched copy.
+- `check-canvas-overlap.mjs` resolves formula-based named values (`App.Formulas`) at the screen size
+  being checked instead of only literal numbers.
+
 ## [0.17.1] - 2026-10-04
 
 ### Fixed

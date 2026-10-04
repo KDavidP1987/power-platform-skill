@@ -586,6 +586,17 @@ or missed run then sends exactly once and skips nothing, failed sends stay visib
 digest knows who a change was *for* - which a later re-read of `modifiedon` cannot tell, since
 ownership may have moved. Keep the cadence (immediate, daily, weekly) in a settings row.
 
+- **Style every email that carries a table.** A digest built with the *Create HTML table* action
+  and sent as is arrived as an unstyled grid with raw column names and ISO dates. Build the body
+  from a template with inline styles (email clients drop `<style>` blocks): the app's colours and
+  font from `DESIGN.md`, a one-line summary first, readable headers, the app's date format
+  (`formatDateTime(..., 'dd MMM yyyy')`), right-aligned numbers, and a link to the record or the
+  app. Approval requests are the same: the title says what is asked, the details say what the
+  approver needs to decide, and the body says where to respond.
+- **Use this build's own connections.** A flow bound to a connection another project created breaks
+  when that project is torn down. Create the connection and its connection reference for this
+  solution (`scripts/deploy-flows.py`), and name them after the solution.
+
 ## 11. Testing a sending or scheduled flow without mailing anyone
 
 A flow first switched on at go-live has never run. Prove it first:

@@ -41,7 +41,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseYaml, parseFx, flatten, readConstants } from './check-canvas-format.mjs';
+import { parseYaml, parseFx, flatten, readConstants, evalFormulaConstants } from './check-canvas-format.mjs';
 
 // ---------- what a control is ----------
 const TEXTY = /^(Label|Text|Classic\/Label|ModernText|HtmlViewer|HtmlText|Classic\/HtmlViewer)(@|$)/i;
@@ -217,7 +217,7 @@ export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) 
   const stats = { files: 0, controls: 0, compared: 0, resolved: 0, skipped: 0, skipReasons: {}, skippedControls: [], alwaysHidden: 0, pairs: 0, exempt: { exclusive: 0, modal: 0, linked: 0, clickpad: 0 }, exempted: [] };
   const appFile = files.find((f) => /(^|[\\/])App\.pa\.yaml$/i.test(f.path));
   const appText = appFile ? appFile.text : '';
-  const consts = readConstants(appText);
+  const consts = evalFormulaConstants(appText, readConstants(appText), screenWidth, screenHeight);
   const all = [];
   for (const f of files) {
     if (/(^|[\\/])(App|_EditorState)\.pa\.yaml$/i.test(f.path)) continue;

@@ -1,0 +1,60 @@
+table fact_record
+
+	/// Every record, any status. Measures carry a description: it is the report's tooltip and the
+	/// reconcile-report.py check names it.
+	measure 'Records' = COUNTROWS(fact_record)
+		formatString: 0
+
+	/// Records in status Open.
+	measure 'Open Records' = CALCULATE(COUNTROWS(fact_record), fact_record[status] = "Open")
+		formatString: 0
+
+	/// Open records whose due date is before today (business time zone, set in silver).
+	measure 'Overdue Records' = CALCULATE(COUNTROWS(fact_record), fact_record[is_overdue] = 1)
+		formatString: 0
+
+	column record_id
+		dataType: string
+		summarizeBy: none
+		sourceColumn: record_id
+
+	column record_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: record_name
+
+	column status
+		dataType: string
+		summarizeBy: none
+		sourceColumn: status
+
+	column due_on
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+		sourceColumn: due_on
+
+	column is_overdue
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: is_overdue
+
+	column days_overdue
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: days_overdue
+
+	column as_of_date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+		sourceColumn: as_of_date
+
+	partition fact_record = entity
+		mode: directLake
+		source
+			entityName: fact_record
+			schemaName: dbo
+			expressionSource: DatabaseQuery

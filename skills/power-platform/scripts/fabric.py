@@ -1,0 +1,600 @@
+#!/usr/bin/env python3
+"""fabric.py - deploy and run Microsoft Fabric items from files in the repo, inside ONE workspace
+folder, idempotently. The Fabric lane of a build: lakehouses, a Dataverse-to-bronze dataflow,
+silver and gold notebooks, a refresh pipeline, a semantic model and a report.
+
+Usage:
+    python fabric.py items   --workspace WS [--folder NAME] [--type TYPE]
+    python fabric.py deploy  --manifest fabric.json [--only NAME ...] [--apply]
+    python fabric.py run     TYPE NAME --workspace WS --folder NAME [--job-type J] [--apply]
+    python fabric.py run     --manifest fabric.json TYPE NAME [--apply]
+
+Every write is planned first: without --apply, deploy and run print what they WOULD do and send
+nothing but GETs (the client refuses anything else, structurally). Nothing is ever deleted; removing
+Fabric items is an owner step in the portal or in the project's owner-cleanup script.
+
+The manifest (assets/templates/fabric-medallion/fabric.example.json):
+    {
+      "workspace": "<workspace id or display name>",
+      "folder": "<folder display name: the lane; created when missing>",
+      "vars": { "prefix": "app", "orgHost": "yourorg.crm.dynamics.com" },
+      "items": [
+        { "type": "Lakehouse",    "name": "APP_Bronze" },
+        { "type": "Dataflow",     "name": "APP_Bronze_Dataverse", "source": "fabric/dataflow-bronze" },
+        { "type": "Notebook",     "name": "APP_Silver", "source": "fabric/notebooks/silver.py",
+          "lakehouse": "APP_Silver" },
+        { "type": "DataPipeline", "name": "APP_Refresh", "source": "fabric/pipeline/pipeline-content.json" },
+        { "type": "SemanticModel","name": "APP Model",  "source": "fabric/model" },
+        { "type": "Report",       "name": "APP Report", "source": "fabric/report" }
+      ]
+    }
+
+Items deploy in manifest order, so list what others refer to first. "source" is a folder (every file
+under it becomes a definition part at its relative path) or one file (Notebook .py/.ipynb, or the
+pipeline's pipeline-content.json). A Notebook .py becomes a one-cell ipynb bound to "lakehouse" as
+its default lakehouse.
+
+Placeholders in source files are resolved at deploy time:
+    {{workspaceId}}                 the workspace id
+    {{id:<Type>:<Name>}}            an item's id in this folder (deployed earlier in the manifest)
+    {{sqlEndpoint:<Lakehouse>}}     the lakehouse SQL endpoint host (Direct Lake expressions)
+    {{sqlEndpointId:<Lakehouse>}}   the SQL endpoint id
+    {{var:<key>}}                   a value from "vars"
+A placeholder that cannot be resolved stops an --apply before the item is sent.
+
+Safety: items are matched by type and display name INSIDE the folder. An item with the same type and
+name elsewhere in the workspace belongs to someone else: the run refuses (exit 1) instead of taking
+it over. Folders are matched by display name at the workspace root.
+
+Options:
+    --workspace ID|NAME   workspace (or "workspace" in the manifest)
+    --folder NAME         the folder (or "folder" in the manifest)
+    --token-cmd CMD       command printing a token for https://api.fabric.microsoft.com ("{resource}")
+    --token-env NAME      variable holding that token (default FABRIC_TOKEN)
+    --timeout S           run: give up waiting after S seconds (default 3600; the job keeps running)
+    --poll S              run: seconds between status reads (default 15)
+    --selftest            offline tests against a simulated Fabric API
+
+Run job types (default per item type): Notebook RunNotebook, DataPipeline Pipeline, Dataflow
+Execute. A semantic model refresh is not a Fabric job: the gold notebook reframes the model, or use
+the Power BI refresh API.
+
+Exit: 0 done (or planned); 1 a finding (job failed, a name owned outside the folder, an unresolved
+placeholder); 2 cannot run (no token, workspace not found, API error).
+"""
+import argparse
+import base64
+import json
+import os
+import re
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _ppapi import ApiError, Client, FakeTransport, PlanRefused, RESOURCES, get_token  # noqa: E402
+
+BASE = "https://api.fabric.microsoft.com/v1/"
+JOB_TYPES = {"Notebook": "RunNotebook", "DataPipeline": "Pipeline", "Dataflow": "Execute"}
+PH = re.compile(r"\{\{\s*([a-zA-Z]+)(?::([^:}]+))?(?::([^}]+))?\s*\}\}")
+TEMPLATE_TOKEN = re.compile(r"\{(PREFIX|prefix|table|Table)\}")   # left over from a copied template
+TEXT_EXT = (".json", ".pq", ".tmdl", ".pbir", ".pbism", ".py", ".ipynb", ".sql", ".m", ".txt", ".platform", ".yaml", ".yml")
+
+
+class Finding(Exception):
+    pass
+
+
+class Fabric:
+    def __init__(self, client, workspace, folder_name):
+        self.c = client
+        self.ws = self.resolve_workspace(workspace)
+        self.folder_name = folder_name
+        self.folder_id = self.find_folder(folder_name) if folder_name else None
+        self._items = None
+
+    def resolve_workspace(self, ws):
+        if re.match(r"^[0-9a-fA-F-]{36}$", ws or ""):
+            return ws
+        for w in self.c.get_all("workspaces"):
+            if w.get("displayName") == ws:
+                return w["id"]
+        raise ApiError("workspace not found or not visible to this account: %s" % ws)
+
+    def find_folder(self, name):
+        for f in self.c.get_all("workspaces/%s/folders" % self.ws):
+            if f.get("displayName") == name and not f.get("parentFolderId"):
+                return f["id"]
+        return None
+
+    def ensure_folder(self, apply):
+        if self.folder_id or not self.folder_name:
+            return self.folder_id
+        if not apply:
+            print("would create folder %r" % self.folder_name)
+            return None
+        _, _, body = self.c.call("POST", "workspaces/%s/folders" % self.ws, {"displayName": self.folder_name})
+        self.folder_id = body["id"]
+        print("created folder %r %s" % (self.folder_name, self.folder_id))
+        return self.folder_id
+
+    def items(self, refresh=False):
+        if self._items is None or refresh:
+            self._items = self.c.get_all("workspaces/%s/items" % self.ws)
+        return self._items
+
+    def find(self, kind, name):
+        """(item in the folder or None, the same name elsewhere or None)."""
+        mine = other = None
+        for it in self.items():
+            if it.get("type") == kind and it.get("displayName") == name:
+                if self.folder_id and it.get("folderId") == self.folder_id:
+                    mine = it
+                elif not self.folder_name and not it.get("folderId"):
+                    mine = it
+                else:
+                    other = it
+        return mine, other
+
+    def lakehouse_sql(self, item_id):
+        lh = self.c.get("workspaces/%s/lakehouses/%s" % (self.ws, item_id)) or {}
+        sql = (lh.get("properties") or {}).get("sqlEndpointProperties") or {}
+        return sql.get("connectionString"), sql.get("id")
+
+
+def b64(data):
+    return base64.b64encode(data if isinstance(data, bytes) else data.encode("utf-8")).decode("ascii")
+
+
+def notebook_ipynb(src, lakehouse_id, lakehouse_name, ws):
+    meta = {"language_info": {"name": "python"}, "kernel_info": {"name": "synapse_pyspark"},
+            "kernelspec": {"name": "synapse_pyspark", "display_name": "Synapse PySpark"}}
+    if lakehouse_id:
+        meta["dependencies"] = {"lakehouse": {"default_lakehouse": lakehouse_id,
+                                              "default_lakehouse_name": lakehouse_name,
+                                              "default_lakehouse_workspace_id": ws}}
+    return json.dumps({"nbformat": 4, "nbformat_minor": 5, "metadata": meta,
+                       "cells": [{"cell_type": "code", "metadata": {}, "execution_count": None,
+                                  "outputs": [], "source": src.splitlines(keepends=True)}]}, indent=1)
+
+
+def read_parts(root, source):
+    path = os.path.join(root, source)
+    if os.path.isdir(path):
+        out = {}
+        for d, _, files in os.walk(path):
+            for f in sorted(files):
+                full = os.path.join(d, f)
+                rel = os.path.relpath(full, path).replace(os.sep, "/")
+                with open(full, "rb") as fh:
+                    out[rel] = fh.read()
+        return out
+    with open(path, "rb") as fh:
+        return {os.path.basename(path): fh.read()}
+
+
+def resolve(text, fab, vars_, pending, apply):
+    """Replace {{...}} placeholders. Unknown references stay visible in a plan, stop an apply."""
+    missing = []
+
+    def sub(m):
+        kind, a, b = m.group(1), m.group(2), m.group(3)
+        if kind == "workspaceId":
+            return fab.ws
+        if kind == "var":
+            if a in vars_:
+                return str(vars_[a])
+        elif kind == "id" and a and b:
+            it, _ = fab.find(a, b)
+            if it:
+                return it["id"]
+            if (a, b) in pending:
+                missing.append(m.group(0))
+                return "<id of %s %s, created earlier in this run>" % (a, b)
+        elif kind in ("sqlEndpoint", "sqlEndpointId") and a:
+            it, _ = fab.find("Lakehouse", a)
+            if it:
+                host, sid = fab.lakehouse_sql(it["id"])
+                val = host if kind == "sqlEndpoint" else sid
+                if val:
+                    return val
+            if ("Lakehouse", a) in pending:
+                missing.append(m.group(0))
+                return "<%s of %s, created earlier in this run>" % (kind, a)
+        missing.append(m.group(0))
+        return m.group(0)
+
+    left = sorted(set(TEMPLATE_TOKEN.findall(text)))
+    if left:
+        raise Finding("template token(s) not filled in: %s (replace them when copying the template)"
+                      % ", ".join("{%s}" % t for t in left))
+    out = PH.sub(sub, text)
+    if missing and apply:
+        raise Finding("unresolved placeholder(s): %s" % ", ".join(sorted(set(missing))))
+    return out, missing
+
+
+def build_definition(item, root, fab, vars_, pending, apply):
+    kind, src = item["type"], item.get("source")
+    if not src:
+        return None, []
+    raw = read_parts(root, src)
+    parts, missing = {}, []
+    for rel, data in raw.items():
+        if rel.lower().endswith(TEXT_EXT):
+            text, miss = resolve(data.decode("utf-8-sig"), fab, vars_, pending, apply)
+            missing += miss
+            parts[rel] = text
+        else:
+            parts[rel] = data
+    fmt = None
+    if kind == "Notebook":
+        (name, body), = parts.items() if len(parts) == 1 else (None, None)
+        if name is None:
+            raise Finding("Notebook %s: source must be one .py or .ipynb file" % item["name"])
+        if name.endswith(".py"):
+            lh_id = None
+            if item.get("lakehouse"):
+                lh, _ = fab.find("Lakehouse", item["lakehouse"])
+                lh_id = lh["id"] if lh else ("<pending>" if not apply else None)
+                if apply and not lh_id:
+                    raise Finding("Notebook %s: lakehouse %r not found in the folder" % (item["name"], item["lakehouse"]))
+            body = notebook_ipynb(body, lh_id, item.get("lakehouse"), fab.ws)
+        parts = {"notebook-content.ipynb": body}
+        fmt = "ipynb"
+    definition = {"parts": [{"path": p, "payload": b64(c), "payloadType": "InlineBase64"} for p, c in parts.items()]}
+    if fmt:
+        definition["format"] = fmt
+    return definition, missing
+
+
+def cmd_deploy(fab, man, root, only, apply):
+    fab.ensure_folder(apply)
+    pending, bad = set(), 0
+    for item in man.get("items") or []:
+        kind, name = item["type"], item["name"]
+        if only and name not in only:
+            continue
+        if TEMPLATE_TOKEN.search(name):
+            print("REFUSED %s %r: template token not filled in" % (kind, name))
+            bad += 1
+            continue
+        mine, other = fab.find(kind, name)
+        if other and not mine:
+            print("REFUSED %s %r: an item with this name exists outside folder %r (id %s) - it is not this "
+                  "lane's; rename yours" % (kind, name, fab.folder_name, other["id"]))
+            bad += 1
+            continue
+        try:
+            definition, missing = build_definition(item, root, fab, man.get("vars") or {}, pending, apply)
+        except Finding as e:
+            print("REFUSED %s %r: %s" % (kind, name, e))
+            bad += 1
+            continue
+        nparts = len(definition["parts"]) if definition else 0
+        note = (" (placeholders pending: %s)" % ", ".join(sorted(set(missing)))) if missing else ""
+        if not apply:
+            print("would %s %s %r%s%s" % ("update" if mine else "create", kind, name,
+                                          " with %d definition part(s)" % nparts if nparts else "", note))
+            if not mine:
+                pending.add((kind, name))
+            continue
+        if mine:
+            if definition:
+                st, h, _ = fab.c.call("POST", "workspaces/%s/items/%s/updateDefinition" % (fab.ws, mine["id"]),
+                                      {"definition": definition})
+                if st == 202:
+                    fab.c.wait_operation(h)
+                print("updated %s %r %s" % (kind, name, mine["id"]))
+            else:
+                print("ok %s %r %s" % (kind, name, mine["id"]))
+            continue
+        body = {"displayName": name, "type": kind}
+        if fab.folder_id:
+            body["folderId"] = fab.folder_id
+        if definition:
+            body["definition"] = definition
+        st, h, out = fab.c.call("POST", "workspaces/%s/items" % fab.ws, body)
+        if st == 202:
+            fab.c.wait_operation(h)
+        fab.items(refresh=True)
+        mine, _ = fab.find(kind, name)
+        print("created %s %r %s" % (kind, name, mine["id"] if mine else (out or {}).get("id", "?")))
+        if kind == "Lakehouse":
+            wait_sql_endpoint(fab, mine)
+    return 1 if bad else 0
+
+
+def wait_sql_endpoint(fab, item, tries=20):
+    """A new lakehouse's SQL endpoint provisions after the item; Direct Lake models need it."""
+    if not item:
+        return
+    for _ in range(tries):
+        host, _ = fab.lakehouse_sql(item["id"])
+        if host:
+            return
+        fab.c.sleep(15)
+    print("  note: SQL endpoint of %s not ready yet; {{sqlEndpoint:...}} will resolve on a re-run" % item["displayName"])
+
+
+def cmd_run(fab, kind, name, job_type, apply, timeout, poll):
+    mine, other = fab.find(kind, name)
+    if not mine:
+        print("%s %r not found in folder %r%s" % (kind, name, fab.folder_name,
+                                                 " (one exists outside it; not this lane's)" if other else ""))
+        return 2
+    job = job_type or JOB_TYPES.get(kind)
+    if not job:
+        print("no default job type for %s; pass --job-type" % kind)
+        return 2
+    if not apply:
+        print("would run %s %r (%s), job type %s, and wait up to %d s" % (kind, name, mine["id"], job, timeout))
+        return 0
+    st, h, _ = fab.c.call("POST", "workspaces/%s/items/%s/jobs/instances?jobType=%s" % (fab.ws, mine["id"], job), {})
+    loc = h.get("location")
+    if not loc:
+        print("job accepted without a Location header; check the item's run history")
+        return 2
+    t0 = time.time()
+    while True:
+        fab.c.sleep(poll)
+        s = fab.c.get(loc) or {}
+        status = s.get("status")
+        if status not in ("NotStarted", "InProgress", None):
+            took = time.time() - t0
+            reason = s.get("failureReason")
+            print("%s %r %s after %.0f s%s" % (kind, name, status, took,
+                                               (": " + json.dumps(reason)[:2000]) if reason else ""))
+            return 0 if status in ("Completed", "Deduped") else 1
+        if time.time() - t0 > timeout:
+            print("%s %r still %s after %d s; the job keeps running (%s)" % (kind, name, status, timeout, loc))
+            return 1
+
+
+def cmd_items(fab, kind):
+    rows = [i for i in fab.items() if (not kind or i.get("type") == kind)]
+    if fab.folder_name:
+        rows = [i for i in rows if fab.folder_id and i.get("folderId") == fab.folder_id]
+        print("folder %r: %s" % (fab.folder_name, fab.folder_id or "not created yet"))
+    for i in sorted(rows, key=lambda r: (r.get("type", ""), r.get("displayName", ""))):
+        print("%-16s %-40s %s" % (i.get("type"), i.get("displayName"), i.get("id")))
+    print("%d item(s)" % len(rows))
+    return 0
+
+
+def run(argv, transport=None, sleep=None):
+    ap = argparse.ArgumentParser(prog="fabric.py", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
+    ap.add_argument("command", nargs="?", choices=["items", "deploy", "run"])
+    ap.add_argument("args", nargs="*")
+    ap.add_argument("--manifest")
+    ap.add_argument("--workspace")
+    ap.add_argument("--folder")
+    ap.add_argument("--type")
+    ap.add_argument("--only", action="append")
+    ap.add_argument("--job-type")
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--timeout", type=int, default=3600)
+    ap.add_argument("--poll", type=float, default=15)
+    ap.add_argument("--token-cmd")
+    ap.add_argument("--token-env", default="FABRIC_TOKEN")
+    ap.add_argument("--selftest", action="store_true")
+    a = ap.parse_args(argv)
+    if a.selftest:
+        return selftest()
+    if not a.command:
+        ap.print_help()
+        return 2
+    man, root = {}, os.getcwd()
+    if a.manifest:
+        try:
+            with open(a.manifest, encoding="utf-8-sig") as f:
+                man = json.load(f)
+        except (OSError, ValueError) as e:
+            print("cannot read manifest: %s" % e)
+            return 2
+        root = os.path.dirname(os.path.abspath(a.manifest))
+        root = os.path.join(root, man.get("root", "."))
+    ws = a.workspace or man.get("workspace")
+    folder = a.folder or man.get("folder")
+    if not ws:
+        print("pass --workspace or a manifest with \"workspace\"")
+        return 2
+    if a.command == "deploy" and not man:
+        print("deploy needs --manifest")
+        return 2
+    try:
+        if transport:
+            token = "fixture"
+        else:
+            token, _ = get_token(RESOURCES["fabric"], a.token_cmd, a.token_env)
+        writes = a.apply and a.command in ("deploy", "run")
+        fab = Fabric(Client(BASE, token, read_only=not writes, transport=transport, sleep=sleep), ws, folder)
+        if a.command == "items":
+            return cmd_items(fab, a.type)
+        if a.command == "deploy":
+            rc = cmd_deploy(fab, man, root, set(a.only or []), a.apply)
+            if not a.apply:
+                print("plan only: nothing was written. Re-run with --apply.")
+            return rc
+        if len(a.args) != 2:
+            print("run takes TYPE NAME")
+            return 2
+        return cmd_run(fab, a.args[0], a.args[1], a.job_type, a.apply, a.timeout, a.poll)
+    except PlanRefused as e:
+        print("BUG: %s" % e)
+        return 2
+    except ApiError as e:
+        print("cannot run: %s" % e)
+        return 2
+
+
+# --------------------------------------------------------------------------- selftest
+
+def _fake_fabric():
+    import uuid
+    state = {"folders": [{"id": "f-other", "displayName": "Someone Else"}],
+             "items": [{"id": "x-1", "type": "Notebook", "displayName": "APP_Taken", "folderId": "f-other"},
+                       {"id": "x-2", "type": "Report", "displayName": "Loose report"}],
+             "jobs": {}, "defs": {}}
+    t = FakeTransport()
+    t.on("GET", "/v1/workspaces", lambda u, b: {"value": [{"id": "11111111-2222-3333-4444-555555555555",
+                                                           "displayName": "Team Workspace"}]})
+    t.on("GET", "/folders", lambda u, b: {"value": state["folders"]})
+
+    def new_folder(u, b):
+        f = {"id": "f-" + uuid.uuid4().hex[:6], "displayName": b["displayName"]}
+        state["folders"].append(f)
+        return 201, {}, f
+    t.on("POST", "/folders", new_folder)
+    t.on("GET", "/items", lambda u, b: {"value": state["items"]})
+
+    def new_item(u, b):
+        it = {"id": "i-" + uuid.uuid4().hex[:6], "type": b["type"], "displayName": b["displayName"],
+              "folderId": b.get("folderId")}
+        state["items"].append(it)
+        state["defs"][it["id"]] = b.get("definition")
+        if b["type"] == "Report":           # one long-running create, to exercise the LRO path
+            return 202, {"location": "https://api.fabric.microsoft.com/v1/operations/op1", "retry-after": "0"}, None
+        return 201, {}, it
+    t.on("POST", "/items", new_item)
+    t.on("GET", "/operations/op1", lambda u, b: {"status": "Succeeded"})
+    t.on("GET", "/operations/op1/result", lambda u, b: (404, {}, None))
+
+    def upd(u, b):
+        iid = u.split("/items/")[1].split("/")[0]
+        state["defs"][iid] = b["definition"]
+        return 200, {}, None
+    t.on("POST", "/updateDefinition", upd)
+    t.on("GET", "/lakehouses/", lambda u, b: {"properties": {"sqlEndpointProperties": {
+        "connectionString": "abc.datawarehouse.fabric.microsoft.com", "id": "sql-1"}}})
+
+    def job(u, b):
+        iid = u.split("/items/")[1].split("/")[0]
+        return 202, {"location": "https://api.fabric.microsoft.com/v1/jobs/" + iid}, None
+    t.on("POST", "/jobs/instances", job)
+    t.on("GET", "/v1/jobs/", lambda u, b: {"status": state["jobs"].get(u.rsplit("/", 1)[1], "Completed"),
+                                           "failureReason": {"message": "boom"} if state["jobs"].get(u.rsplit("/", 1)[1]) == "Failed" else None})
+    return t, state
+
+
+def selftest():
+    import io
+    import shutil
+    import tempfile
+    failures = []
+
+    def check(name, cond):
+        print("  %s  %s" % ("ok  " if cond else "FAIL", name))
+        if not cond:
+            failures.append(name)
+
+    tmp = tempfile.mkdtemp(prefix="fabric-selftest-")
+    try:
+        os.makedirs(os.path.join(tmp, "fabric", "notebooks"))
+        os.makedirs(os.path.join(tmp, "fabric", "model", "definition"))
+        with open(os.path.join(tmp, "fabric", "notebooks", "silver.py"), "w") as f:
+            f.write("WS = '{{workspaceId}}'\nBRONZE = '{{id:Lakehouse:APP_Bronze}}'\nP = '{{var:prefix}}'\n")
+        with open(os.path.join(tmp, "fabric", "model", "definition", "expressions.tmdl"), "w") as f:
+            f.write('Sql.Database("{{sqlEndpoint:APP_Gold}}", "{{sqlEndpointId:APP_Gold}}")\n')
+        with open(os.path.join(tmp, "fabric", "model", "definition.pbism"), "w") as f:
+            f.write('{"version": "4.0"}')
+        man = {"workspace": "Team Workspace", "folder": "Equipment Lane", "vars": {"prefix": "app"},
+               "items": [{"type": "Lakehouse", "name": "APP_Bronze"},
+                         {"type": "Lakehouse", "name": "APP_Gold"},
+                         {"type": "Notebook", "name": "APP_Silver", "source": "fabric/notebooks/silver.py",
+                          "lakehouse": "APP_Bronze"},
+                         {"type": "SemanticModel", "name": "APP Model", "source": "fabric/model"},
+                         {"type": "Report", "name": "APP Report"}]}
+        mpath = os.path.join(tmp, "fabric.json")
+        with open(mpath, "w") as f:
+            json.dump(man, f)
+
+        def go(t, *args):
+            buf, old = io.StringIO(), sys.stdout
+            sys.stdout = buf
+            try:
+                rc = run(list(args), transport=t, sleep=lambda s: None)
+            finally:
+                sys.stdout = old
+            return rc, buf.getvalue()
+
+        t, state = _fake_fabric()
+        rc, out = go(t, "deploy", "--manifest", mpath)
+        check("plan exits 0", rc == 0)
+        check("plan sends only GETs", t.writes() == [])
+        check("plan names the folder it would create", "would create folder 'Equipment Lane'" in out)
+        check("plan lists every item as a create", out.count("would create ") == 6)
+        check("plan names placeholders that wait for an earlier item", "placeholders pending: {{id:Lakehouse:APP_Bronze}}" in out)
+
+        rc, out = go(t, "deploy", "--manifest", mpath, "--apply")
+        check("apply exits 0", rc == 0, )
+        lane = [f for f in state["folders"] if f["displayName"] == "Equipment Lane"]
+        check("apply creates the folder once", len(lane) == 1)
+        mine = [i for i in state["items"] if lane and i.get("folderId") == lane[0]["id"]]
+        check("apply creates five items in the folder", len(mine) == 5)
+        nb = next(i for i in mine if i["type"] == "Notebook")
+        part = state["defs"][nb["id"]]["parts"][0]
+        nbjson = json.loads(base64.b64decode(part["payload"]).decode())
+        src = "".join(nbjson["cells"][0]["source"])
+        bronze = next(i for i in mine if i["displayName"] == "APP_Bronze")
+        check("notebook placeholders resolved", "11111111-2222-3333-4444-555555555555" in src
+              and bronze["id"] in src and "P = 'app'" in src)
+        check("notebook bound to its default lakehouse",
+              nbjson["metadata"]["dependencies"]["lakehouse"]["default_lakehouse"] == bronze["id"])
+        model = next(i for i in mine if i["type"] == "SemanticModel")
+        parts = {p["path"]: base64.b64decode(p["payload"]).decode() for p in state["defs"][model["id"]]["parts"]}
+        check("model keeps folder-relative part paths", set(parts) == {"definition.pbism", "definition/expressions.tmdl"})
+        check("SQL endpoint placeholders resolved", "abc.datawarehouse.fabric.microsoft.com" in parts["definition/expressions.tmdl"]
+              and "sql-1" in parts["definition/expressions.tmdl"])
+
+        n_before = len(state["items"])
+        rc, out = go(t, "deploy", "--manifest", mpath, "--apply")
+        check("re-run is idempotent (no new items)", rc == 0 and len(state["items"]) == n_before)
+        check("re-run updates definitions in place", "updated Notebook 'APP_Silver'" in out)
+
+        man2 = dict(man, items=[{"type": "Notebook", "name": "APP_Taken", "source": "fabric/notebooks/silver.py"}])
+        with open(mpath, "w") as f:
+            json.dump(man2, f)
+        w0 = len(t.writes())
+        rc, out = go(t, "deploy", "--manifest", mpath, "--apply")
+        check("a name owned outside the folder is refused with exit 1", rc == 1 and "REFUSED" in out)
+        check("a refusal writes nothing", len(t.writes()) == w0)
+
+        man3 = dict(man, items=[{"type": "Notebook", "name": "APP_New", "source": "fabric/notebooks/silver.py"}],
+                    vars={})
+        with open(mpath, "w") as f:
+            json.dump(man3, f)
+        rc, out = go(t, "deploy", "--manifest", mpath, "--apply")
+        check("an unresolved placeholder stops the apply", rc == 1 and "unresolved placeholder" in out
+              and "{{var:prefix}}" in out)
+
+        with open(os.path.join(tmp, "fabric", "notebooks", "raw.py"), "w") as f:
+            f.write("LH = '{{id:Lakehouse:{PREFIX}_Bronze}}'\n")
+        man4 = dict(man, items=[{"type": "Notebook", "name": "APP_Raw", "source": "fabric/notebooks/raw.py"},
+                                {"type": "Notebook", "name": "{PREFIX}_Gold"}])
+        with open(mpath, "w") as f:
+            json.dump(man4, f)
+        rc, out = go(t, "deploy", "--manifest", mpath)
+        check("unfilled template tokens are refused, in names and in files", rc == 1
+              and out.count("template token") == 2)
+
+        rc, out = go(t, "run", "Notebook", "APP_Silver", "--workspace", "Team Workspace", "--folder", "Equipment Lane")
+        check("run without --apply only plans", rc == 0 and "would run" in out and not any("jobs/instances" in u for _, u in t.writes()))
+        rc, out = go(t, "run", "Notebook", "APP_Silver", "--workspace", "Team Workspace", "--folder", "Equipment Lane", "--apply")
+        check("run waits for Completed and exits 0", rc == 0 and "Completed" in out)
+        state["jobs"][nb["id"]] = "Failed"
+        rc, out = go(t, "run", "Notebook", "APP_Silver", "--workspace", "Team Workspace", "--folder", "Equipment Lane", "--apply")
+        check("a failed job exits 1 with its reason", rc == 1 and "boom" in out)
+        rc, out = go(t, "items", "--workspace", "Team Workspace", "--folder", "Equipment Lane")
+        check("items lists the folder only", rc == 0 and "APP_Silver" in out and "Loose report" not in out)
+        rc, out = go(t, "items", "--workspace", "No Such Workspace")
+        check("unknown workspace exits 2", rc == 2)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    print()
+    print("selftest: %s" % ("PASSED" if not failures else "FAILED %d: %s" % (len(failures), ", ".join(failures))))
+    return 0 if not failures else 1
+
+
+if __name__ == "__main__":
+    sys.exit(run(sys.argv[1:]))

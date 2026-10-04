@@ -1,0 +1,33 @@
+{
+  "properties": {
+    "description": "{PREFIX} medallion: Dataverse -> bronze (dataflow) -> silver -> gold + model reframe (notebooks).",
+    "activities": [
+      {
+        "name": "Bronze_from_Dataverse",
+        "type": "RefreshDataflow",
+        "dependsOn": [],
+        "policy": { "timeout": "0.01:00:00", "retry": 1, "retryIntervalInSeconds": 30, "secureOutput": false, "secureInput": false },
+        "typeProperties": {
+          "dataflowId": "{{id:Dataflow:{PREFIX}_Bronze_Dataverse}}",
+          "workspaceId": "{{workspaceId}}",
+          "notifyOption": "NoNotification",
+          "dataflowType": "DataflowFabric"
+        }
+      },
+      {
+        "name": "Silver_transform",
+        "type": "TridentNotebook",
+        "dependsOn": [ { "activity": "Bronze_from_Dataverse", "dependencyConditions": [ "Succeeded" ] } ],
+        "policy": { "timeout": "0.01:00:00", "retry": 0, "retryIntervalInSeconds": 30, "secureOutput": false, "secureInput": false },
+        "typeProperties": { "notebookId": "{{id:Notebook:{PREFIX}_Silver_Transform}}", "workspaceId": "{{workspaceId}}" }
+      },
+      {
+        "name": "Gold_build_and_model_refresh",
+        "type": "TridentNotebook",
+        "dependsOn": [ { "activity": "Silver_transform", "dependencyConditions": [ "Succeeded" ] } ],
+        "policy": { "timeout": "0.01:00:00", "retry": 0, "retryIntervalInSeconds": 30, "secureOutput": false, "secureInput": false },
+        "typeProperties": { "notebookId": "{{id:Notebook:{PREFIX}_Gold_Build}}", "workspaceId": "{{workspaceId}}" }
+      }
+    ]
+  }
+}

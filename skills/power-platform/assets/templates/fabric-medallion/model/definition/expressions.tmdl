@@ -1,0 +1,5 @@
+expression DatabaseQuery =
+		let
+			database = Sql.Database("{{sqlEndpoint:{PREFIX}_Gold}}", "{{sqlEndpointId:{PREFIX}_Gold}}")
+		in
+			database

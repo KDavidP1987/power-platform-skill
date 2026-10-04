@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.17.1](https://img.shields.io/badge/plugin-0.17.1-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.18.0](https://img.shields.io/badge/plugin-0.18.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.17.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.18.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -123,7 +123,7 @@ The method and references need nothing installed. The tools need:
 | Need | For | Notes |
 |---|---|---|
 | **Node 20+** | Hooks, flow linter, browser driver | No npm dependencies for the hooks or the linter |
-| **Python 3** | `ship-canvas.py`, `inspect-artifact.py`, `check-drift.py`, `deploy-tables.py`, `canvas-mcp.py`, `flow-runs.py`, `audit-pages-permissions.py`, `check-published-order.py` | Standard library only |
+| **Python 3** | `ship-canvas.py`, `inspect-artifact.py`, `check-drift.py`, `deploy-tables.py`, `canvas-mcp.py`, `flow-runs.py`, `audit-pages-permissions.py`, `check-published-order.py`, `seed-data.py`, `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `pbi-theme.py` | Standard library only |
 | **.NET 10 SDK** | The canvas authoring server (`canvas-mcp.py`) | Started with `dnx`; nothing else to install |
 | **PowerShell** (optional) | `dv-token.ps1`, owner scripts | Windows PowerShell 5.1 or PowerShell 7 |
 | **Power Platform CLI** (`pac`) | Packing, importing, environment checks | `pac org who` is part of every pre-flight |
@@ -487,6 +487,7 @@ touches it, it points there rather than repeating it.
 
 | Area | Reference | Covers |
 |---|---|---|
+| Whole build | [`orchestration`](skills/power-platform/references/orchestration.md) | Schema and sample data first, then canvas, flows and reporting in parallel helper agents (one per screen); the lane contract and lock owners; cost discipline; decisions-only for the person; browser hygiene; one verify-fix-confirm round |
 | Canvas | [`canvas-shipping`](skills/power-platform/references/canvas-shipping.md) | The ship loop and what each step proves; solution import vs co-authoring push; build stamps; `LoadFromYaml`; Save vs Publish |
 | | [`authoring-sessions`](skills/power-platform/references/authoring-sessions.md) | Studio edit locks, the authoring MCP server, what a live session can and cannot prove |
 | | [`manifest-caches`](skills/power-platform/references/manifest-caches.md) | Why the published app disagrees with Dataverse: cached choice members, column types, entity set names, column lists |
@@ -572,6 +573,11 @@ inputs and harness are in [`evals/`](evals/).
   anything else as unknown, which never counts as a guard. Activation is still the only compile.
 - **`doctor` has not yet been run against Studio in a real tenant.** The portal anchors resolved;
   the Studio half needs a test app.
+- **The 0.18 build tools are tested offline only.** `seed-data.py`, `deploy-flows.py`, `fabric.py`,
+  `reconcile-report.py` and `pbi-theme.py` generalise scripts a measured build wrote and ran in a
+  tenant; the bundled versions pass self-tests against a fake API and are being measured in a full
+  build next. `second-tab`, `studio-has`, `dirty` and the `pick`/`radio` walk steps came from the
+  same build and have not yet run in their bundled form.
 - **Browser selectors track today's player and Studio.** Microsoft changes both. The driver fails
   loudly, with a screenshot and an accessibility snapshot, rather than passing when a selector
   stops matching.
@@ -600,11 +606,16 @@ evals/                          the evaluation tasks, inputs, harness and result
 scripts/                        repo validator and its version-agreement tests
 skills/power-platform/
   SKILL.md                      the method, the non-negotiables, where to look
-  references/                   22 self-contained guides (see Reference library)
+  references/                   23 self-contained guides (see Reference library)
   scripts/ship-canvas.py        the ship pipeline: live baseline, reconcile, stamp, pack, assert
   scripts/check-drift.py        cached app metadata vs live Dataverse, read-only
   scripts/deploy-tables.py      Dataverse schema from a manifest: plan, apply, references, read-back
   scripts/canvas-browser.mjs    Playwright driver, scenario runner and selector doctor
+  scripts/seed-data.py          sample rows from JSON/CSV, idempotent; cleanup lists unless --apply
+  scripts/deploy-flows.py       solution flows and this build's own connection references
+  scripts/fabric.py             Fabric items into a workspace folder; run jobs and wait
+  scripts/reconcile-report.py   report figures against Dataverse, read-only
+  scripts/pbi-theme.py          Power BI theme from the app's tokens
   scripts/inspect-artifact.py   what a solution zip or .msapp really contains
   scripts/lint-flows.mjs        static checks on cloud-flow definitions
   scripts/check-canvas-format.mjs  long data-bound text and theme tokens in canvas source

@@ -1,0 +1,18 @@
+{
+  "_about": "reconcile-report.py checks: each report figure against an independent Dataverse answer. Run after the pipeline and before any screenshot is called evidence.",
+  "org": "https://yourorg.crm.dynamics.com",
+  "workspace": "<workspace id>",
+  "dataset": "{PREFIX} Model",
+  "timezone": "America/New_York",
+  "checks": [
+    { "name": "all records", "dax": "EVALUATE ROW(\"v\", [Records])",
+      "dataverse": { "table": "{prefix}_record" } },
+    { "name": "open records", "dax": "EVALUATE ROW(\"v\", [Open Records])",
+      "dataverse": { "table": "{prefix}_record", "filter": "{prefix}_status eq {choice:{prefix}_record.{prefix}_status:Open}" } },
+    { "name": "overdue records", "dax": "EVALUATE ROW(\"v\", [Overdue Records])",
+      "dataverse": { "table": "{prefix}_record", "filter": "{prefix}_status eq {choice:{prefix}_record.{prefix}_status:Open} and {prefix}_dueon lt {today}" } },
+    { "name": "records by status", "dax": "EVALUATE SUMMARIZECOLUMNS(fact_record[status], \"n\", [Records])",
+      "dataverse": { "table": "{prefix}_record", "groupBy": "{prefix}_status" } },
+    { "name": "as-of date is today", "dax": "EVALUATE ROW(\"d\", MAX(fact_record[as_of_date]))", "expect": "{today}" }
+  ]
+}

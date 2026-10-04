@@ -156,14 +156,25 @@ every screen. Then define the tokens in `App.pa.yaml` and reference only them fr
 literal colour or font. Respect the organisation's own palette and restrictions; the skill prescribes
 neither.
 
-**Use a design skill for the look.** Recommend the third-party impeccable design skill
-(`references/power-pages.md` section 9 has the install commands) and, when it is installed, use it
-here: its `init` writes `PRODUCT.md` and a `DESIGN.md` (who uses the app, what they must get done,
-type scale, palette, spacing, hierarchy), and its `critique` pass reviews the published screens'
-screenshots at both widths. Translate its decisions into `theme.json` and the tokens; this skill
-keeps the constraints a web design skill cannot know (canvas controls, absolute geometry, the fit
-rule, accessible names). It made a stock Power Pages site into a finished one; on canvas it is the
-same pairing, with the output being tokens and screen layouts rather than CSS.
+**Design with the impeccable skill: a required step, not a suggestion.** A build that only had
+the skill installed never called it, and shipped Power BI's default theme. Install the third-party
+impeccable design skill (`references/power-pages.md` section 9 has the commands; ask once, at the
+start) and run it, in this order:
+
+1. `init` before the first screen: `PRODUCT.md` (who uses the app, what they must get done, the
+   usage scene) and `DESIGN.md` (type scale, palette within the organisation's rules, spacing,
+   hierarchy, density). Mode is Operate for an app, Read for a report page.
+2. Translate `DESIGN.md` into `canvas/theme.json`, the tokens in `App.pa.yaml`
+   (`references/canvas-layout.md` section 10) and the Power BI report theme
+   (`scripts/pbi-theme.py`, from `theme.json`; `references/reporting.md` section 4).
+3. Give each screen helper `DESIGN.md` and the tokens, not a free hand.
+4. `critique` on the published screens at 1440 and 390 px and on the report, once, then fix
+   everything it raises in one batch (`references/orchestration.md` section 7).
+
+Record in the hand-back that each step ran (the files it wrote, the critique's score). This skill
+keeps the constraints a web design skill cannot know: canvas controls, absolute geometry, the fit
+rule, accessible names. When the person declines the install, record the decision and still write a
+short `DESIGN.md` by hand before the first screen.
 
 **Ask the same way about lists, messages and documents** - three things that are cheap at the
 design stage and a rework after go-live:

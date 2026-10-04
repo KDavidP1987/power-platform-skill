@@ -591,6 +591,21 @@ relying on `DisplayMode`.
   sort a primary name as text.
 - **Empty totals show 0, not nothing** (`power-fx-and-pa-yaml.md`, section 8), and a data-empty
   feature is not a broken one - publish what is empty before a test round (`browser-verification.md`).
+- **Offer an action only in the state that allows it.** A Lend button stayed active on an asset
+  already on loan and refused after the click. Show the state on the row ("On loan to ... until
+  ..."), and replace the action with the reason, or disable it with the reason printed beside it -
+  never an active button that only says no once pressed.
+- **A save must show that it is saving.** A first save that took 36 seconds showed only a greyed
+  button; testers pressed it again. Set a `varSaving` flag around the write, show "Saving..." (or a
+  spinner) and disable the button while it holds, and clear it in every branch.
+- **Rows open their detail when tapped.** A gallery row that does nothing on tap, with a small arrow
+  as the only target, reads as broken at phone width. Put `OnSelect` on the row template.
+- **Nothing for the developer reaches the user.** No visible build stamps, test diagnostics, record
+  ids or placeholder dates ("2001-12-31" as an empty value). Keep the build stamp on an admin-only
+  label (`references/canvas-shipping.md`, "The build stamp"), blank dates as blank, and remove diagnostic
+  panels before the final ship.
+- **Remove the leftover blank screen** that app creation leaves (`Screen1`) once your own screens
+  exist, and set `App.StartScreen`.
 
 ## 16. Lists: filter, search, group, sort
 

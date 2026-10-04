@@ -1,0 +1,25 @@
+{
+  "_about": "seed-data.py seed file. Sample rows the canvas, flow and report lanes build against, and fixtures acceptance needs (an overdue row, a returned row). Choice values by label, dates relative to today, lookups by the target's key. Mark test rows (here '[SAMPLE]') so cleanupFilter finds what a walk created.",
+  "org": "https://yourorg.crm.dynamics.com",
+  "timezone": "America/New_York",
+  "tables": [
+    {
+      "table": "app_asset", "key": "app_assettag", "cleanup": "restore", "restore": ["app_status"],
+      "rows": [
+        { "app_assettag": "A-01", "app_name": "Laptop 14in", "app_category": "Laptop", "app_status": "Available" },
+        { "app_assettag": "A-02", "app_name": "Monitor 27in", "app_category": "Monitor", "app_status": "On Loan" },
+        { "app_assettag": "A-03", "app_name": "Docking station", "app_category": "Accessory", "app_status": "In Repair" }
+      ]
+    },
+    {
+      "table": "app_loan", "key": "app_borrower", "cleanup": "delete",
+      "cleanupFilter": "startswith(app_borrower,'[SAMPLE]')",
+      "rows": [
+        { "app_borrower": "[SAMPLE] Overdue borrower",
+          "app_asset": { "lookup": "app_asset", "key": "app_assettag", "value": "A-02" },
+          "app_checkedouton": "=today-24", "app_dueon": "=today-10", "app_status": "Open" }
+      ]
+    },
+    { "table": "app_location", "key": "app_name", "csv": "seed/locations.csv" }
+  ]
+}

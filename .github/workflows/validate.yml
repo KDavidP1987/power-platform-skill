@@ -38,6 +38,11 @@ jobs:
       - run: python skills/power-platform/scripts/check-published-order.py --selftest
       - run: python skills/power-platform/scripts/flow-runs.py --selftest
       - run: python skills/power-platform/scripts/audit-pages-permissions.py --selftest
+      - run: python skills/power-platform/scripts/seed-data.py --selftest
+      - run: python skills/power-platform/scripts/deploy-flows.py --selftest
+      - run: python skills/power-platform/scripts/fabric.py --selftest
+      - run: python skills/power-platform/scripts/reconcile-report.py --selftest
+      - run: python skills/power-platform/scripts/pbi-theme.py --selftest
       - run: node skills/power-platform/scripts/contract-to-walk.mjs --selftest
       - run: node skills/power-platform/scripts/setup-harness.mjs --selftest
       - run: node skills/power-platform/scripts/hooks/shared-guard.mjs --selftest

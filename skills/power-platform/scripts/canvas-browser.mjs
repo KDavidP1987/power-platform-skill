@@ -30,6 +30,17 @@
 //   node canvas-browser.mjs publish [--reload-first]  publish the saved app to the player
 //   node canvas-browser.mjs close-studio           leave the editor through Back (frees the lock),
 //                                                  then quit the held browser (frees the profile)
+//   node canvas-browser.mjs tabs                   list the held browser's tabs (Studio, blank, other)
+//   node canvas-browser.mjs tidy [--all] [--studio] [--dry-run]
+//                                                  close blank and error tabs in the held browser; --all
+//                                                  also every non-Studio tab, --studio also older Studio
+//                                                  tabs (left through Back first); the held editor stays
+//   node canvas-browser.mjs second-tab [--expect a,b]  open the app's edit URL in a second tab of the held
+//                                                  browser (it joins the co-authoring session) and wait
+//                                                  for the named controls to render there
+//   node canvas-browser.mjs studio-has <name...>   does the held Studio tab show these control names
+//   node canvas-browser.mjs dirty                  make a harmless edit (a space in the formula bar) so
+//                                                  Save is enabled after a push that left it disabled
 //   node canvas-browser.mjs shot <url> <name>      navigate anywhere, screenshot + aria dump
 //   node canvas-browser.mjs lint <scenario.json>   check a scenario's verbs without a browser
 //   node canvas-browser.mjs confirm <scenario.json> [--since <ISO time>]
@@ -43,6 +54,7 @@
 //        --fresh          delete the player's IndexedDB/Cache Storage before loading (stale build)
 //        --allow-writes   required to walk a scenario that declares "writes": true
 //        --keep-browser   close-studio: release the edit lock but leave the browser running
+//        --expect a,b     second-tab: control names to wait for
 //        --selectors <path>  UI anchor table (default: the skill's assets/selectors.json)
 //        --player-only | --studio-only | --record   doctor: limit the surfaces / write lastVerified dates
 
@@ -141,6 +153,12 @@ const SELECTOR_DEFAULTS = {
   'studio.dataSearch':        { surface: 'studio', kind: 'role', role: 'searchbox', name: '^search$', flags: 'i', check: 'conditional' },
   'studio.dataItemDescription': { surface: 'studio', kind: 'template', value: 'Table {logical}', check: 'conditional' },
   'studio.dataSourceAdded':   { surface: 'studio', kind: 'regex', pattern: 'data source was successfully added|was added to your app', flags: 'i', check: 'conditional' },
+  'studio.canvasRoute':       { surface: 'studio', kind: 'regex', pattern: '/canvas/', flags: '', check: 'required' },
+  'studio.editUrl':           { surface: 'studio', kind: 'regex', pattern: '[?&]action=edit', flags: '', check: 'conditional' },
+  'studio.formulaBar':        { surface: 'studio', kind: 'role', role: 'textbox', name: 'formula', flags: 'i', check: 'conditional' },
+  'studio.formulaEditor':     { surface: 'studio', kind: 'css', value: '.monaco-editor .view-lines', check: 'conditional' },
+  'browser.blankUrl':         { surface: 'portal', kind: 'regex', pattern: '^(about:blank|chrome://new-tab-page|chrome://newtab|edge://newtab|chrome-error://|chrome://crash|edge://crash)', flags: 'i', check: 'conditional' },
+  'player.dropdownOption':    { surface: 'player', kind: 'role', role: 'option', name: '', flags: '', check: 'conditional' },
 };
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // In the skill: assets/selectors.json. Installed into a project by setup-harness.mjs: next to this script.
@@ -618,6 +636,13 @@ async function runSteps(page, frameRef, steps, results) {
     try {
       frame = frameRef.f = await ensureFresh(page, frame);
       if (step.wait) await page.waitForTimeout(Number(step.wait));
+      if (step.viewport) {
+        // Phone and desktop in one walk: the same session, re-laid out at another width.
+        const [vw, vh] = step.viewport;
+        await page.setViewportSize({ width: vw, height: vh });
+        log(tag + 'viewport ' + vw + 'x' + vh);
+        await page.waitForTimeout(Number(step.settle || 2500));
+      }
 
       if (step.click) {
         // Prefer the control over its caption text: a caption is a separate text node and can
@@ -671,6 +696,37 @@ async function runSteps(page, frameRef, steps, results) {
         if (after !== step.select) throw new Error('dropdown[' + idx + '] still reads "' + after + '"');
         log(tag + 'select dropdown[' + idx + '] "' + before + '" -> "' + after + '"');
         results.passed.push('select:' + step.select);
+        await page.waitForTimeout(Number(step.settle || 3000));
+      }
+
+      if (step.radio !== undefined) {
+        const r = frame.getByRole('radio', { name: String(step.radio), exact: true }).first();
+        await r.waitFor({ state: 'visible', timeout: 30000 });
+        await r.click({ timeout: 15000 });
+        await page.waitForTimeout(600);
+        if (!(await r.isChecked().catch(() => true))) throw new Error('radio "' + step.radio + '" is not checked after the click');
+        log(tag + 'radio "' + step.radio + '"  OK');
+        results.passed.push('radio:' + step.radio);
+        await page.waitForTimeout(Number(step.settle || 2000));
+      }
+
+      if (step.pick !== undefined) {
+        // A classic DropDown in the current player is a button + listbox, not a <select>: open it
+        // by its accessible name, then choose the option by role (gallery text cannot match).
+        const opener = frame.getByRole('button', { name: step.from, exact: false }).first();
+        await opener.waitFor({ state: 'visible', timeout: 30000 });
+        await opener.click({ timeout: 15000 });
+        await page.waitForTimeout(800);
+        // The listbox can render inside the app frame or, as a popup layer, on the outer page.
+        const optRole = SEL['player.dropdownOption'].role;
+        let opt = frame.getByRole(optRole, { name: String(step.pick), exact: true });
+        if (await opt.count() === 0) opt = page.getByRole(optRole, { name: String(step.pick), exact: true });
+        await opt.first().click({ timeout: 15000 });
+        await page.waitForTimeout(800);
+        const now = await opener.getAttribute('aria-label').catch(() => '') || await opener.innerText().catch(() => '');
+        if (!String(now).includes(String(step.pick))) throw new Error('dropdown "' + step.from + '" reads "' + now + '" after choosing "' + step.pick + '"');
+        log(tag + 'pick "' + step.pick + '" from "' + step.from + '"  OK');
+        results.passed.push('pick:' + step.pick);
         await page.waitForTimeout(Number(step.settle || 3000));
       }
 
@@ -749,7 +805,7 @@ async function runSteps(page, frameRef, steps, results) {
 }
 
 // --- scenario lint (no browser) ---------------------------------------------------------------
-const VERBS = new Set(['wait', 'click', 'nth', 'type', 'into', 'blur', 'select', 'fillCell', 'value', 'expect', 'absent',
+const VERBS = new Set(['wait', 'viewport', 'radio', 'pick', 'from', 'click', 'nth', 'type', 'into', 'blur', 'select', 'fillCell', 'value', 'expect', 'absent',
   'scroll', 'clipcheck', 'deadclick', 'overlapcheck', 'measurefont', 'capture', 'mustBeClean', 'settle', 'note']);
 export function lintScenario(sc) {
   const errs = [];
@@ -762,7 +818,13 @@ export function lintScenario(sc) {
     if ('type' in st && !st.into) errs.push(`step ${i + 1}: "type" needs "into" (placeholder or label)`);
     if ('fillCell' in st && !('value' in st)) errs.push(`step ${i + 1}: "fillCell" needs "value"`);
     if ('nth' in st && !(Number.isInteger(st.nth) && st.nth >= 0)) errs.push(`step ${i + 1}: "nth" is a 0-based integer`);
-    if (!keys.some((k) => !['nth', 'into', 'blur', 'value', 'mustBeClean', 'settle', 'note'].includes(k))) errs.push(`step ${i + 1}: no action or assertion`);
+    if ('viewport' in st && !(Array.isArray(st.viewport) && st.viewport.length === 2 && st.viewport.every((n) => Number.isInteger(n) && n >= 200 && n <= 4000))) {
+      errs.push(`step ${i + 1}: "viewport" is [width, height] in pixels, for example [390, 844]`);
+    }
+    if ('pick' in st && !st.from) errs.push(`step ${i + 1}: "pick" needs "from" (the dropdown's accessible name)`);
+    if ('from' in st && !('pick' in st)) errs.push(`step ${i + 1}: "from" is only used with "pick"`);
+    if ('radio' in st && !(typeof st.radio === 'string' && st.radio.trim())) errs.push(`step ${i + 1}: "radio" is the option's visible label`);
+    if (!keys.some((k) => !['nth', 'into', 'from', 'blur', 'value', 'mustBeClean', 'settle', 'note'].includes(k))) errs.push(`step ${i + 1}: no action or assertion`);
   });
   if (!(sc.steps || []).some((st) => st.expect || st.absent || st.deadclick || st.clipcheck || st.overlapcheck)) {
     errs.push('scenario asserts nothing (no expect/absent/deadclick/clipcheck/overlapcheck) - it would pass vacuously');
@@ -910,17 +972,25 @@ function selectorTableProblems() {
 
 function selftest() {
   const good = { name: 'ok', steps: [{ click: 'Approvals', settle: 3000 }, { type: 'x', into: 'Search' }, { expect: 'Saved' }, { deadclick: 'scr' }] };
-  const bad = { name: 'a/b', steps: [{ clik: 'Approvals' }, { type: 'x' }, { nth: 1 }, { click: 'Open', nth: -1 }] };
+  const bad = { name: 'a/b', steps: [{ clik: 'Approvals' }, { type: 'x' }, { nth: 1 }, { click: 'Open', nth: -1 },
+    { viewport: [390] }, { pick: 'Laptop' }, { from: 'Type' }, { radio: '' }] };
+  const goodPhone = { name: 'phone', steps: [{ viewport: [390, 844] }, { pick: 'Laptop', from: 'Asset type' }, { radio: 'Approved' }, { clipcheck: 'scr' }] };
   const goodWrite = { name: 'edit-then-revert', writes: true, restore: 'revert-edit', steps: [{ fillCell: 0, value: '7.5' }, { expect: 'Saved' }],
     confirm: [{ entitySet: 'app_timeentries', filter: "app_name eq 'TEST-1'", expect: { app_hours: 7.5 }, count: 1 }] };
   const badWrite = { name: 'edit', writes: true, steps: [{ fillCell: 0, value: '7.5' }, { expect: 'Saved' }] };
   const badConfirm = { name: 'c', steps: [{ expect: 'x' }], confirm: [{ entitySet: 'bad set', filter: '', expect: {}, colour: 1 }, { entitySet: 'app_x', filter: 'a eq 1' },
     { entitySet: 'app_x', filter: 'a eq 1', absent: true, expect: { a: 1 } }] };
   const absentOnly = { name: 'w', writes: true, restore: 'r', steps: [{ expect: 'x' }], confirm: [{ entitySet: 'app_x', filter: 'a eq 1', absent: true }] };
-  const g = [...lintScenario(good), ...lintScenario(goodWrite)];
+  const g = [...lintScenario(good), ...lintScenario(goodWrite), ...lintScenario(goodPhone)];
   const b = [...lintScenario(bad), ...lintScenario(badWrite), ...lintScenario(badConfirm), ...lintScenario(absentOnly)];
   const want = ['file-name safe', 'unknown verb', 'needs "into"', 'no action', '0-based', 'asserts nothing', 'no "restore"', 'no "confirm"',
-    'entity set name', '"filter" is required', 'unknown key', 'object of column', 'asserts nothing: give', 'cannot be combined'];
+    'entity set name', '"filter" is required', 'unknown key', 'object of column', 'asserts nothing: give', 'cannot be combined',
+    '[width, height]', '"pick" needs "from"', 'only used with "pick"', 'visible label'];
+  // Tab hygiene: what tidy treats as blank, as the Studio editor, and as anything else.
+  const T = [['about:blank', 'blank'], ['chrome-error://chromewebdata/', 'blank'], ['edge://newtab/', 'blank'],
+    ['https://make.powerapps.com/e/E/canvas/?action=edit&app-id=x', 'studio'], ['https://make.powerapps.com/e/E/apps', 'other'],
+    ['https://apps.powerapps.com/play/e/E/a/A', 'other']];
+  const tabs = T.filter(([u, want]) => tabKind(u) !== want).map(([u, want]) => u + ' -> ' + tabKind(u) + ' (want ' + want + ')');
   // judgeRows: values, choice labels, counts, absence and freshness.
   const t0 = Date.parse('2026-01-01T12:00:00Z');
   const row = (o) => ({ modifiedon: '2026-01-01T12:00:30Z', ...o });
@@ -939,9 +1009,9 @@ function selftest() {
   const judged = J.filter(([, w, n]) => w.length !== n).map(([k, w]) => k + ' -> ' + JSON.stringify(w));
   const missing = want.filter((w) => !b.some((e) => e.includes(w)));
   const sel = selectorTableProblems();
-  const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
-         : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}]`);
+  const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0 && tabs.length === 0;
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+         : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}], tabs -> [${tabs.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }
 
@@ -1158,8 +1228,143 @@ async function readSaveStamp(studio, frame) {
   return null;
 }
 
+// What a tab is, by URL alone: a Studio editor, a blank/new-tab/crashed page, or anything else.
+function tabKind(url) {
+  if (rx('browser.blankUrl').test(url)) return 'blank';
+  if (rx('portal.makerUrl').test(url) && rx('studio.canvasRoute').test(url)) return 'studio';
+  return 'other';
+}
+const isStudioTab = (p) => tabKind(p.url()) === 'studio';
+
 function studioPage(ctx) {
-  return ctx.pages().find((p) => rx('portal.makerUrl').test(p.url())) || ctx.pages()[0];
+  // The NEWEST Studio tab: after a push that blanked the first tab, a second tab joins the held
+  // session and is the one that renders (and saves) the pushed document.
+  return ctx.pages().filter(isStudioTab).pop() || ctx.pages().filter((p) => rx('portal.makerUrl').test(p.url())).pop() || ctx.pages()[0];
+}
+
+// --- tab hygiene ------------------------------------------------------------------------------
+// Every tab a run leaves open is one more for the person to close, and an extra Studio tab
+// competes for the edit lock. `tabs` lists them; `tidy` closes what nothing is using.
+const allPages = (browser) => browser.contexts().flatMap((c) => c.pages());
+
+async function cmdTabs() {
+  const { browser, ctx } = await attach();
+  const held = studioPage(ctx);
+  const pages = allPages(browser);
+  for (const [i, p] of pages.entries()) {
+    const kind = tabKind(p.url());
+    const title = await p.title().catch(() => '?');
+    log('  ' + String(i + 1).padStart(2) + '  ' + (p === held && kind === 'studio' ? 'HELD  ' : kind.padEnd(6)) + '  ' + (title || '(no title)').slice(0, 60) + '  |  ' + p.url().slice(0, 110));
+  }
+  log('  ' + pages.length + ' tab(s); ' + pages.filter((p) => tabKind(p.url()) === 'blank').length + ' blank. `tidy` closes the blank ones.');
+  await browser.close(); // detaches; the browser stays up
+}
+
+async function cmdTidy() {
+  const { browser, ctx } = await attach();
+  const dry = has('dry-run');
+  const held = studioPage(ctx);
+  const pages = allPages(browser);
+  const close = [];
+  for (const p of pages) {
+    const kind = tabKind(p.url());
+    if (kind === 'blank') close.push([p, 'blank']);
+    else if (kind === 'other' && has('all')) close.push([p, 'not Studio (--all)']);
+    else if (kind === 'studio' && p !== held && has('studio')) close.push([p, 'older Studio tab (--studio)']);
+  }
+  // Closing the last tab quits the browser (and ends a held `studio` process): keep one.
+  if (close.length && close.length === pages.length) close.shift();
+  let closed = 0;
+  for (const [p, why] of close) {
+    const url = p.url();
+    if (!dry && tabKind(url) === 'studio') {
+      p.on('dialog', async (d) => { await d.accept().catch(() => {}); });
+      const r = await leaveEditor(p);
+      if (r.stillEditing) { log('  kept         ' + url.slice(0, 110) + '  (still in the editor; leave it by hand)'); continue; }
+    }
+    if (!dry) await p.close({ runBeforeUnload: false }).catch(() => {});
+    closed++;
+    log('  ' + (dry ? 'would close ' : 'closed ') + why.padEnd(28) + url.slice(0, 110));
+  }
+  log('  ' + (dry ? 'dry run: ' + closed + ' would close, ' + (pages.length - closed) : closed + ' closed, ' + allPages(browser).length) + ' open'
+    + (held && isStudioTab(held) ? '; held Studio tab kept: ' + held.url().slice(0, 90) : '') + '.');
+  await browser.close();
+}
+
+async function framesText(page) {
+  let text = '';
+  for (const f of page.frames()) { try { text += '\n' + await f.evaluate(() => (document.body ? document.body.innerText : '')); } catch { /* detached */ } }
+  return text;
+}
+
+// After a push blanked the Studio tab, a SECOND tab on the same edit URL joins the held
+// co-authoring session and renders the pushed document; `save`, `publish` and `keys` then use it
+// (the newest Studio tab). Never opened on a new-blank URL: that would create another app.
+async function cmdSecondTab() {
+  const { browser, ctx } = await attach();
+  const first = ctx.pages().find(isStudioTab);
+  const url = APP.appId && APP.environmentId ? STUDIO_URL : first && rx('studio.editUrl').test(first.url()) ? first.url() : null;
+  if (!url) { log('  no app in the config and no Studio tab on an edit URL - nothing to join.'); await browser.close(); process.exitCode = 1; return; }
+  const names = String(flag('expect', '') || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const page = await ctx.newPage();
+  log('  second Studio tab: ' + url);
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  const t0 = Date.now(); let text = ''; let title = '';
+  while (Date.now() - t0 < Number(flag('wait-for', 240000))) {
+    await page.waitForTimeout(5000);
+    for (const f of page.frames().filter((x) => rx('studio.authoringFrameUrl').test(x.url()))) await dismissBubbles(f).catch(() => 0);
+    title = await page.title().catch(() => '');
+    text = await framesText(page);
+    if (rx('studio.titleReadOnly').test(title)) break;
+    if (rx('studio.titleEditing').test(title) && names.every((n) => text.includes(n))) break;
+  }
+  for (const n of names) log('  ' + (text.includes(n) ? 'FOUND   ' : 'MISSING ') + n);
+  log('  title: ' + title + (rx('studio.titleReadOnly').test(title) ? '  !! READ-ONLY: this tab did not join the editing session' : ''));
+  await capture(page, 'studio-second-tab');
+  if (names.some((n) => !text.includes(n))) process.exitCode = 6;
+  log('  save / publish / keys now use this tab; close-studio leaves every Studio tab; tidy --studio closes the older one.');
+  await browser.close();
+}
+
+// Is a pushed control actually in the editor? Read the held tab's tree view and canvas text.
+async function cmdStudioHas() {
+  const names = argv.slice(1).filter((a, i, all) => !a.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--')));
+  if (!names.length) { log('usage: canvas-browser.mjs studio-has <controlName...>'); process.exitCode = 1; return; }
+  const { browser, ctx } = await attach();
+  const studio = studioPage(ctx);
+  const text = await framesText(studio);
+  for (const n of names) log('  ' + (text.includes(n) ? 'FOUND   ' : 'MISSING ') + n);
+  log('  tab: ' + await studio.title().catch(() => '?'));
+  if (names.some((n) => !text.includes(n))) process.exitCode = 6;
+  await browser.close();
+}
+
+// After a co-authoring push, Studio can hold the document with Save disabled (nothing "changed"
+// locally). A space appended to the selected property's formula, committed with Tab, makes the
+// buffer dirty without changing what the formula means; then `save`.
+async function cmdDirty() {
+  const { browser, ctx } = await attach();
+  const studio = studioPage(ctx);
+  if (rx('studio.titleReadOnly').test(await studio.title())) { log('  READ-ONLY - nothing can be saved from here.'); await browser.close(); process.exitCode = 3; return; }
+  for (const f of studio.frames()) {
+    if (!rx('studio.authoringFrameUrl').test(f.url())) continue;
+    try {
+      if (await locsOf(f, 'studio.formulaBar')[0].count() === 0) continue;
+      await f.locator(css('studio.formulaEditor')).first().click({ timeout: 10000 });
+      await studio.keyboard.press('End');
+      await studio.keyboard.type(' ');
+      await studio.waitForTimeout(800);
+      await studio.keyboard.press('Tab');
+      await studio.waitForTimeout(1500);
+      log('  formula bar edited (a trailing space) - now `save`, and read "Saved: <time>".');
+      await browser.close();
+      return;
+    } catch { /* detached or not this frame */ }
+  }
+  log('  !! no formula bar found in any authoring frame - select a control first.');
+  await capture(studio, 'dirty-not-found');
+  process.exitCode = 4;
+  await browser.close();
 }
 
 // Studio's editor is an authoring.*.powerapps.com iframe; there can be two (one a prefetch with
@@ -1266,9 +1471,16 @@ async function cmdPublish() {
 // those controls were seen, so `doctor` can report them, and whether the lock is still held.
 async function leaveEditor(page) {
   const seen = { back: false, leave: false, preview: false };
-  const editor = () => page.frames().find((f) => rx('studio.authoringFrameUrl').test(f.url()));
+  // Two authoring frames can exist (one a prefetch with no DOM): use the one holding Back or Leave.
+  const editor = async () => {
+    const fs = page.frames().filter((f) => rx('studio.authoringFrameUrl').test(f.url()));
+    for (const f of fs) {
+      try { if (await f.locator(css('studio.backButton')).count() || await f.locator(css('studio.leaveButton')).count()) return f; } catch { /* detached */ }
+    }
+    return fs[0];
+  };
   for (let i = 0; i < 4; i++) {
-    const ed = editor();
+    const ed = await editor();
     if (!ed) break;
     const preview = ed.locator(css('studio.closePreview')).first();
     if (await preview.count() > 0) { seen.preview = true; await preview.click({ timeout: 12000 }).catch(() => {}); log('  exited preview'); await page.waitForTimeout(6000); continue; }
@@ -1293,10 +1505,16 @@ async function cmdCloseStudio() {
   // Exit preview first; accept the DOM "Leave" modal; a native beforeunload dialog follows, so
   // the handler is registered BEFORE the click.
   const { browser, ctx } = await attach();
-  const page = ctx.pages().find((p) => rx('portal.makerUrl').test(p.url()));
-  if (!page) { log('no Studio page on the debug port'); await browser.close(); return; }
-  page.on('dialog', async (d) => { await d.accept().catch(() => {}); });
-  const { stillEditing } = await leaveEditor(page);
+  // Every Studio tab: a push can leave a blank first tab plus a second tab that joined the session.
+  const pages = ctx.pages().filter(isStudioTab).reverse();
+  if (!pages.length) { log('no Studio page on the debug port'); await browser.close(); return; }
+  let stillEditing = false;
+  for (const [k, page] of pages.entries()) {
+    page.on('dialog', async (d) => { await d.accept().catch(() => {}); });
+    const r = await leaveEditor(page);
+    log('  tab ' + (k + 1) + '/' + pages.length + ': ' + (r.stillEditing ? 'still in the editor' : 'left the editor'));
+    if (r.stillEditing) stillEditing = true;
+  }
   log(stillEditing ? '  !! STILL IN THE EDITOR - close it by hand before the next compile or import' : '  edit lock released');
   // Releasing the edit lock does not release the PROFILE: the `studio` process keeps the browser
   // (and its persistent profile) open, so the next launch fails "profile is already in use".
@@ -1665,6 +1883,7 @@ async function cmdDoctor() {
     mark('studio.authoringFrameUrl', authoring.length ? 'ok' : 'stale',
       authoring.length ? authoring.length + ' frame(s) matched' : 'no frame URL matched; frames: ' + st.frames().map((f) => { try { return new URL(f.url()).host; } catch { return '?'; } }).join(', '));
     mark('portal.studioUrl', authoring.length ? 'ok' : 'stale', authoring.length ? 'the editor loaded' : 'the editor never appeared');
+    mark('studio.canvasRoute', rx('studio.canvasRoute').test(st.url()) ? 'ok' : 'stale', 'Studio settled on ' + st.url().split('?')[0]);
     if (!authoring.length) {
       const text = await st.locator('body').innerText().catch(() => '');
       if (/invalid|not found|does not exist|don't have access|not authorized|error/i.test(text)) {
@@ -1735,7 +1954,8 @@ async function cmdShot() {
 }
 
 const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
-  keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm };
+  keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot,
+  tabs: cmdTabs, tidy: cmdTidy, 'second-tab': cmdSecondTab, 'studio-has': cmdStudioHas, dirty: cmdDirty, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm };
 
 if (argv.includes('--selftest')) selftest();
 else if (!commands[cmd]) {
@@ -1744,6 +1964,7 @@ else if (!commands[cmd]) {
   log('  confirm <scenario.json> [--since ISO]   run only the scenario\'s Dataverse checks');
   log('  create --name N --solution-id GUID [--form-factor tablet|phone] [--layout responsive|fixed] [--tables a,b] [--publish] [--close]');
   log('  studio | keys [combo] | save | publish [--reload-first] | close-studio [--keep-browser] | shot <url> <name>');
+  log('  tabs | tidy [--all] [--studio] [--dry-run] | second-tab [--expect a,b] | studio-has <name...> | dirty');
   log('  doctor [--player-only|--studio-only] [--record]   are the UI anchors in assets/selectors.json still valid?\n');
   log('  config:  ' + (CONFIG_PATH || '(none found - pass --config or create scripts/canvas-app.json)'));
   if (APP.appId) log('  app:     ' + (APP.appName || '') + '  ' + APP.appId);

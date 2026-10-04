@@ -632,7 +632,16 @@ App:
 - **Respect the organisation's own palette and restrictions.** The skill prescribes no brand and
   bans no colour on anyone's behalf; the project's `standards.config.json` holds any colour rule the
   organisation has.
-- **Let a design skill choose, and this reference constrain.** With the impeccable design skill
-  installed (`references/project-setup.md` section 3), take the palette, type scale, spacing and
-  hierarchy from its `DESIGN.md`, express them as the tokens above, and run its `critique` on the
-  published screens' screenshots at desktop and phone width before calling the look done.
+- **Let the design skill choose, and this reference constrain.** Run impeccable `init` before
+  the first screen (`references/project-setup.md` section 3; it is a required step), take the
+  palette, type scale, spacing and hierarchy from its `DESIGN.md`, express them as the tokens above,
+  and run its `critique` on the published screens' screenshots at desktop and phone width before
+  calling the look done.
+- **Use the width.** A desktop layout that is one stretched column at 1440 px reads as unfinished:
+  at desktop width show a table (several columns) or list plus detail side by side; at phone width
+  stack them.
+- **Wrap names at phone width; do not cut them.** An asset or person name truncated with an
+  ellipsis at 390 px failed acceptance in a measured build even though a tooltip existed (there is
+  no hover on a phone). Give the row a flexible height or a second line for the name.
+- **One date format across the app**, defined once as a token (`fmtDate = "dd mmm yyyy"`), used by
+  every label, gallery and email.

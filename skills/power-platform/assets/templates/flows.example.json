@@ -1,0 +1,15 @@
+{
+  "_about": "deploy-flows.py manifest. Connection references carry this build's prefix and point at connections the signed-in person made for THIS build; list them with: python scripts/deploy-flows.py --manifest flows/flows.json connections --env <environment id>.",
+  "org": "https://yourorg.crm.dynamics.com",
+  "solution": "AppSolution",
+  "prefix": "app",
+  "connectionReferences": [
+    { "logicalName": "app_sharedcommondataserviceforapps", "api": "shared_commondataserviceforapps", "connection": "<connection id>" },
+    { "logicalName": "app_sharedoffice365", "api": "shared_office365", "connection": "<connection id>" },
+    { "logicalName": "app_sharedapprovals", "api": "shared_approvals", "connection": "<connection id>" }
+  ],
+  "flows": [
+    { "name": "APP Request Approval", "file": "app-request-approval.json", "activate": true },
+    { "name": "APP Overdue Digest", "file": "app-overdue-digest.json", "activate": true }
+  ]
+}

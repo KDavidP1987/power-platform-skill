@@ -254,6 +254,21 @@ repo's design doc. Keep the Demo source filterable end to end.
 - **Name the refresh identity.** A dataflow on one person's Dataverse connection stops when that
   account does. Record it as an open decision until a service account or workspace identity owns it.
 
+**The report's look comes from the design, never from the default theme.** Power BI's default
+palette (with purple and magenta series) shipped in a measured build because nothing replaced it.
+Generate the report theme from the app's tokens with `scripts/pbi-theme.py --tokens canvas/theme.json
+--report fabric/report --apply` (data colours, text classes, background; it refuses purple,
+violet, indigo and magenta, contrast under 4.5:1 and unset values), and check it by screenshot. One page reads top to
+bottom: the headline figures in cards, then the trend, then the breakdown, then the detail table;
+titles state the question each visual answers; the same date format as the app. Run impeccable
+`critique` on the report screenshot with the canvas screens.
+
+**Build the reporting lane in parallel with the app** once schema and sample data exist
+(`references/orchestration.md`): `scripts/fabric.py` deploys folder, notebooks, pipeline, model and
+report from `assets/templates/fabric-medallion/` (plan by default, `--apply` to write), runs the
+pipeline and waits; `scripts/reconcile-report.py` runs each figure's DAX and compares it with an
+independent Dataverse count.
+
 **Licensing, before promising a report to leaders:** viewing a Power BI report needs a Pro (or
 Premium Per User) licence for each viewer unless the workspace sits on a capacity of F64 / P1 or
 larger, where free-licence viewers can open what is SHARED with them (share the report or an app,
