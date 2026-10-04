@@ -11,6 +11,37 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-10-04
+
+The 0.19.1 Stop gate produced a report, not compliance: in a live test the agent listed the missing
+design and planning steps in its summary and ended. A gate at the end arrives when the work is
+already done in the wrong order. This release gates the order of work as it happens.
+
+### Added
+
+- **Order gates before tools** (`plugin-gate.mjs --pre`, PreToolUse on Write, Edit, MultiEdit, Bash
+  and PowerShell, in `hooks/hooks.json`):
+  - *Design before screens.* A new app's screen `.pa.yaml` (not `App.pa.yaml` or `_EditorState`) is
+    refused, by a file tool or a shell write, until `DESIGN.md` and `design/prototype.html` exist;
+    the denial tells the agent to invoke impeccable. An established app (three or more screens) is
+    not held up, so maintenance work elsewhere is unaffected.
+  - *Plan before schema.* `deploy-tables.py` (not `--plan`) is refused until the DOD plan exists
+    when dod is installed, otherwise until `docs/acceptance-contract.md` is filled in (the bare
+    template does not count).
+- Live test, headless, with only the brief "write the Loans list screen": the screen write was
+  denied, and the agent then invoked dod (plan), impeccable (PRODUCT.md, prototype, DESIGN.md),
+  wrote the screen from the prototype and recorded a design critique, in that order.
+
+### Changed
+
+- The Stop gate blocks up to three times per session (counted per session id in the temp folder)
+  instead of once, then lets the stop through with the gaps on stderr, so it cannot trap a session.
+  Its reason now says to carry out the steps, not to list them.
+- Shell writes are judged by their target: a read such as `cat Src/*.pa.yaml 2>/dev/null` (denied in
+  the first live run) passes; a redirect into a screen file or a write command naming one does not.
+- SKILL.md "Start here" and the README hooks section describe the plugin gates.
+- 39 self-test cases for the gate (was 17), in CI.
+
 ## [0.19.1] - 2026-10-04
 
 Test D (the fourth measured build) followed the brief and skipped every design and planning step

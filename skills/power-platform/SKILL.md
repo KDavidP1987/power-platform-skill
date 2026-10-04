@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.19.1"
+  version: "0.19.2"
 ---
 
 # Power Platform development
@@ -54,8 +54,12 @@ app or a multi-part build, before any table, screen or flow:
    `docs/design-critique.md`, the independent reviewer into `docs/review.md`, one fix batch, the
    seed restored, then the hand-back.
 
-The plugin's Stop hook blocks a hand-back on a canvas project that is missing DESIGN.md, the
-prototype, the critique, the DOD plan (when dod is installed) or the reviewer's record.
+The plugin enforces this order with its own hooks, no project setup needed. Before a tool runs, it
+refuses a new app's screen `.pa.yaml` until DESIGN.md and `design/prototype.html` exist, and a table
+deploy until the plan exists (the DOD plan when dod is installed, otherwise a filled
+`docs/acceptance-contract.md`). At the end it blocks the hand-back, up to three times, while the
+critique, the plan or the reviewer's record is missing. A denial is an instruction: do the named
+step with its tool, then retry; do not work around it.
 
 ## The non-negotiables
 

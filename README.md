@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.19.1](https://img.shields.io/badge/plugin-0.19.1-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.19.2](https://img.shields.io/badge/plugin-0.19.2-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.19.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.19.2 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -87,7 +87,7 @@ states **what it proves and what it does not**.
 | **The method** | `SKILL.md`: ten non-negotiables, a ten-step working loop, and a routing table into the references. Loaded whenever a task touches Power Apps, Power Automate, Dataverse or a solution. |
 | **21 references** | Self-contained guides loaded only when a task needs them: canvas shipping, manifest caches, Power Fx and `.pa.yaml`, controls, layout, browser verification, Dataverse, the Web API, security, data migration, flows, reporting (in-app and Power BI), CI/CD pipelines, audits, project setup and more. |
 | **Six tools** | A Dataverse schema deployer, a ship pipeline, a metadata drift checker, an artifact inspector, a cloud-flow linter, and a Playwright driver for Studio and the published player. Each proves it can fail with `--selftest`. |
-| **Four hooks** | Claude Code hooks that stop known compile-killers at the moment a file is written, plus a session pre-flight and an end-of-turn audit. |
+| **Hooks** | Plugin gates that hold a new build to its order (plan before schema, design before screens, critique and review before hand-back) with no setup, plus project hooks that stop known compile-killers at the moment a file is written, a session pre-flight and an end-of-turn audit. |
 | **Templates** | Hook settings, config examples, an example browser scenario, and state, decisions and dependency templates. |
 
 ## Install
@@ -465,7 +465,15 @@ tenant secrets; the live check stays a manual step.
 
 ## Hooks
 
-Copy `skills/power-platform/scripts/hooks/` to `.claude/hooks/` and merge
+**Plugin gates** (`hooks/hooks.json`, active whenever the plugin is enabled, silent outside a Power
+Platform build, `"pluginGate": false` in `scripts/canvas-app.json` turns them off):
+
+| Gate | Event | Does |
+|---|---|---|
+| `plugin-gate.mjs --pre` | PreToolUse | Refuses a new app's screen `.pa.yaml` (file tool or shell write) until `DESIGN.md` and `design/prototype.html` exist, and `deploy-tables.py` (not `--plan`) until the DOD plan or a filled acceptance contract exists. An established app (three or more screens) is not held up |
+| `plugin-gate.mjs` | Stop | Blocks the hand-back while the design, prototype, screenshot critique, DOD plan or reviewer's record is missing, or a token is written to a file or lakehouse; up to three times per session, then lets the stop through with the gaps on stderr |
+
+**Project hooks**: copy `skills/power-platform/scripts/hooks/` to `.claude/hooks/` and merge
 `assets/settings.snippet.json` into `.claude/settings.json`.
 
 | Hook | Event | Does |
