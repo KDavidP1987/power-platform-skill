@@ -120,6 +120,23 @@
         { "kind": "css", "value": "button:has-text(\"Got it\")" }
       ],
       "purpose": "Dismisses first-run and teaching bubbles that swallow command-bar clicks", "check": "conditional", "lastVerified": "0.1.0"
-    }
+    },
+    "portal.newAppUrl": {"surface": "studio", "kind": "template", "value": "https://make.powerapps.com/e/{environmentId}/canvas/?action=new-blank&form-factor={formFactor}&name={name}&solution-id={solutionId}", "purpose": "Opens Studio on a new blank app in a solution (what the portal's New > App > Canvas app dialog opens)", "check": "conditional", "lastVerified": "0.17.0"},
+    "portal.appIdInUrl": {"surface": "studio", "kind": "regex", "pattern": "app-id=(?:%2F|/)providers(?:%2F|/)Microsoft\\.PowerApps(?:%2F|/)apps(?:%2F|/)([0-9a-f-]{36})", "flags": "i", "purpose": "The new app's id, which appears in Studio's URL after the first save", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.appSettings": {"surface": "studio", "kind": "role", "role": "menuitem", "name": "^app settings$", "flags": "i", "purpose": "Opens the Settings dialog from the left rail", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.settingsDisplayTab": {"surface": "studio", "kind": "role", "role": "tab", "name": "^display$", "flags": "i", "purpose": "Settings tab holding App layout", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.settingsUpdatesTab": {"surface": "studio", "kind": "role", "role": "tab", "name": "^updates$", "flags": "i", "purpose": "Settings tab holding Coauthoring", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.appLayout": {"surface": "studio", "kind": "role", "role": "combobox", "name": "^app layout$", "flags": "i", "purpose": "Responsive or Fixed (formerly Scale to fit)", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.listOption": {"surface": "studio", "kind": "css", "value": "[role=\"option\"]", "purpose": "Options of an open Settings dropdown (they carry no accessible name; matched by text)", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.coauthoringSwitch": {"surface": "studio", "kind": "role", "role": "switch", "name": "^coauthoring$", "flags": "i", "purpose": "Off on a new app; the authoring server needs it on", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.saveRefreshUpdate": {"surface": "studio", "kind": "css", "value": "[role=\"alertdialog\"] button:has-text(\"Update\")", "purpose": "Confirms 'Save and refresh' after the Coauthoring switch (the dialog is aria-hidden, so no role query)", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.closeSettings": {"surface": "studio", "kind": "role", "role": "button", "name": "^close( settings)?$", "flags": "i", "purpose": "Closes the Settings dialog", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.addData": {"surface": "studio", "kind": "role", "role": "menuitem", "name": "^add data$", "flags": "i", "purpose": "Command bar Add data", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.dataSearch": {"surface": "studio", "kind": "role", "role": "searchbox", "name": "^search$", "flags": "i", "purpose": "Add data search; matches display names only", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.dataItemDescription": {"surface": "studio", "kind": "template", "value": "Table {logical}", "purpose": "Part of each Add data result's accessible description that names its logical table", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.dataSourceAdded": {"surface": "studio", "kind": "regex", "pattern": "data source was successfully added|was added to your app", "flags": "i", "purpose": "Confirmation that a data source was added", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.welcomeSkip": {"surface": "studio", "kind": "css", "value": "[role=\"dialog\"]:has-text(\"Welcome to Power Apps Studio\") button:has-text(\"Skip\")", "purpose": "Dismisses the welcome dialog a new app or fresh profile opens on (its overlay blocks every click)", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.modernSwitch": {"surface": "studio", "kind": "role", "role": "switch", "name": "^modern controls and themes$", "flags": "i", "purpose": "Modern controls (create --modern); off on a new app in some tenants", "check": "conditional", "lastVerified": "0.17.0"},
+    "studio.welcomeDontShow": {"surface": "studio", "kind": "css", "value": "[role=\"dialog\"]:has-text(\"Welcome to Power Apps Studio\") input[type=\"checkbox\"]", "purpose": "'Don't show me this again' on the welcome dialog (it returns after every refresh otherwise)", "check": "conditional", "lastVerified": "0.17.0"}
   }
 }

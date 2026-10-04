@@ -11,6 +11,32 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-04
+
+### Added
+
+- `canvas-browser.mjs create`: the agent creates the canvas app itself instead of asking the person.
+  New blank app in the solution, first save (which creates it), app id written to
+  `scripts/canvas-app.json`, layout (Responsive or Fixed), Coauthoring on (`--modern` for modern
+  controls), tables added by logical name, save, optional publish, then Back or hold Studio for the
+  authoring server. Measured end to end in a tenant in about two minutes.
+- Seventeen UI anchors for it in `assets/selectors.json` (selftest keeps them in step).
+
+### Fixed
+
+- The driver falls back to Edge when Chrome hands every automated launch to the running Chrome
+  ("Opening in existing browser session"); Edge then signed in through the Windows account with no
+  prompt.
+- The "Welcome to Power Apps Studio" dialog, which blocks every click and returns after each
+  refresh, is dismissed (Skip, and "Don't show me this again").
+- A failed command exits instead of leaving the browser and its profile held.
+
+### Changed
+
+- `canvas-shipping.md`, `project-setup.md` section 3, `browser-verification.md` sections 3
+  and 11, `first-run.md` sections 12 and 13 and `SKILL.md`: creating the app is the browser's
+  work, not a human step; Coauthoring is off on a new app and lives under Settings > Updates > New.
+
 ## [0.16.0] - 2026-10-04
 
 ### Added

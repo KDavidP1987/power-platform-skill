@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.16.0"
+  version: "0.17.0"
 ---
 
 # Power Platform development
@@ -103,6 +103,10 @@ user unproven.
    the tokens (`references/project-setup.md` section 3). Asked for after ten screens, the theme is
    a rebuild. Recommend the impeccable design skill for the look (install it when the person
    agrees); when it is installed, use it to set the design and to critique the published screens.
+   **Create the app yourself**: `scripts/canvas-browser.mjs create` makes a new blank app in the
+   solution, turns Coauthoring on and adds the tables, in about two minutes. Studio-only steps are
+   the browser's work, not the person's (`references/canvas-shipping.md`, "Creating a new canvas
+   app").
 3. **Build in source.** Edit `.pa.yaml`, solution XML, or flow JSON in the repo. Hooks check each
    write for the compile-killers in `references/power-fx-and-pa-yaml.md`. **When the hooks are not
    wired in the project, run the checks yourself before you finish** - a YAML comment or an
@@ -192,7 +196,7 @@ than carrying an id. Run any of them with `--help`.
 
 | Tool | Use |
 |---|---|
-| `scripts/canvas-browser.mjs` | Playwright driver for the maker portal and the published player: `login`, `check`, `play`, `walk <scenario.json>`, `studio`, `save`, `publish`, `close-studio`, `shot`, `doctor`, `confirm`. `--fresh` clears the player's cached build, `--trace` records `$batch` traffic, `--channel` picks Chrome, Edge or bundled Chromium. A scenario that writes must declare a `restore` and `confirm` checks: after the steps the walk reads the rows back over the Web API (token from `dataverseTokenCommand` in the app config) and fails unless they hold the expected values and changed during this run. `expect` also finds `Notify()` banners, which the player draws outside the app frame. `lint` checks a scenario without a browser. Every UI anchor it depends on is in `assets/selectors.json`; `doctor` checks them against a live, signed-in session (exit 0 all resolve, 9 stale, 2 cannot verify - never a pass offline). Needs `npm i playwright`. |
+| `scripts/canvas-browser.mjs` | Playwright driver for the maker portal and the published player: `login`, `check`, `create` (a new blank app in the solution, Coauthoring on, tables added by logical name), `play`, `walk <scenario.json>`, `studio`, `save`, `publish`, `close-studio`, `shot`, `doctor`, `confirm`. `--fresh` clears the player's cached build, `--trace` records `$batch` traffic, `--channel` picks Chrome, Edge or bundled Chromium (falls back to Edge when Chrome will only open in the running session). A scenario that writes must declare a `restore` and `confirm` checks: after the steps the walk reads the rows back over the Web API (token from `dataverseTokenCommand` in the app config) and fails unless they hold the expected values and changed during this run. `expect` also finds `Notify()` banners, which the player draws outside the app frame. `lint` checks a scenario without a browser. Every UI anchor it depends on is in `assets/selectors.json`; `doctor` checks them against a live, signed-in session (exit 0 all resolve, 9 stale, 2 cannot verify - never a pass offline). Needs `npm i playwright`. |
 | `scripts/inspect-artifact.py` | Opens a solution zip or `.msapp` and reports what is really inside: root components vs built metadata, security roles, canvas `LoadFromYaml`, build stamp, data-source count, `DatabaseReferences` vs `DataSources.json`, marker search in the half that runs. Python 3 standard library only. |
 | `scripts/check-drift.py` | Compares a canvas app's cached Dataverse metadata with the live environment, read-only: tables, entity set names (every cached copy), columns the formulas use, column types, choice members in both caches, lookup navigation names, and `<DatabaseReferences>` vs `DataSources.json`. Each drift names what breaks in the published app and the fix. `--dump` / `--offline` run it in CI without a tenant. Exit 2 is never a pass. Python 3 standard library only. |
 | `scripts/deploy-tables.py` | Dataverse schema from a JSON manifest (`assets/tables.example.json`): publisher, solution, tables, columns (text, memo, whole number, decimal, currency, yes/no, date, date and time, choice, autonumber, file), lookups, publish, then every table owned by another solution that a lookup pulled in WITH its schema turned back into a reference, then a read-back of every table, column, option and lookup. `--plan` prints every change and writes nothing. Idempotent; never renames, retypes or deletes; choice options append-only; a manifest error is refused before any call. Exit 0 deployed and read back, 1 conflict or missing on read-back, 2 could not run. Python 3 standard library only. |

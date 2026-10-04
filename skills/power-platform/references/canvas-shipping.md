@@ -60,16 +60,38 @@ and `OnStart` smoke test of a built `.msapp`.)
 
 ### Creating a new canvas app: Studio, inside the solution, settings first
 
-pac and `.pa.yaml` can edit and ship an app but cannot create one.
+pac and `.pa.yaml` can edit and ship an app but cannot create one; Studio creates it on its first
+save. **Do this yourself through the browser - it is not a step for the person:**
 
-1. Create the app in Studio with the form factor the layout assumes (for example tablet 1366x768).
+```bash
+node scripts/canvas-browser.mjs create --name "<App name>" --solution-id <solution GUID> \
+  --tables <prefix>_table1,<prefix>_table2 [--form-factor tablet] [--layout responsive] [--modern] --close
+```
+
+It opens Studio on a new blank app in the solution, saves it (which creates it), records the app id
+in `scripts/canvas-app.json`, sets the layout, turns Coauthoring on, adds each table by its
+**logical** name, saves and leaves through Back (or holds Studio open without `--close`, ready for
+the authoring server). Measured in a tenant end to end in about two minutes. What it handles, so a
+hand-driven attempt knows too: the portal dialog only opens
+`/canvas/?action=new-blank&form-factor=tablet&name=<name>&solution-id=<id>`; a "Welcome to Power Apps
+Studio" dialog blocks every click until Skip, and returns after each refresh; Studio sometimes keeps
+the new-blank URL after the first save, and a refresh then opens a second blank app of the same name
+("Didn't save: This name already exists") - reopen the saved app by id first; Add data search
+matches display names only, and two tables can share one, so pick the result whose accessible
+description reads "Table <logical name>"; the id comes from the URL or the new `canvasapps` row.
+Ask the person only when no browser can sign in (`browser-verification.md` section 3).
+
+The settings it applies, and why they matter when done by hand:
+
+1. Create the app with the form factor the layout assumes (for example tablet 1366x768).
 2. Save it **into the solution** (Solutions > your solution > New > App), not as a loose app.
 3. Record its app id in the identity config.
 4. Turn on **modern controls** (Settings > Updates, "Modern controls and themes"; sometimes under
    Preview). When off, the manifest reads `fluentv9controls: false` and every modern control name
    fails to bind. Turning it on changes default properties: free on a blank app, a re-style after
    ten screens.
-5. Turn on **co-authoring** (Settings > Updates > Preview > Collaborative editing). Until it is
+5. Turn on **co-authoring** (Settings > Updates > New > Coauthoring; older Studio builds list it
+   under Preview as Collaborative editing). It is **off on a new app**. Until it is
    on, the authoring server's `connect` fails with "Coauthoring is not enabled for this app", and
    no Power Fx is ever compiled. It is not visible in the package, so no script can check it -
    re-check it after toggling other settings, which is when it tends to get lost.

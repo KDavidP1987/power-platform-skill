@@ -18,6 +18,10 @@
 // Usage:
 //   node canvas-browser.mjs login                  sign in once (headed; MFA included)
 //   node canvas-browser.mjs check                  is the saved profile still signed in
+//   node canvas-browser.mjs create --name N --solution-id GUID [--tables a,b] [--layout responsive]
+//                                                  create a blank canvas app IN the solution: first save,
+//                                                  layout, Coauthoring on, data sources by logical name,
+//                                                  save; writes appId to the config; holds Studio open
 //   node canvas-browser.mjs play [--screen NAME]   open the PUBLISHED app, capture, report console
 //   node canvas-browser.mjs walk <scenario.json>   PERFORM a task and assert the result
 //   node canvas-browser.mjs studio                 open Studio in EDIT mode and hold it open
@@ -75,7 +79,8 @@ const flag = (name, fallback = null) => {
   return i === -1 ? fallback : (argv[i + 1] ?? true);
 };
 const has = (name) => argv.includes('--' + name);
-const CHANNEL = String(flag('channel', 'chrome'));
+let CHANNEL = String(flag('channel', 'chrome'));
+const CHANNEL_GIVEN = has('channel');
 const log = (...a) => console.log(...a);
 
 // --- UI anchors ------------------------------------------------------------------------------
@@ -93,6 +98,9 @@ const SELECTOR_DEFAULTS = {
   'portal.playerUrl':         { surface: 'player', kind: 'template', value: 'https://apps.powerapps.com/play/e/{environmentId}/a/{appId}', check: 'required' },
   'portal.studioUrl':         { surface: 'studio', kind: 'template', check: 'required',
     value: 'https://make.powerapps.com/e/{environmentId}/canvas/?action=edit&app-id=/providers/Microsoft.PowerApps/apps/{appId}' },
+  'portal.newAppUrl':         { surface: 'studio', kind: 'template', check: 'conditional',
+    value: 'https://make.powerapps.com/e/{environmentId}/canvas/?action=new-blank&form-factor={formFactor}&name={name}&solution-id={solutionId}' },
+  'portal.appIdInUrl':        { surface: 'studio', kind: 'regex', pattern: 'app-id=(?:%2F|/)providers(?:%2F|/)Microsoft\\.PowerApps(?:%2F|/)apps(?:%2F|/)([0-9a-f-]{36})', flags: 'i', check: 'conditional' },
   'player.controlAttribute':  { surface: 'player', kind: 'attribute', value: 'data-control-name', check: 'required' },
   'player.consentAllow':      { surface: 'player', kind: 'role', role: 'button', name: '^allow$', flags: 'i', check: 'conditional' },
   'player.staleBanner':       { surface: 'player', kind: 'text', pattern: 'old version of this app', flags: 'i', check: 'conditional' },
@@ -118,6 +126,21 @@ const SELECTOR_DEFAULTS = {
   'studio.gotIt':             { surface: 'studio', kind: 'anyOf', check: 'conditional', anyOf: [
     { kind: 'role', role: 'button', name: '^got it$', flags: 'i' },
     { kind: 'css', value: 'button:has-text("Got it")' }] },
+  'studio.welcomeSkip':       { surface: 'studio', kind: 'css', value: '[role="dialog"]:has-text("Welcome to Power Apps Studio") button:has-text("Skip")', check: 'conditional' },
+  'studio.welcomeDontShow':   { surface: 'studio', kind: 'css', value: '[role="dialog"]:has-text("Welcome to Power Apps Studio") input[type="checkbox"]', check: 'conditional' },
+  'studio.appSettings':       { surface: 'studio', kind: 'role', role: 'menuitem', name: '^app settings$', flags: 'i', check: 'conditional' },
+  'studio.settingsDisplayTab': { surface: 'studio', kind: 'role', role: 'tab', name: '^display$', flags: 'i', check: 'conditional' },
+  'studio.settingsUpdatesTab': { surface: 'studio', kind: 'role', role: 'tab', name: '^updates$', flags: 'i', check: 'conditional' },
+  'studio.appLayout':         { surface: 'studio', kind: 'role', role: 'combobox', name: '^app layout$', flags: 'i', check: 'conditional' },
+  'studio.listOption':        { surface: 'studio', kind: 'css', value: '[role="option"]', check: 'conditional' },
+  'studio.modernSwitch':      { surface: 'studio', kind: 'role', role: 'switch', name: '^modern controls and themes$', flags: 'i', check: 'conditional' },
+  'studio.coauthoringSwitch': { surface: 'studio', kind: 'role', role: 'switch', name: '^coauthoring$', flags: 'i', check: 'conditional' },
+  'studio.saveRefreshUpdate': { surface: 'studio', kind: 'css', value: '[role="alertdialog"] button:has-text("Update")', check: 'conditional' },
+  'studio.closeSettings':     { surface: 'studio', kind: 'role', role: 'button', name: '^close( settings)?$', flags: 'i', check: 'conditional' },
+  'studio.addData':           { surface: 'studio', kind: 'role', role: 'menuitem', name: '^add data$', flags: 'i', check: 'conditional' },
+  'studio.dataSearch':        { surface: 'studio', kind: 'role', role: 'searchbox', name: '^search$', flags: 'i', check: 'conditional' },
+  'studio.dataItemDescription': { surface: 'studio', kind: 'template', value: 'Table {logical}', check: 'conditional' },
+  'studio.dataSourceAdded':   { surface: 'studio', kind: 'regex', pattern: 'data source was successfully added|was added to your app', flags: 'i', check: 'conditional' },
 };
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // In the skill: assets/selectors.json. Installed into a project by setup-harness.mjs: next to this script.
@@ -200,6 +223,14 @@ async function launch(opts) {
       args,
     });
   } catch (e) {
+    // On some managed machines Chrome hands EVERY automated launch to the person's running Chrome
+    // ("Opening in existing browser session"), even with a brand-new profile directory. Edge is
+    // unaffected and present on every Windows machine: fall back to it unless a channel was given.
+    if (!CHANNEL_GIVEN && CHANNEL === 'chrome' && /Opening in existing browser session/i.test(e.message)) {
+      log('  Chrome would only open inside the running Chrome session here - using Edge instead (--channel msedge).');
+      CHANNEL = 'msedge';
+      return launch(opts);
+    }
     // A persistent profile can be held by only one Chrome. `close-studio --keep-browser` (or a
     // `studio` process still running in the background) keeps it; deleting Singleton* files
     // inside the profile did not help when tried. Recreate the profile with `login` instead.
@@ -1067,6 +1098,18 @@ async function cmdStudio() {
 // read-only bubble over Override) swallow every command-bar click until dismissed.
 async function dismissBubbles(frame) {
   let n = 0;
+  // A new app (or a fresh browser profile) opens on "Welcome to Power Apps Studio", whose modal
+  // overlay intercepts every click until Skip.
+  for (const c of locsOf(frame, 'studio.welcomeSkip')) {
+    try {
+      if (await c.first().count() > 0 && await c.first().isVisible()) {
+        // "Don't show me this again" stops it returning after every refresh of this profile.
+        const dont = frame.locator(css('studio.welcomeDontShow')).first();
+        if (await dont.count() > 0 && !(await dont.isChecked().catch(() => true))) await dont.check({ timeout: 3000, force: true }).catch(() => {});
+        await c.first().click({ timeout: 5000 }); n++; log('  dismissed "Welcome to Power Apps Studio" (Skip)');
+      }
+    } catch { /* none */ }
+  }
   for (const c of locsOf(frame, 'studio.gotIt')) {
     try { if (await c.first().count() > 0 && await c.first().isVisible()) { await c.first().click({ timeout: 5000 }); n++; log('  dismissed a teaching bubble ("Got it")'); } }
     catch { /* none */ }
@@ -1256,6 +1299,262 @@ async function cmdCloseStudio() {
   await browser.close();
 }
 
+// --- create: a new blank canvas app, in a solution, ready for the authoring server -------------
+// The step every canvas build starts with and no API offers: Studio creates the app on its first
+// save. Measured sequence (2026-10): the maker portal's "New > App > Canvas app" dialog only opens
+// portal.newAppUrl; the first Save turns the URL into action=edit&app-id=...; a new app has
+// Coauthoring OFF (the authoring server needs it ON) and its "Save and refresh" confirmation
+// reloads Studio; Add data search matches DISPLAY names only, and two tables can share one, so
+// the result is chosen by the logical name in its accessible description ("Table <logical>").
+
+// Find an anchor in whichever authoring frame currently has it (the frames change on a refresh).
+async function inEditor(page, id, { wait = 0, visible = false } = {}) {
+  const until = Date.now() + wait;
+  do {
+    for (const f of page.frames()) {
+      if (!rx('studio.authoringFrameUrl').test(f.url())) continue;
+      for (const loc of locsOf(f, id)) {
+        try {
+          const c = loc.first();
+          if (await c.count() > 0 && (!visible || await c.isVisible())) return { frame: f, ctl: c };
+        } catch { /* detached mid-refresh */ }
+      }
+    }
+    if (Date.now() < until) await page.waitForTimeout(1000);
+  } while (Date.now() < until);
+  return null;
+}
+
+async function tableDisplayName(logical) {
+  const base = String(APP.dataverseUrl || APP.environmentUrl || '').replace(/\/+$/, '');
+  let token = null;
+  try { token = dataverseToken(); } catch { /* reported below */ }
+  if (!base || !token) return null;
+  const r = await fetch(`${base}/api/data/v9.2/EntityDefinitions(LogicalName='${logical}')?$select=DisplayCollectionName`,
+    { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
+  if (!r.ok) return null;
+  const j = await r.json();
+  return j.DisplayCollectionName?.UserLocalizedLabel?.Label || null;
+}
+
+async function newAppRowId(name, sinceMs) {
+  const base = String(APP.dataverseUrl || APP.environmentUrl || '').replace(/\/+$/, '');
+  let token = null;
+  try { token = dataverseToken(); } catch { return null; }
+  if (!base || !token) return null;
+  const q = `${base}/api/data/v9.2/canvasapps?$select=canvasappid,createdtime&$filter=displayname eq '${String(name).replace(/'/g, "''")}'`;
+  try {
+    const r = await fetch(q, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
+    if (!r.ok) return null;
+    const rows = (await r.json()).value || [];
+    const fresh = rows.filter((x) => Date.parse(x.createdtime) >= sinceMs - 120000);
+    return fresh.length === 1 ? fresh[0].canvasappid : null;
+  } catch { return null; }
+}
+
+// After a "Save and refresh" Studio reloads and shows the welcome dialog AGAIN; while it is open the
+// command bar is aria-hidden, so role queries find nothing. Dismiss it on every pass.
+async function waitForEditing(page, label) {
+  let title = '';
+  for (let i = 0; i < 36; i++) {
+    await page.waitForTimeout(5000);
+    for (const f of page.frames()) if (rx('studio.authoringFrameUrl').test(f.url())) await dismissBubbles(f).catch(() => 0);
+    title = await page.title().catch(() => '');
+    if (rx('studio.titleReadOnly').test(title)) break;
+    if (await inEditor(page, 'studio.addData', { visible: true })) return true;
+  }
+  log(`  !! ${label}: Studio did not come back in edit mode (title "${title}")`);
+  return false;
+}
+
+function writeAppToConfig(appId, name, solutionId) {
+  const path = CONFIG_PATH || resolve('scripts/canvas-app.json');
+  let cfg = {};
+  try { cfg = JSON.parse(readFileSync(path, 'utf8').replace(/^﻿/, '')); } catch { /* new file */ }
+  Object.assign(cfg, { environmentId: APP.environmentId, appId, appName: name, solutionId });
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
+  return path;
+}
+
+async function cmdCreate() {
+  const name = flag('name', APP.appName);
+  const solutionId = flag('solution-id', APP.solutionId);
+  const formFactor = String(flag('form-factor', 'tablet')).toLowerCase();
+  const layout = String(flag('layout', 'responsive')).toLowerCase();
+  const tablesArg = flag('tables', Array.isArray(APP.tables) ? APP.tables.join(',') : '');
+  const tables = String(tablesArg === true ? '' : tablesArg).split(',').map((s) => s.trim()).filter(Boolean);
+  if (!APP.environmentId || !name || name === true || !solutionId || solutionId === true || !/^(tablet|phone)$/.test(formFactor) || !/^(responsive|fixed)$/.test(layout)) {
+    log('usage: create --name "<app name>" --solution-id <solution GUID> [--form-factor tablet|phone] [--layout responsive|fixed]');
+    log('               [--tables <logical>[,<logical>] | "<Display name>=<logical>,..."] [--modern] [--publish] [--close]');
+    log('  environmentId comes from scripts/canvas-app.json; the new appId is written back to it.');
+    process.exitCode = 1; return;
+  }
+  if (APP.appId && !has('force')) {
+    log(`  refusing: ${CONFIG_PATH} already names app ${APP.appId}. A second app of the same name is the usual result`);
+    log('  of re-running a create. Open the existing one with `studio`, or pass --force to create another.');
+    process.exitCode = 1; return;
+  }
+  // Resolve each table's display name now: Add data cannot search by logical name.
+  const want = [];
+  for (const t of tables) {
+    if (t.includes('=')) { const [d, l] = t.split('='); want.push({ display: d.trim(), logical: l.trim() }); continue; }
+    const display = await tableDisplayName(t);
+    if (!display) { log(`  !! cannot look up the display name of ${t} (no Dataverse token or URL in the config). Pass --tables "<Display name>=${t}".`); process.exitCode = 1; return; }
+    want.push({ display, logical: t });
+  }
+
+  const ctx = await launch({ headless: false, debugPort: DEBUG_PORT });
+  const page = await ctx.newPage();
+  page.on('dialog', async (d) => { await d.accept().catch(() => {}); });
+  const url = tpl('portal.newAppUrl', { environmentId: APP.environmentId, formFactor, name: encodeURIComponent(name), solutionId });
+  log('1. Creating "' + name + '" (' + formFactor + ') in solution ' + solutionId);
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  if (!(await isSignedIn(page))) { log('NOT SIGNED IN - run `login` once (it opens a browser for the sign-in), then retry.'); await ctx.close(); process.exitCode = 2; return; }
+  const save = await inEditor(page, 'studio.saveButton', { wait: 180000, visible: true });
+  if (!save) { log('  !! the editor never loaded'); await capture(page, 'create-no-editor'); await ctx.close(); process.exitCode = 4; return; }
+  // The welcome dialog arrives a few seconds AFTER the command bar; wait for it before clicking.
+  const welcome = await inEditor(page, 'studio.welcomeSkip', { wait: 20000, visible: true });
+  if (welcome) await page.waitForTimeout(1000);
+  await dismissBubbles(save.frame);
+
+  // The app does not exist until the first save.
+  try { await save.ctl.click({ timeout: 20000 }); }
+  catch (e) { log('  !! Save was not clickable (a dialog over the editor?)'); await capture(page, 'create-blocked'); await ctx.close(); process.exitCode = 4; return; }
+  // The id shows in Studio's URL in some sessions and not in others (measured both ways); the app's
+  // canvasapps row, created by that first save, is the dependable source.
+  const clickedAt = Date.now();
+  let appId = null;
+  for (let i = 0; i < 40 && !appId; i++) {
+    await page.waitForTimeout(1500);
+    const m = page.url().match(rx('portal.appIdInUrl'));
+    if (m) appId = m[1];
+    else if (i % 4 === 3) appId = await newAppRowId(name, clickedAt);
+  }
+  if (!appId) {
+    log('  !! no app id: not in Studio\'s URL, and no new canvasapps row named "' + name + '" could be read');
+    log('     (is a Dataverse token configured?). The app MAY exist - look in the solution before creating again.');
+    await capture(page, 'create-no-appid');
+    await leaveEditor(page).catch(() => {});   // Back, so a created app's edit lock is not stranded
+    await ctx.close(); process.exitCode = 4; return;
+  }
+  const cfgPath = writeAppToConfig(appId, name, solutionId);
+  log('   created ' + appId + '  (written to ' + cfgPath + ')');
+  // Reopen the saved app by id. When the URL still reads action=new-blank, the reload that
+  // "Save and refresh" performs opens ANOTHER blank app of the same name, and every later step
+  // lands there ("Didn't save: This name already exists").
+  if (!rx('portal.appIdInUrl').test(page.url())) {
+    log('   reopening the saved app by id (Studio kept the new-blank URL)');
+    await leaveEditor(page).catch(() => {});   // Back first: a navigation away would strand the edit lock
+    await page.goto(tpl('portal.studioUrl', { environmentId: APP.environmentId, appId }), { waitUntil: 'domcontentloaded' });
+    if (!(await waitForEditing(page, 'reopening the new app'))) { await capture(page, 'create-reopen'); await ctx.close(); process.exitCode = 4; return; }
+  }
+
+  // Settings: layout first (it rides on the save that a switch's "Save and refresh" forces).
+  const modern = has('modern');
+  log('2. Settings: layout ' + layout + (modern ? ', modern controls on' : '') + ', Coauthoring on');
+  const openTab = async (tabId) => {
+    if (!(await inEditor(page, 'studio.settingsUpdatesTab', { visible: true }))) {
+      const open = await inEditor(page, 'studio.appSettings', { wait: 30000 });
+      if (!open) return false;
+      await open.ctl.click();
+    }
+    const tab = await inEditor(page, tabId, { wait: 15000 });
+    if (!tab) return false;
+    await tab.ctl.click();
+    return true;
+  };
+  // Turn a Settings > Updates switch on. A new-feature switch asks to "Save and refresh"; accepting
+  // reloads Studio, which closes the dialog. Returns 'on' | 'changed' | 'missing'.
+  const switchOn = async (id, label) => {
+    if (!(await openTab('studio.settingsUpdatesTab'))) return 'missing';
+    const sw = await inEditor(page, id, { wait: 15000 });
+    if (!sw) { log(`   !! ${label} switch not found`); return 'missing'; }
+    if ((await sw.ctl.getAttribute('aria-checked')) === 'true') { log(`   ${label} already on`); return 'on'; }
+    await sw.ctl.click();
+    const upd = await inEditor(page, 'studio.saveRefreshUpdate', { wait: 15000 });
+    if (upd) {
+      await upd.ctl.click({ force: true });
+      log(`   ${label} on: "Save and refresh" accepted, Studio reloading ...`);
+      if (!(await waitForEditing(page, 'after ' + label))) { await capture(page, 'create-after-' + label.replace(/\W+/g, '-')); process.exitCode = 4; }
+    } else log(`   ${label} on`);
+    return 'changed';
+  };
+  if (!(await openTab('studio.settingsDisplayTab'))) { log('  !! App settings not found'); await capture(page, 'create-no-settings'); process.exitCode = 4; }
+  else {
+    const combo = await inEditor(page, 'studio.appLayout', { wait: 15000 });
+    if (combo && !new RegExp('^\\s*' + layout, 'i').test(await combo.ctl.innerText())) {
+      await combo.ctl.click();
+      await combo.frame.locator(css('studio.listOption')).filter({ hasText: new RegExp('^\\s*' + layout + '\\s*$', 'i') }).first().click({ timeout: 10000 });
+      log('   layout set to ' + layout);
+    } else log(combo ? '   layout already ' + layout : '   !! App layout control not found - set it by hand (Settings > Display)');
+    if (modern && (await switchOn('studio.modernSwitch', 'Modern controls')) === 'missing') process.exitCode = 4;
+    const co = await switchOn('studio.coauthoringSwitch', 'Coauthoring');
+    if (co === 'missing') { log('   !! the authoring server cannot connect until Coauthoring is on'); process.exitCode = 4; }
+    const close = await inEditor(page, 'studio.closeSettings', { visible: true });
+    if (close) await close.ctl.click().catch(() => {});
+  }
+
+  // Data sources, each chosen by its logical name.
+  if (want.length) log('3. Data sources');
+  for (const t of want) {
+    const add = await inEditor(page, 'studio.addData', { wait: 30000 });
+    if (!add) { log('  !! Add data not found'); process.exitCode = 4; break; }
+    await add.ctl.click();
+    const box = await inEditor(page, 'studio.dataSearch', { wait: 15000, visible: true });
+    if (!box) { log('  !! Add data search box not found'); process.exitCode = 4; break; }
+    await box.ctl.fill(t.display);
+    await page.waitForTimeout(4000);
+    const desc = new RegExp('\\b' + tpl('studio.dataItemDescription', { logical: t.logical }).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+    const item = box.frame.getByRole('listitem', { description: desc }).first();
+    if (await item.count() === 0) {
+      log(`  !! no result for "${t.display}" whose table is ${t.logical}. Nothing added; check the display name.`);
+      await capture(page, 'create-no-table-' + t.logical); await page.keyboard.press('Escape').catch(() => {}); process.exitCode = 4; continue;
+    }
+    await item.click();
+    let ok = false;
+    for (let i = 0; i < 30 && !ok; i++) { await page.waitForTimeout(1000); ok = rx('studio.dataSourceAdded').test(await box.frame.evaluate(() => document.body.innerText || '').catch(() => '')); }
+    log(ok ? `   added ${t.display} (${t.logical})` : `   !! ${t.display} (${t.logical}): no "added" confirmation seen - check the Data pane`);
+    if (!ok) process.exitCode = 4;
+  }
+
+  // Save, and prove it.
+  log('4. Save');
+  const s2 = await inEditor(page, 'studio.saveButton', { wait: 15000, visible: true });
+  if (s2) {
+    await dismissBubbles(s2.frame);
+    await s2.ctl.click({ timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(Number(flag('after', 15000)));
+    const stamp = await readSaveStamp(page, s2.frame);
+    log(stamp ? '   saved: "Saved: ' + stamp + '"' : '   !! could not read "Saved: <time>" - treat the save as unproven');
+  }
+  if (has('publish')) {
+    const pub = await inEditor(page, 'studio.publishButton', { wait: 15000, visible: true });
+    if (pub) {
+      await dismissBubbles(pub.frame);
+      try {
+        await pub.ctl.click({ timeout: 20000 });
+        await page.waitForTimeout(5000);
+        for (const c of locsOf(pub.frame, 'studio.publishConfirm')) { try { if (await c.first().count() === 0) continue; await c.first().click({ timeout: 15000 }); break; } catch { /* next */ } }
+        await page.waitForTimeout(20000);
+        log('   publish clicked; prove it from the canvasapps row (lastpublishtime), not the toast');
+      } catch { log('   !! Publish was not clickable (a dialog over the editor?) - publish with `publish` later'); await capture(page, 'create-publish-blocked'); process.exitCode = 4; }
+    }
+  }
+  await capture(page, 'create-done');
+  log('\nNext: connect the authoring server to app ' + appId + ' (Studio is open in edit mode, Coauthoring on).');
+  if (has('close')) {
+    const { stillEditing } = await leaveEditor(page);
+    log(stillEditing ? '  !! still in the editor - close it by hand' : '  left Studio through Back (edit lock released)');
+    await ctx.close().catch(() => {});
+    return;
+  }
+  log('Holding Studio open (like `studio`). Save/publish/close-studio reattach to it.');
+  ctx.on('close', () => { process.exit(process.exitCode || 0); });
+  try { await page.waitForTimeout(Number(flag('hold', 3600000))); } catch { /* closed */ }
+  await ctx.close().catch(() => {});
+}
+
 // --- doctor: are the UI anchors still where the driver expects them? ---------------------------
 // Opens the maker portal, the published player and Studio with the saved profile and checks every
 // entry of the selector table that a normal session can show. Never passes without a live,
@@ -1422,7 +1721,7 @@ async function cmdShot() {
   await ctx.close();
 }
 
-const commands = { login: cmdLogin, check: cmdCheck, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
+const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
   keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm };
 
 if (argv.includes('--selftest')) selftest();
@@ -1430,6 +1729,7 @@ else if (!commands[cmd]) {
   log('canvas-browser - drive Power Apps Studio and the published player\n');
   log('  login | check | play [--screen N] [--trace] [--fresh] | walk <scenario.json> [--trace] [--fresh] [--allow-writes]');
   log('  confirm <scenario.json> [--since ISO]   run only the scenario\'s Dataverse checks');
+  log('  create --name N --solution-id GUID [--form-factor tablet|phone] [--layout responsive|fixed] [--tables a,b] [--publish] [--close]');
   log('  studio | keys [combo] | save | publish [--reload-first] | close-studio [--keep-browser] | shot <url> <name>');
   log('  doctor [--player-only|--studio-only] [--record]   are the UI anchors in assets/selectors.json still valid?\n');
   log('  config:  ' + (CONFIG_PATH || '(none found - pass --config or create scripts/canvas-app.json)'));
@@ -1438,5 +1738,6 @@ else if (!commands[cmd]) {
   log('  output:  ' + OUT);
   process.exitCode = cmd ? 1 : 0;
 } else {
-  commands[cmd]().catch((e) => { console.error('FAILED: ' + e.message); process.exitCode = 1; });
+  // Exit on a failure: an open browser context would otherwise keep the process (and the profile) alive.
+  commands[cmd]().catch((e) => { console.error('FAILED: ' + e.message); process.exit(1); });
 }

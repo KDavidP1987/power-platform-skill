@@ -178,7 +178,11 @@ Record the answers in the spec; `check-canvas-format.mjs` warns on a table galle
 filter, search or grouping.
 
 pac and `.pa.yaml` can edit and ship an app but cannot create one. Do this once, in Studio, before
-the first screen:
+the first screen - **yourself, through the browser**, with
+`node scripts/canvas-browser.mjs create --name "<App name>" --solution-id <GUID> --tables <logical names>`
+(`canvas-shipping.md`, "Creating a new canvas app"). It does every step below except modern
+controls, which it turns on with `--modern`. Creating the app is not a human step; ask the person
+only if no browser on the machine can sign in.
 
 1. **Create the app in Studio with the form factor the layout assumes** (for example tablet
    1366x768). Absolute layout does not reflow; state the supported size in the app's guide.

@@ -99,6 +99,11 @@ asserting against a sign-in form.
 - Use the real installed Chrome (`channel: 'chrome'`), `--disable-blink-features=AutomationControlled`
   and `ignoreDefaultArgs: ['--enable-automation']`; some tenant policies treat bundled Chromium or an
   obviously automated browser differently.
+- **When Chrome will not launch, use Edge - the driver does this by itself.** On a managed machine
+  Chrome handed every automated launch to the person's running Chrome ("Opening in existing browser
+  session"), even with a brand-new profile directory. Edge (`--channel msedge`), present on every
+  Windows machine, launched normally and signed in to the tenant through the Windows account with
+  no prompt at all. Without an explicit `--channel`, the driver falls back to Edge on that error.
 - **Try headless first.** On a domain-joined Windows machine, the driver signed in headlessly on its
   first run through Windows SSO, with no interactive MFA (environment-specific). Run
   `check --headless` before asking a person to sign in. The mechanism, observed again on an
@@ -389,8 +394,11 @@ negative. Use it for "is my code right?" and the player for "what do users get?"
   (`manifest-caches.md`). Two "inert" picker filters worked in Preview while the player caught up
   later. Confirm the ship in the player.
 
-## 11. Driving Studio: open, save, publish, close
+## 11. Driving Studio: create, open, save, publish, close
 
+- **Create a new app** with `canvas-browser.mjs create` (`canvas-shipping.md`, "Creating a new
+  canvas app"): new blank app in the solution, first save, layout, Coauthoring, data sources by
+  logical name, save. Never hand this to the person while a browser can sign in.
 - **Open in edit mode** as the app owner:
   `https://make.powerapps.com/e/<envId>/canvas/?action=edit&app-id=/providers/Microsoft.PowerApps/apps/<appId>`.
   Studio is slow (allow ~3 minutes) and not usable headless. Wait for the window title to read
