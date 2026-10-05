@@ -65,6 +65,17 @@ lead: one fix batch, ship once, confirm once, seed re-applied, report refreshed 
   tokens; the reporting lane gets the report mock. The build whose design the person rated best was
   the first to run this step; builds that left design to "required" in the guidance skipped it
   (`project-setup.md` section 3).
+- **Ship in batches, walk in one call.** A measured build that met every requirement still took 107
+  minutes, mostly in Studio churn: 29 Studio opens, 27 saves, 21 publishes, 81 walk calls and 472
+  single shell calls. The driver now refuses a publish when the canvas source has not changed since
+  the last one (`--again` overrides), counts publishes, and runs every scenario in one call
+  (`canvas-browser.mjs walk canvas/walks`); the plugin reports the shell-call count and the elapsed
+  time against the budget. Fix a whole batch, push it, save, publish once, walk once.
+- **The fix round has a budget too.** After the screenshot critique and the reviewer, fix every high
+  and medium finding in one batch; list the low ones in the hand-back instead of shipping for each.
+  Most findings in a measured fix round (phone width, pill and tag styles, banners, dialog
+  spacing) were visible in the prototype: take the prototype critique at 390 px seriously, and run
+  `check-canvas-format.mjs` and the clip sweep before the first ship, not after.
 - **The time budget.** For a five-screen app, two flows and a medallion, about an hour of agent
   time: decisions 5 minutes, design and schema together 15 to 20, lanes 25, walks, critique and
   review together 10, the fix batch and the final refresh 5. Microsoft's plugins built this brief in
@@ -205,8 +216,14 @@ else is the agent's work.
 
 ## 6. Browser hygiene
 
-- One browser, one tab per job. The driver reuses its first tab and closes the ones it opened
-  (`canvas-browser.mjs tidy` closes blank and leftover tabs in a held session).
+- One browser, one tab per job. The driver reuses its first tab, closes blank tabs after every
+  command, and `second-tab` closes the older Studio tab once the new one is in edit mode; never open
+  Studio tabs with your own scripts (a measured build had three Studio tabs open when Studio raised a
+  dialog in one of them, and the evaluator later closed 28 blank tabs).
+- Studio's "Accept Coauthoring preview terms?" dialog is answered by the driver: the skill turns
+  Coauthoring on because the authoring server needs it, so accepting is the recommendation, listed
+  with the other up-front decisions; `"acceptCoauthoringTerms": false` in `scripts/canvas-app.json`
+  makes the driver stop and report instead.
 - With the Playwright MCP tools, close each tab you opened when you are done with it
   (`browser_tabs` close), and check the tab list before handing back.
 - Close Studio through its Back button; never leave a held co-authoring session behind.

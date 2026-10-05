@@ -83,9 +83,9 @@ async function pw() {
   }
   return chromium;
 }
-import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1030,8 +1030,18 @@ function selftest() {
     ['not confirm', !rx('consent.confirmUrl').test('https://global.consent.azure-apim.net/redirect/x?code=abc')],
   ].filter(([, okc]) => !okc).map(([k]) => 'connection: ' + k);
   tabs.push(...C);
+  const P = [
+    ['unchanged source refused', publishRefused('h1', { hash: 'h1' }, false)],
+    ['--again publishes', !publishRefused('h1', { hash: 'h1' }, true)],
+    ['changed source publishes', !publishRefused('h2', { hash: 'h1' }, false)],
+    ['first publish', !publishRefused('h1', undefined, false)],
+    ['no source found publishes', !publishRefused(null, { hash: null }, false)],
+    ['terms dialog selector covers dialog and alertdialog', /\[role="dialog"\]/.test(COAUTHOR_TERMS) && /alertdialog/.test(COAUTHOR_TERMS) && /Accept/.test(COAUTHOR_TERMS)],
+    ['autoTidy skips holding commands', NO_TIDY.has('studio') && NO_TIDY.has('close-studio') && !NO_TIDY.has('walk')],
+  ].filter(([, okc]) => !okc).map(([k]) => 'publish/tabs: ' + k);
+  tabs.push(...P);
   const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0 && tabs.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 7 publish-guard, terms-dialog and auto-tidy cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
          : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}], tabs -> [${tabs.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }
@@ -1114,10 +1124,33 @@ async function cmdPlay() {
   process.exitCode = frame ? 0 : 3;
 }
 
+// walk <a.json> [b.json ...] | walk <folder>: every scenario in one call. A measured build made 81
+// separate walk calls; each one re-sent the whole conversation. One call runs them in order (writes
+// still need --allow-writes) and ends with a one-line-per-scenario summary.
 async function cmdWalk() {
+  const args = argv.slice(1).filter((a) => !a.startsWith('--') && !/^\d+$/.test(a));
+  let files = [];
+  for (const a of args) {
+    let st = null; try { st = statSync(resolve(a)); } catch { /* missing */ }
+    if (st && st.isDirectory()) files.push(...readdirSync(resolve(a)).filter((f) => /\.json$/i.test(f) && !/\.result\.json$/i.test(f)).sort().map((f) => join(a, f)));
+    else files.push(a);
+  }
+  if (!files.length) { log('usage: canvas-browser.mjs walk <scenario.json> [more.json ...] | walk <folder>'); process.exitCode = 1; return; }
+  const summary = [];
+  for (const f of files) {
+    process.exitCode = 0;
+    const v = await walkOne(f);
+    summary.push([v || 'FAIL', f, process.exitCode || 0]);
+  }
+  if (files.length > 1) {
+    log('\n=== WALKS: ' + summary.filter((x) => x[0] === 'PASS').length + ' of ' + summary.length + ' pass ===');
+    for (const [v, f, c] of summary) log('  ' + v.padEnd(5) + ' ' + f + (c && v !== 'PASS' ? '  (exit ' + c + ')' : ''));
+  }
+  process.exitCode = summary.every((x) => x[0] === 'PASS') ? 0 : (summary.find((x) => x[0] !== 'PASS')[2] || 4);
+}
+
+async function walkOne(file) {
   needApp();
-  const file = argv[1];
-  if (!file) { log('usage: canvas-browser.mjs walk <scenario.json>'); process.exitCode = 1; return; }
   const scenario = JSON.parse(readFileSync(resolve(file), 'utf8'));
   const problems = lintScenario(scenario);
   if (problems.length) { problems.forEach((e) => log('BAD  ' + e)); process.exitCode = 1; return; }
@@ -1163,6 +1196,7 @@ async function cmdWalk() {
     JSON.stringify({ scenario: scenario.name, at: new Date().toISOString(), runStart: new Date(runStart).toISOString(), verdict, ...results, appErrors: real, dataverse: confirmation }, null, 2), 'utf8');
   await ctx.close();
   process.exitCode = verdict === 'PASS' ? 0 : 4;
+  return verdict;
 }
 
 async function cmdStudio() {
@@ -1218,7 +1252,32 @@ async function dismissBubbles(frame) {
     try { if (await c.first().count() > 0 && await c.first().isVisible()) { await c.first().click({ timeout: 5000 }); n++; log('  dismissed a teaching bubble ("Got it")'); } }
     catch { /* none */ }
   }
+  n += await coauthoringTerms(frame);
   return n;
+}
+
+// "Accept Coauthoring preview terms?" (Accept / Decline) blocks Studio until answered. A measured
+// build stalled on it with three Studio tabs open and wrote throwaway scripts to click it. The skill
+// turns Coauthoring on (the authoring server needs it), so accepting is the recommendation and an
+// up-front decision: "acceptCoauthoringTerms": false in scripts/canvas-app.json stops here instead.
+const COAUTHOR_TERMS = ['[role="dialog"]', '[role="alertdialog"]'].map((r) => r + ':has-text("Coauthoring preview terms") button:has-text("Accept")').join(', ');
+async function coauthoringTerms(frame) {
+  const frames = [frame];
+  try { for (const f of frame.page().frames()) if (!frames.includes(f)) frames.push(f); } catch { /* detached */ }
+  for (const f of frames) {
+    try {
+      const b = f.locator(COAUTHOR_TERMS).first();
+      if (!(await b.count()) || !(await b.isVisible())) continue;
+      if (APP.acceptCoauthoringTerms === false) {
+        log('  !! Studio asks to accept the Coauthoring preview terms; "acceptCoauthoringTerms" is false, so not answering. Ask the person, then re-run.');
+        process.exitCode = 9; return 0;
+      }
+      await b.click({ timeout: 5000 });
+      log('  accepted the Coauthoring preview terms (Studio refreshes the app; "acceptCoauthoringTerms": false in canvas-app.json stops this)');
+      return 1;
+    } catch { /* next frame */ }
+  }
+  return 0;
 }
 
 // Proof of a save is the "Saved: <time>" line in Save's flyout (or a fresh session) - never the
@@ -1343,7 +1402,19 @@ async function cmdSecondTab() {
   log('  title: ' + title + (rx('studio.titleReadOnly').test(title) ? '  !! READ-ONLY: this tab did not join the editing session' : ''));
   await capture(page, 'studio-second-tab');
   if (names.some((n) => !text.includes(n))) process.exitCode = 6;
-  log('  save / publish / keys now use this tab; close-studio leaves every Studio tab; tidy --studio closes the older one.');
+  // One Studio tab at a time: a measured build opened 13 second tabs and left them, and Studio then
+  // raised dialogs in tabs nobody was looking at. Once the new tab is in edit mode with what was
+  // expected, the older Studio tabs are left properly (Back, Leave) and closed.
+  if (!process.exitCode && rx('studio.titleEditing').test(title)) {
+    for (const old of ctx.pages().filter((p) => p !== page && isStudioTab(p))) {
+      old.on('dialog', async (d) => { await d.accept().catch(() => {}); });
+      const r = await leaveEditor(old).catch(() => ({ stillEditing: true }));
+      if (r.stillEditing) { log('  kept the older Studio tab (still in the editor): ' + old.url().slice(0, 90)); continue; }
+      await old.close({ runBeforeUnload: false }).catch(() => {});
+      log('  closed the older Studio tab');
+    }
+  }
+  log('  save / publish / keys now use this tab; close-studio leaves every Studio tab.');
   await browser.close();
 }
 
@@ -1451,7 +1522,29 @@ async function cmdSave() {
   await browser.close();
 }
 
+// Publish once per batch. A measured build published 21 times; a publish costs minutes and proves
+// nothing new when the source has not changed. The canvas source's hash is recorded after each
+// publish (in the work folder); an unchanged source is refused unless --again is passed.
+function srcHash() {
+  const dir = APP.canvasSrc ? resolve(REPO, APP.canvasSrc) : null;
+  if (!dir || !existsSync(dir)) return null;
+  const h = createHash('sha256');
+  for (const f of readdirSync(dir).filter((x) => /\.pa\.yaml$/i.test(x)).sort()) { h.update(f); h.update(readFileSync(join(dir, f))); }
+  return h.digest('hex');
+}
+const PUBLISH_LOG = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'publish-log.json');
+export function publishRefused(h, last, again) { return !!(h && last && last.hash === h && !again); }
+function publishLog() { try { return JSON.parse(readFileSync(PUBLISH_LOG(), 'utf8')); } catch { return []; } }
+
 async function cmdPublish() {
+  const hash = srcHash();
+  const plog = publishLog();
+  const last = plog[plog.length - 1];
+  if (publishRefused(hash, last, has('again'))) {
+    log('  REFUSED: the canvas source has not changed since the last publish (' + last.at + '). Publishing again re-tests nothing.');
+    log('  Batch the fixes, push them, save, then publish once. --again publishes anyway (e.g. after a Studio-only change).');
+    process.exitCode = 7; return;
+  }
   const { browser, ctx } = await attach();
   const studio = studioPage(ctx);
   await studio.bringToFront();
@@ -1485,6 +1578,12 @@ async function cmdPublish() {
   log('    GET canvasapps?$filter=displayname eq \'' + (APP.appName || '<app display name>') + '\'&$select=lastpublishtime');
   log('  must move past the time you clicked. If it did not, retry with --reload-first.');
   log('  Publish ships what was SAVED when it started; the player can lag the publish by ten minutes.');
+  try {
+    mkdirSync(dirname(PUBLISH_LOG()), { recursive: true });
+    plog.push({ at: new Date().toISOString(), hash });
+    writeFileSync(PUBLISH_LOG(), JSON.stringify(plog.slice(-50), null, 1));
+    log('  publish ' + plog.length + ' of this build' + (plog.length > 4 ? ' - more than four publishes means fixes are being shipped one at a time; batch them.' : '.'));
+  } catch { /* unwritable work folder */ }
   await browser.close();
 }
 
@@ -2109,6 +2208,23 @@ async function cmdConnection() {
   return done(c, mine[0] ? 'finished' : 'created');
 }
 
+// After every command, close the blank tabs in the held browser (keeping one, so the browser stays
+// up). A measured build left 28 blank tabs; tidy existed but was run by hand 7 times. Commands that
+// hold or end the browser, or only report on it, are skipped.
+const NO_TIDY = new Set(['studio', 'login', 'close-studio', 'tidy', 'tabs', 'lint', 'doctor']);
+async function autoTidy() {
+  if (NO_TIDY.has(cmd) || has('no-tidy')) return;
+  let browser;
+  try { browser = await (await pw()).connectOverCDP('http://127.0.0.1:' + DEBUG_PORT, { timeout: 4000 }); } catch { return; }
+  try {
+    const pages = browser.contexts().flatMap((c) => c.pages());
+    const blank = pages.filter((p) => tabKind(p.url()) === 'blank');
+    const close = blank.length === pages.length ? blank.slice(1) : blank;
+    for (const p of close) await p.close({ runBeforeUnload: false }).catch(() => {});
+    if (close.length) log('  tidy: closed ' + close.length + ' blank tab(s)');
+  } finally { await browser.close().catch(() => {}); }
+}
+
 const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, connection: cmdConnection, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
   keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot,
   tabs: cmdTabs, tidy: cmdTidy, 'second-tab': cmdSecondTab, 'studio-has': cmdStudioHas, dirty: cmdDirty, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm };
@@ -2130,5 +2246,5 @@ else if (!commands[cmd]) {
   process.exitCode = cmd ? 1 : 0;
 } else {
   // Exit on a failure: an open browser context would otherwise keep the process (and the profile) alive.
-  commands[cmd]().catch((e) => { console.error('FAILED: ' + e.message); process.exit(1); });
+  commands[cmd]().then(autoTidy).catch((e) => { console.error('FAILED: ' + e.message); process.exit(1); });
 }

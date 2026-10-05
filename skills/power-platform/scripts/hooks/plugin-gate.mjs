@@ -41,6 +41,10 @@
 //       scripts/canvas-app.json) and the last message asks the person a question: take the
 //       recommendation, record it, carry on. A measured build stopped three times to ask questions
 //       it had already answered with a recommendation.
+// After tools (--post, PostToolUse on Bash and PowerShell) it keeps the build to its budget, with
+// numbers rather than advice: every 40 shell calls it reports the count (a measured lead made 472
+// single calls, each re-sending the whole conversation) and points at the batched tools, and at 45,
+// 60, 90 and 120 minutes it reports the elapsed time against the one-hour budget. It never blocks.
 // Self-test: node plugin-gate.mjs --selftest
 import fs from 'node:fs';
 import os from 'node:os';
@@ -235,6 +239,44 @@ export function decideStop(root, input = {}, env = process.env, stateDir = os.tm
   return counted(stateDir, sid, '', reason);
 }
 
+// ---- PostToolUse budget ------------------------------------------------------------------------
+export const SHELL_NUDGE_EVERY = 40;
+export const TIME_MARKS = [45, 60, 90, 120];
+function isBuildFolder(root) {
+  const app = appConfig(root);
+  return !!(app.appId || app.canvasSrc) || canvasSrcDirs(root, loadConfig(root).canvasSrcGlob || 'canvas').length > 0 || hasReport(path.join(root, 'fabric'));
+}
+export function budgetNote(state, now = Date.now()) {
+  const notes = [];
+  const mins = Math.floor((now - state.start) / 60000);
+  if (state.shell >= state.nextNudge) {
+    notes.push(`Budget: ${state.shell} shell calls so far this session. Each call re-sends the whole conversation. Batch: ` +
+      'node scripts/check-all.mjs for the static checks, one canvas-browser.mjs walk call with every scenario (walk <folder>), ' +
+      'one script for a group of Dataverse reads, and helpers for anything that produces long output.');
+    state.nextNudge = state.shell + SHELL_NUDGE_EVERY;
+  }
+  const mark = TIME_MARKS.filter((m) => mins >= m && !state.marks.includes(m)).pop();
+  if (mark) {
+    state.marks.push(...TIME_MARKS.filter((m) => m <= mark && !state.marks.includes(m)));
+    notes.push(`Budget: ${mins} minutes since this session's first shell call, against about 60 for a five-screen app with two flows and a ` +
+      'medallion. Finish what is open in one batch: fix every high and medium finding together, ship once, walk once (one call), ' +
+      'refresh the report last; list the low findings in the hand-back instead of fixing them one by one.');
+  }
+  return notes.join('\n');
+}
+export function decidePost(root, input = {}, stateDir = os.tmpdir(), now = Date.now()) {
+  if (!/^(Bash|PowerShell)$/.test(input.tool_name || '')) return null;
+  if (loadConfig(root).pluginGate === false || appConfig(root).pluginGate === false) return null;
+  if (!isBuildFolder(root)) return null;
+  const sid = String(input.session_id || '').replace(/[^\w-]/g, '') || 'nosession';
+  const f = path.join(stateDir, `pp-plugin-budget-${sid}.json`);
+  const state = readJson(f) || { start: now, shell: 0, nextNudge: SHELL_NUDGE_EVERY, marks: [] };
+  state.shell++;
+  const note = budgetNote(state, now);
+  try { fs.writeFileSync(f, JSON.stringify(state)); } catch { /* unwritable temp */ }
+  return note || null;
+}
+
 // ---- PreToolUse order gates --------------------------------------------------------------------
 // A glob (Src/*.pa.yaml) names no file to write, so * and ? end a name.
 const SCREEN_RE = /(^|[\\/])Src[\\/](?:[^\\/\s'"`*?]+[\\/])*([^\\/\s'"`*?]+)\.pa\.yaml\b/i;
@@ -316,7 +358,12 @@ export function evaluatePre(root, input = {}, env = process.env) {
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (!isMain) { /* imported: no side effects */ }
 else if (process.argv.includes('--selftest')) selftest();
-else if (process.argv.includes('--pre')) {
+else if (process.argv.includes('--post')) {
+  const input = readStdinJson();
+  const note = decidePost(input.cwd || process.cwd(), input);
+  if (note) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: note } }));
+  process.exit(0);
+} else if (process.argv.includes('--pre')) {
   const input = readStdinJson();
   const reason = evaluatePre(input.cwd || process.cwd(), input);
   if (reason) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }));
@@ -428,6 +475,21 @@ function selftest() {
     check('run checks apply with the project harness too', stop([sdk, asst('Shall I go on? Recommend yes.')], 'r4'), (g) => g.block);
     rm('.claude/hooks/audit-stop.mjs');
     fs.rmSync(st2, { recursive: true, force: true });
+    // PostToolUse budget
+    const st3 = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-gate-budget-'));
+    put('scripts/canvas-app.json', JSON.stringify({ appId: 'x', canvasSrc: 'canvas/app/Src' }));
+    const t0 = 1_000_000_000_000;
+    const post = (n, at, tool = 'Bash') => { let out = null; for (let i = 0; i < n; i++) out = decidePost(tmp, { tool_name: tool, session_id: 'b1' }, st3, at) || out; return out; };
+    check('post: a Read is ignored', decidePost(tmp, { tool_name: 'Read', session_id: 'b0' }, st3, t0), silent);
+    check('post: 39 shell calls say nothing', post(39, t0), silent);
+    check('post: the 40th reports the count', post(1, t0), (g) => typeof g === 'string' && g.includes('40 shell calls') && g.includes('walk <folder>'));
+    check('post: the next note waits 40 more', post(39, t0), silent);
+    check('post: 45 minutes reports the budget once', post(1, t0 + 46 * 60000), (g) => typeof g === 'string' && g.includes('46 minutes') && g.includes('ship once'));
+    check('post: the same mark is not repeated', post(1, t0 + 50 * 60000), silent);
+    check('post: a jump past several marks reports once', post(1, t0 + 125 * 60000), (g) => typeof g === 'string' && g.includes('125 minutes'));
+    check('post: silent outside a build folder', (put('scripts/canvas-app.json', '{}'), rm('canvas'), decidePost(tmp, { tool_name: 'Bash', session_id: 'b9' }, st3, t0)), silent);
+    fs.rmSync(st3, { recursive: true, force: true });
+    put('canvas/app/Src/Screen1.pa.yaml', 'Screens: {}'); put('scripts/canvas-app.json', '{}');
     put('fabric/notebooks/refresh.py', "token = get_token()\nnotebookutils.fs.put('Files/landing/t.txt', token, True)\n");
     check('token written to a lakehouse blocks', evaluate(tmp, {}, env), blocks('access token', 'fabric/notebooks/refresh.py:2'));
     put('fabric/notebooks/refresh.py', 'def token_file_url():\n    return "%s/%s/Files/_runtime/dv_token.txt" % (ONELAKE, item)\n');
@@ -445,7 +507,7 @@ function selftest() {
   if (fails.length) { console.log('selftest FAILED:\n  ' + fails.join('\n  ')); process.exit(1); }
   console.log(`selftest ok: ${CASES} plugin-gate cases (Stop: unrelated silent, design missing, three blocks per session then a note, per-session count, ` +
     'no-id fallback, harness present, two opt-outs, designed, shipped without critique/review, complete, dod opt-in, background shell pending and done, unattended question, attended question, unattended hand-back, unattended flag, sidechain, run-check cap, run checks with harness, token to ' +
-    'lakehouse, token file over REST, non-token write, report-only; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
+    'lakehouse, token file over REST, non-token write, report-only; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
     'App.pa.yaml, _EditorState, shell read, other tools, prototype missing, designed, deploy-tables with and without --plan, bare template, ' +
     'filled contract, dod plan, opt-out, unrelated write)');
   process.exit(0);

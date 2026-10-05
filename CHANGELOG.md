@@ -11,6 +11,42 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-04
+
+Test F (0.20.0, impeccable, no DOD) was the first build to meet all 35 acceptance rows, with the best
+design of six and nothing asked of the person. It still took 107 agent minutes and $41, against 63
+minutes and $24 for Microsoft's plugins. Most of that went on Studio churn, not on the work: 29 Studio
+opens, 27 saves, 21 publishes, 13 second tabs left open, 81 walk calls and 472 single shell calls. It
+also stalled on Studio's "Accept Coauthoring preview terms?" dialog with three Studio tabs open. Each
+fix here is enforced by the driver or a hook, not left to the guidance.
+
+### Added
+
+- **Budget hook** (`plugin-gate.mjs --post`, PostToolUse on Bash and PowerShell). In a Power Platform
+  build it reports the shell-call count every 40 calls, with the batched tools to use, and the elapsed
+  time at 45, 60, 90 and 120 minutes against the one-hour budget. It never blocks. 8 self-test cases.
+- **One walk call for every scenario:** `canvas-browser.mjs walk <a.json> <b.json> ...` or
+  `walk <folder>`, ending with a one-line-per-scenario summary.
+
+### Changed
+
+- **The driver keeps the browser tidy without being asked:**
+  - Blank tabs are closed after every command.
+  - `second-tab` leaves and closes the older Studio tab once the new one is in edit mode.
+- **Studio's Coauthoring terms dialog is a known step.** The driver accepts it, because Coauthoring is
+  what the authoring server needs. `"acceptCoauthoringTerms": false` in `scripts/canvas-app.json` makes
+  it stop and report instead. The setting is in the example config, and the decision is listed with the
+  up-front decisions.
+- **Publish once per batch:**
+  - `publish` refuses when the canvas source has not changed since the last publish. `--again`
+    overrides.
+  - Each publish is recorded in the work folder, and a note appears after the fourth.
+- **Orchestration:**
+  - Fix rounds cover high and medium findings in one batch; low findings are listed.
+  - The format check and the clip sweep run before the first ship.
+  - Never open Studio tabs from your own scripts.
+- Driver self-test: 7 new cases (publish guard, terms selector, auto-tidy scope).
+
 ## [0.20.0] - 2026-10-04
 
 Test E, the fifth measured build of one brief, was the first in which every design and review step

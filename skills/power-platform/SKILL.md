@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.20.0"
+  version: "0.20.1"
 ---
 
 # Power Platform development
@@ -66,8 +66,12 @@ refuses a new app's screen `.pa.yaml` until DESIGN.md and `design/prototype.html
 deploy until the plan exists (a filled `docs/acceptance-contract.md`, or a DOD plan when the person
 chose DOD). At the end it blocks the hand-back, up to three times, while the critique or the
 reviewer's record is missing, while background work this session started is still running, or, with
-no person present, while the last message asks the person a question. A denial is an instruction: do
-the named step with its tool, then retry; do not work around it.
+no person present, while the last message asks the person a question. After shell calls it reports the
+budget (the call count every 40, the elapsed time at 45, 60, 90 and 120 minutes). The browser driver
+enforces its own hygiene: it closes blank tabs after every command, keeps one Studio tab, answers
+Studio's Coauthoring terms dialog per `acceptCoauthoringTerms`, refuses a publish when the canvas
+source has not changed since the last one, and runs every walk scenario in one call (`walk <folder>`).
+A denial is an instruction: do the named step with its tool, then retry; do not work around it.
 
 ## The non-negotiables
 
