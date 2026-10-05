@@ -13,7 +13,7 @@
       "name": "power-platform",
       "source": "./",
       "description": "Power Platform development the way software is built: canvas apps as .pa.yaml in git, Dataverse solutions and Power Automate flows shipped by solution import, and every change proved by performing the task in the published app with Playwright.",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "category": "development"
     }
   ]

@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.21.0"
+  version: "0.22.0"
 ---
 
 # Power Platform development
@@ -270,6 +270,7 @@ than carrying an id. Run any of them with `--help`.
 | `scripts/reconcile-report.py` | Each report figure's DAX (executeQueries) against an independent Dataverse count, sum or group; exit 1 on any difference. Read-only. |
 | `scripts/pbi-theme.py` | A Power BI report theme from the app's `theme.json` tokens, installed into a PBIR report folder; refuses purple, violet, indigo and magenta, contrast under 4.5:1 and unset values. |
 | `scripts/check-all.mjs` | One call for the routine checks: canvas format, overlap, flow lint, drift, seed drift and the build stamp, printed as one compact table with an exit code. Use it instead of a shell call per check. |
+| `assets/templates/pages-decisions.md` | The go-live decisions for a Power Pages portal, settled in the first batch: audience and visibility, identity for people who are not Dataverse users, licence, access without invitations, freshness; each with the recommendation to take when no person answers. |
 | `assets/templates/design-prototype.html`, `reviewer-prompt.md`, `screenshot-walk.json` | The design lane's HTML prototype skeleton (tokens as CSS properties, both widths, no palette of its own), the independent reviewer's prompt, and the walk that captures every published screen at 1440 and 390 px for the design critique. |
 | `scripts/setup-harness.mjs` | Installs this method's harness into a project: the hooks wired with `$CLAUDE_PROJECT_DIR`, the tools, the config and continuity documents, `.gitignore` entries and the version record the pre-flight's update notice reads. Plan by default, `--apply` to install; never overwrites a changed file or removes anything; merges into an existing `settings.json`. |
 | `scripts/canvas-mcp.py` | Direct stdio client for the canvas authoring server: `tools` (the argument names it accepts now), `compile`, `hold` (push, refuse unless clean, hold the session until a release file appears), `sync` (never into `Src`), `sources`, `schema`, `describe`, `a11y`, `checker`, `accounts`. Sends `login_hint` so connect never prompts; always releases the session and kills the server tree. |

@@ -11,6 +11,46 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-05
+
+The first measured Power Pages build with this skill passed 30 of 30 blind checks with a design score
+of 23 of 25, in 85 minutes with no person needed. It wrote its own walk script because `site-walk.mjs`
+could not confirm writes, and it handed back one go-live blocker: people who are not Dataverse users
+could not be named on a comment or request. This release closes both and writes down what the build
+learned.
+
+### Added
+
+- **`site-walk.mjs` confirms writes in Dataverse**: `confirm` blocks read rows back over the Web API
+  after the steps and fail (`SW-CONFIRM`) unless they hold the expected values and changed during the
+  run; a writing scenario without `confirm` and `restore` is refused (exit 2). `capture` carries a value
+  (a new key from the page, an id from `/_api`) into later steps through `{{name}}`, with `{{runId}}` and
+  `{{today+N}}` built in. `expectWithin` retries a cached page until a timeout and records how long it
+  took (`SW-STALE` past it). Writes are logged to `.ship-work/writes.json`, so the seed gate sees site
+  walks. Options `--token-cmd` and `--work-dir`.
+- **Power Pages go-live decisions** (`power-pages.md` section 17, `assets/templates/pages-decisions.md`):
+  audience and visibility (a Private site admits a limited number of named people; a whole organisation
+  needs Public with every page restricted to signed-in accounts), the identity source, licence, access
+  without invitation emails, and freshness, settled in the first batch with a recommendation for each.
+- **Name and email for people who are not Dataverse users** (section 18): the Entra ID provider
+  configured as OpenID Connect with claims mapping (an app registration only a person can create), asking
+  once for a display name with email from a trusted claim, and `systemuser` as one source among these. A
+  write the site cannot attribute is refused and reported as a go-live blocker.
+- **The write path that held every refusal** (section 19): Web API off on every table, Liquid reads
+  with the visibility filter and a re-check on the detail page, one server logic endpoint that sets
+  identity and fields itself, Read/Create/Append/Append To only, and protection against a double press.
+
+### Changed
+
+- **The cache** (section 6): a change made outside the site reaches it within Microsoft's documented
+  15-minute window, which cannot be shortened; writes through the site clear their table's cache at once.
+  Measure it with `expectWithin` rather than promise "immediately".
+- **Design rules for portals** (section 9, rule 11): confirm every write where the person is looking,
+  rows that open something look clickable, status chips of equal weight, no silent defaults, errors that
+  name their field, and the platform's private-site strip reconciled with the brand header.
+- **Liquid traps** (section 5): `replace` treats its pattern as a regular expression (escape `[`), and
+  search input needs `[`, `%` and `_` escaped for a FetchXML `like`.
+
 ## [0.21.0] - 2026-10-05
 
 Power Pages becomes a measured area, the speed lessons from the last canvas build are enforced, and

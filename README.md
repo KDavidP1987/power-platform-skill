@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.21.0](https://img.shields.io/badge/plugin-0.21.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.22.0](https://img.shields.io/badge/plugin-0.22.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.21.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.22.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -51,7 +51,7 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 <!-- backlog:start -->
 | # | Item | Why it matters | Status |
 |---|---|---|---|
-| 1 | Power Pages: a site walk driver with sign-in, refusal and `/_api` proofs, and a reference covering row visibility, "my records", Private sign-in, deploy and teardown | The thinnest area: written from one real site, and nothing could walk a site or prove a refusal on one | Built in 0.21; a measured build against Microsoft's Power Pages plugin is under way |
+| 1 | Power Pages: a site walk driver with sign-in, refusal and `/_api` proofs, and a reference covering row visibility, "my records", Private sign-in, deploy and teardown | The thinnest area: written from one real site, and nothing could walk a site or prove a refusal on one | First measured build (0.21): 30 of 30 blind checks, design 23 of 25, 85 minutes, no person needed. 0.22 adds Dataverse confirmation, captures and freshness waits to the walker, and the build's lessons (go-live decisions, identity for people who are not Dataverse users, the 15-minute cache window, feedback patterns). Microsoft's plugin arm still to run |
 | 2 | Speed and cost against Microsoft's plugins | The last four canvas builds beat them on quality but not on time or cost | 0.21: data-source check on `create`, a design-helper time box, no single-issue publishes after the fix batch; to be measured |
 | 3 | A self-test in CI for every script, and a floor that refuses to pass when nothing was examined | A 1.0 criterion; four scripts had none | Done in 0.21 |
 | 4 | Teardown order for Fabric: Dataflows before their lakehouse | Dataflows can refuse deletion once their destination is gone | Done in 0.21 |
@@ -365,7 +365,10 @@ live site from a JSON scenario at 1440 and 390 px: pages, steps and expected tex
 check on every page, and page-only screenshots. Its refusal probes run inside the signed-in page and
 call the site's own `/_api` with the anti-forgery token, so they test what a person could really do:
 a hidden row by id or filter, another person's row, a PATCH, a DELETE, a forbidden create. Signed-out
-checks run in a fresh context and fail on any data shown. Example in
+checks run in a fresh context and fail on any data shown. A writing walk must carry `confirm` checks
+that read the rows back over the Dataverse Web API and prove they changed during the run; `capture`
+carries a value (a new key, an id) into later steps, and `expectWithin` waits for a cached page and
+records how long it took. Example in
 `assets/scenarios/site-walk.example.json`. Exit codes: `0` clean, `1` findings (`SW-SCROLL`,
 `SW-API-ALLOWED`, `SW-SIGNEDOUT-LEAK` and others in `references/interfaces.md`), `2` nothing
 examined.
@@ -630,8 +633,9 @@ inputs and harness are in [`evals/`](evals/).
   site (submit, list, detail with a conversation, on the enhanced data model) and extended in 0.21
   from Microsoft Learn: row-level visibility, "my records", Private-site access, the site lifecycle
   through the Power Platform API, and teardown. Statements not yet tried in a tenant are marked
-  "confirm in your tenant". `site-walk.mjs` passes its self-test against a local fixture site and has
-  not yet walked a live one. File uploads and external identity providers are not covered. Claims
+  "confirm in your tenant". A measured build used `site-walk.mjs signin` on a live
+  site but wrote its own walk, because the walker could not yet confirm writes in Dataverse; 0.22
+  adds that, and its walk with `confirm` has so far run only against the local fixture site. File uploads and external identity providers are not covered. Claims
   mapping on the built-in Entra provider did not fill the contact; the reference gives the
   identity-by-object-id approach instead.
 - **Microsoft's official plugins** (`microsoft/power-platform-skills`) generate apps; this skill is

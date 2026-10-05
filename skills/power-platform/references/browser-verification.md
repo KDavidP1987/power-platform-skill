@@ -688,23 +688,51 @@ try what the site must refuse. `scripts/site-walk.mjs` does both from one JSON s
 2. **The scenario.** `pages` are visited at every width (default 1440 and 390) with the text or
    selectors each must show, and a screenshot when named. `steps` perform the task once (fill, click,
    select, press, then `expectText`, `expectNoText`, `expectUrl`). A scenario that posts or saves
-   declares `"writes": true` and runs only with `--allow-writes`; mark the rows it creates (a `[TEST]`
-   prefix) so the owner can remove them.
-3. **The refusals.** Each `api` probe is sent from inside the signed-in page with `fetch`, carrying the
+   declares `"writes": true` and runs only with `--allow-writes`. It must also say how its rows are
+   removed (`restore`, e.g. the owner's cleanup script) and carry at least one `confirm`; without
+   either it is refused with exit 2, as `canvas-browser.mjs walk` refuses one. Title every test row
+   `[TEST] {{runId}} ...`: `{{runId}}` is one value per walk, so a row from an earlier run can never
+   satisfy this one, and the `[TEST]` prefix is what the cleanup finds. Each such walk is logged to
+   `.ship-work/writes.json` (`--work-dir` moves it), the same log the plugin gate's seed check reads.
+3. **Carry values between steps.** A value the site makes (a new request's key, a row id) is taken with
+   `capture` - from the page URL, the page text or a JSON response, by a `pattern` (its first group) or
+   a JSON `path` (`value.0.id`) - and used later as `{{name}}` in any path, selector, value or filter.
+   `{{today+14}}` gives a date. An unknown name fails the step that uses it (`SW-STEP`) rather than
+   sending the literal braces. This is what lets one scenario post a request, open it by the key the
+   site showed, and probe `/_api` for its own row by the id that came back.
+4. **Confirm the write in Dataverse.** The page saying "Request sent" proves the page; only a read-back
+   proves the row. Each `confirm` check reads `orgUrl`'s Web API (`table` is the entity set) with a
+   `filter`, and asserts `expect` column values (a raw value or its formatted label, so `Backlog` and
+   `100000000` both match), `count`, or `absent: true` for a create that must have been refused. Every
+   matched row must also have been written during this walk (`modifiedon` after the start), so an old
+   row cannot pass. `within` keeps re-reading for a flow that writes later. The token comes from
+   `DATAVERSE_TOKEN`, `--token-cmd`, or the scenario's `dataverseTokenCommand`; no token is
+   `SW-CONFIRM` and never a pass. Server-set columns are the point: prove the site set the author,
+   status and visibility itself, whatever the browser sent.
+5. **The refusals.** Each `api` probe is sent from inside the signed-in page with `fetch`, carrying the
    anti-forgery token the site serves at `/_layout/tokenhtml`, so it is exactly the call an attacker
    with a signed-in session could make. Prove, at least: a hidden row by id (`expectStatus: [403, 404]`)
    and by `$filter` (`expectNoRows`); another person's row; a PATCH and a DELETE that must fail; a
    create bound to a row the person may not use. A refusal that returns 2xx is `SW-API-ALLOWED`; a row
    that should not exist is `SW-API-ROWS`. Hiding a button proves nothing; only these calls do.
-4. **Signed out.** `signedOut` paths open in a fresh context with no cookies. A page must go to sign-in
+   Probes open from `/` unless `apiFrom` names another signed-in page.
+6. **Eventual consistency.** A change made in Dataverse outside the site reaches its pages through a
+   server cache: Microsoft documents up to 15 minutes, and one measured site took about 2.5. Do not
+   write a sleep and do not call a cached page a defect. Put `"expectWithin": <seconds>` (and `every`,
+   default 10) on the `expectText` / `expectNoText` step or the page: the walk reloads until it holds,
+   the report records how long it took, and past the limit it is `SW-STALE`. The time is a measure
+   worth reporting; changes made through the site itself should show at once.
+7. **Signed out.** `signedOut` paths open in a fresh context with no cookies. A page must go to sign-in
    or show none of `mustNotShow`; an `/_api` path must return no rows. Anything else is
    `SW-SIGNEDOUT-LEAK`.
-5. **The scroll check** runs after every width change and on every page: `scrollWidth` wider than
+8. **The scroll check** runs after every width change and on every page: `scrollWidth` wider than
    `clientWidth` is `SW-SCROLL`, the single most common phone defect on a themed site.
-6. **Screenshots** are of the page only, never the browser frame: full-page captures of the document,
+9. **Screenshots** are of the page only, never the browser frame: full-page captures of the document,
    or of `screenshotSelector`'s element when the site wraps its content. Named `<name>-<width>.png`,
    so two builds' captures line up file for file.
 
-Exit 0 is clean, 1 is findings, 2 is nothing examined (no browser, empty or refused scenario) and is
-never a pass. On a managed machine where Chrome refuses automated launches, the driver moves to Edge by
+Exit 0 is clean, 1 is findings, 2 is nothing examined (no browser, empty or refused scenario, a
+writing scenario without `confirm` or `restore`) and is never a pass. If a walk cannot express a check,
+extend the scenario or the driver; a hand-written walk script beside it loses the read-back, the
+captures and the writes log. On a managed machine where Chrome refuses automated launches, the driver moves to Edge by
 itself; `--channel` overrides.

@@ -10,7 +10,11 @@ it is marked as coming from documentation.
 rows that some signed-in people must not see are kept from them (table permissions cannot filter on
 a column such as a "published" Yes/No); and how a row records whose it is. Getting any of them
 wrong is a security defect, not a style choice, and the last two can need a schema change the owner
-must agree to.
+must agree to. **And put the go-live decisions to the owner in the same batch** (section 17): who
+the audience is and how many (a Private site admits a fixed number of named people), where a
+person's name and email come from when they are not a Dataverse user (section 18), the licence,
+and how people are let in. A site that passes every test can still be unusable by the people it was
+built for when these are left to the end.
 
 | Section | Covers |
 |---|---|
@@ -22,6 +26,9 @@ must agree to.
 | 14 | Private sites, granting access, the trial |
 | 15 | creating, activating and restarting a site without the Azure CLI |
 | 16 | teardown |
+| 17 | the go-live decisions to settle up front (audience and visibility, identity, licence, access) |
+| 18 | name and email for people who are not Dataverse users |
+| 19 | a write path that held every refusal: Web API off, Liquid reads, one server logic endpoint |
 
 ## 1. Choose the app type before the first screen
 
@@ -113,11 +120,12 @@ conversion is their licensing decision, not a build step.
   documented short claim names), config cleared, the site restarted from the admin centre, and a
   fresh sign-out and sign-in: the contact row did not change. The built-in provider appears to
   ignore them; the documentation describes them for a provider you configure yourself.
-  **Best approach: identify the person by the contact's `adx_identity_username`** (the Entra object
-  id the platform writes; it cannot be typed in by the visitor) and resolve the name and email
-  where they are needed - in the back-office app, from the user directory or `systemuser`
-  (`azureactivedirectoryobjectid`). Do not ask the visitor to type their own email as identity.
-  Check the contact row, never the header, before relying on any mapping.
+  **Identify the person by the contact's `adx_identity_username`** (the Entra object id the
+  platform writes; it cannot be typed in by the visitor). Resolving the name and email from
+  `systemuser` (`azureactivedirectoryobjectid`) works only for people who are Dataverse users -
+  usually not the people a portal is for, who have no Power Apps licence. Section 18 gives the
+  options; decide among them up front (section 17). Do not ask the visitor to type their own email
+  as identity. Check the contact row, never the header, before relying on any mapping.
 - **Turn off the profile redirect** (`Authentication/Registration/ProfileRedirectEnabled = false`)
   unless the site has a working profile form: by default every sign-in lands on `/profile/`, which on
   a blank-template site is an empty page, instead of the page the visitor asked for.
@@ -170,6 +178,11 @@ Show the server's error message on failure: the 403 text names the missing privi
   `{% if list.size == 0 %}` before the loop.
 - Validate a GUID parameter before putting it in FetchXML (`{% if id.size != 36 %}`), and escape it.
 - Render every page after every upload; a single parse error is a blank page, not a warning.
+- **`replace` treats its first argument as a regular expression** (observed). `| replace: '[', ''`
+  is an invalid pattern, and the filter it fed silently dropped: a search box matched everything.
+  Escape the characters a regular expression gives meaning to (`'\['`, `'\.'`), and test a search
+  with `[`, `%` and `_` in it - FetchXML `like` treats `%` and `_` as wildcards, so escape those too
+  when the person's words must match literally.
 
 ## 6. The cache
 
@@ -180,6 +193,29 @@ content. Authentication settings can need a site restart from the admin centre, 
 Platform API's restart operation (section 15), which needs no person in a portal.
 Changes to the "Power Pages Web API Columns" view can take up to five minutes to reach the Web
 API (documentation).
+
+**Business data is cached too, and that sets what "fresh" can mean** (documentation, "How
+server-side caching works"):
+
+- Data a person reads on the site is cached on the server, per user (shared for anonymous visitors
+  and tables with Global permission).
+- **A write through the site** (any create, update or delete on that table or a related one, by any
+  site user) clears that table's cache for everyone at once: the person sees their own comment or
+  request immediately.
+- **A change made outside the site** (the back-office app, a flow, a plug-in, a script) reaches the
+  site within the cache's 15-minute service level, usually within a couple of minutes. The 15
+  minutes cannot be shortened. A status an IT person changes in the back-office app took about
+  2.5 minutes to show on a measured site.
+- Clearing by hand: **Clear cache** at `/_services/about` (needs a web role with all website access
+  permissions) or Preview in the studio; it clears every table and slows a busy site, so it is a
+  test step, never a design. Whether server logic reads go through the same cache is not documented
+  (confirm in your tenant).
+
+So: say in the hand-back that changes made outside the site appear within minutes, word any
+"last updated" text on the page to match, and measure it rather than assume it -
+`site-walk.mjs` waits with `expectWithin` for a change made in Dataverse and reports how long it
+took. A requirement for instant reflection of back-office changes is not achievable on this
+platform; raise it as a decision, do not promise it.
 
 ## 7. Verify by performing the task, then prove the refusals
 
@@ -361,6 +397,30 @@ The rules below are what that pairing found the platform needs, in order:
     theme on your markup: the framework's own styling is the theme. On either, the logo and
     photograph are web files (classic) or compiled assets (code site), sized for the header at
     1x and 2x, with an `alt` naming the organisation.
+11. **What a design critique marked down on a site that passed every functional check** (blind
+    review and a heuristic critique of a measured portal; each is cheap at build time):
+    - **Confirm every write where the person is looking.** After a comment, the comment appears in
+      the thread with a short "Posted" state; after a request, land on the new item (or on the list
+      with it at the top) under a banner naming its key ("REQ-1025 is in the backlog"). A form that
+      simply clears reads as "did it work?".
+    - **Rows that open something look like it.** Make the whole row or card the link, give the
+      title link styling (colour and an underline on hover), and link every list that holds items -
+      including the person's own requests - to the item page.
+    - **Status chips carry equal weight.** One tinted style per status, the same weight for all; a
+      single solid chip reads as selected or urgent.
+    - **No silent defaults.** A field labelled optional and left empty is saved empty, or is
+      preselected so the person can see the value, or is required. Saving a value the person never
+      saw (a default type filled in for a blank one) is a defect.
+    - **Errors name their field**: "Add a description", not "Describe what you need" under a label
+      the reader has to connect it to; move focus to the first error and announce it (`aria-live`).
+    - **Reconcile the platform's private-site bar.** A Private site shows the platform's own
+      "This site is private" strip, with "Signed in as", above your header; it cannot be removed while
+      the site is Private (observed). Style around it: drop your own signed-in name from the header
+      at phone width so the person's name is not shown twice, and pick a header colour that sits with
+      the strip's dark ground rather than against it.
+    - **Make finding work fast once there are more than a screenful**: search as you type or on
+      Enter, a visible "filtered by" state with a clear control, and a sort that matches the list's
+      purpose (newest first for "my requests", priority then due date for shared work).
 
 ## 10. Classic site or code site
 
@@ -446,8 +506,9 @@ the parent unreadable outside the filter.
 - **Never take who-it-is from the client.** Keep requester name and email columns out of the
   `fields` allow-list and fill them on the server: server logic from `Server.User` (`fullname`,
   `emailaddress1`), or a Dataverse plug-in or flow from the contact lookup. The built-in Entra
-  provider can leave the contact's name and email blank (section 4), so check the contact row first
-  and fall back to `adx_identity_username` against `systemuser.azureactivedirectoryobjectid`.
+  provider can leave the contact's name and email blank (section 4), so check the contact row
+  first. Falling back to `adx_identity_username` against `systemuser.azureactivedirectoryobjectid`
+  works only for Dataverse users, not for the unlicensed people a portal serves - section 18.
 - **Lock it after create**: give the person no Write privilege on the table (nothing they created
   can change) - or, where some edits are allowed, column permissions narrow which columns the Web
   API may change (documentation; confirm in your tenant).
@@ -562,3 +623,82 @@ site in the environment. Remove a site in this order, listing first and confirmi
 What stays by design: contacts created by sign-ins, rows the site's users wrote, and any column or
 relationship added to your own tables for the site - remove those deliberately, as schema changes of
 their own.
+
+## 17. The go-live decisions to settle up front
+
+A portal can pass every functional check and still be unusable by its audience, because who can get
+in and who they are is decided by platform settings nobody asked about. Put these to the owner in the
+first decision batch, each with the recommendation below; when no person is present, take the
+recommendation, build to it, and list it in the hand-back. Template:
+`assets/templates/pages-decisions.md`.
+
+| Decision | Why it matters | Recommendation when no person answers |
+|---|---|---|
+| **Audience and visibility.** How many people, inside the organisation only? | A Private site admits its makers, environment System Administrators and up to 50 people granted by name (section 14). Past that, the site must be Public, with every page and the Web API restricted to signed-in people through web roles, and the organisation's Entra ID as the only identity provider (local sign-up and other providers off). | Build Private for the pilot; say in the hand-back that going organisation-wide means Public plus page-level restrictions, and that changing visibility is an administrator action. Write every page so it does not depend on Private: check the web role in Liquid or server logic on every page and endpoint. |
+| **Identity source** for people who are not Dataverse users | The built-in Entra provider can leave the contact's name and email blank; the `systemuser` fallback finds only licensed users (section 18). | Configure the Entra ID OpenID Connect provider with `openid email profile` and claims mapping if the owner can create an app registration; otherwise ship the fallback in section 18 and record the go-live blocker. |
+| **Licence** | A new site is a 90-day trial (30 in a trial environment); production needs capacity for the site's monthly authenticated users. | Stay on trial; never convert as a build step. |
+| **Letting people in** | Granting access is a list the owner keeps; whether a grant notifies the person is not documented. | Grant nobody during the build. At go-live, the owner grants named people (Private) or opens the site to the organisation (Public). Staff signing in with Entra ID need no invitation. |
+| **Freshness of back-office changes** | Changes made outside the site take up to 15 minutes to appear (section 6). | Accept it and say so on the page ("updates within a few minutes"); measure it with `site-walk.mjs expectWithin`. |
+
+## 18. Name and email for people who are not Dataverse users
+
+The people a portal is built for usually have no Power Apps licence and are not Dataverse users.
+Their contact record is all the site knows about them, and the built-in Entra provider has been seen
+to leave its name and email blank (section 4). Options, best first:
+
+1. **The Entra ID provider configured as OpenID Connect** (documentation, "Set up an OpenID Connect
+   provider with Microsoft Entra ID"): an app registration in Entra (redirect URI = the site's reply
+   URL, a client secret, ID tokens enabled), then in the studio a new OpenID Connect provider with
+   Authority `https://login.microsoftonline.com/<tenant id>/`, the client id and secret, Response type
+   `code id_token`, Response mode `form_post`, and **Scope `openid email profile`**. The `email` scope
+   fills the email on sign-in; Registration and Login claims mapping
+   (`firstname=given_name,lastname=family_name`, text and boolean contact columns only) fill the
+   name. "Contact mapping with email" (`AllowContactMappingWithEmail`) matches an existing contact by
+   the `email`, `emails` or `upn` claim instead of the object id. Creating the app registration needs
+   app-registration rights in the tenant, and a tenant that blocks user consent needs an
+   administrator to consent (confirm in your tenant); the person or an administrator does this, the
+   agent cannot. Then turn the built-in provider off so there is one way in, and sign in again with a
+   new contact to check the row, not the header.
+2. **Read the name the person already sees.** The Private-site strip shows "Signed in as <name>"
+   from the sign-in, but nothing documented exposes that value to Liquid or server logic; do not
+   scrape it (confirm in your tenant whether `user` or `Server.User` carries it on your site).
+3. **Ask once, then keep it.** On the first write, show a one-time "Your name as colleagues know it"
+   field, saved to the contact's first and last name through server logic. The email still has to
+   come from a trusted source (option 1, or the contact's `emailaddress1` if the provider filled it);
+   never take an email the visitor typed as their identity.
+4. **Resolve through `systemuser`** by `azureactivedirectoryobjectid`: correct for staff who are
+   Dataverse users, empty for everyone else. Use it only as one source among these.
+
+**Whatever the option: a write the site cannot attribute is refused, not saved anonymously.** Tell
+the person why and who to contact, and list it in the hand-back as a go-live blocker with the fix
+that needs the owner (option 1). Test it: the owner is usually a Dataverse user, so the walk cannot
+prove the unlicensed path by signing in as the owner - say so, and prove at least that a contact
+with no name and no matching `systemuser` is refused with the message.
+
+## 19. A write path that held every refusal
+
+One measured classic site passed every refusal a blind evaluator tried (hidden rows by id, filter
+and `/_api`; another person's rows; PATCH and DELETE; a comment bound to a hidden item; a request
+that sent its own author, status, project and visibility). Its shape:
+
+- **The Web API off on every table** (no `Webapi/<table>/enabled`): every `/_api/<entity set>`
+  answers 404 to a signed-in person and redirects a signed-out one to sign-in.
+- **Reads in Liquid `fetchxml`** with the visibility condition on every query (list, counts, search,
+  status filter), and on the detail page the condition **and** the id from the address: visible, or
+  the signed-in person's own request (`<requester lookup> eq user.id`). An id that fails either shows
+  "not found or not shared", the same message for both.
+- **Every write through one server logic endpoint** (`/_api/serverlogics/<name>`, POST with the
+  anti-forgery token): it sets the author or requester from the signed-in contact, the fixed project,
+  the first status and "not visible" itself, ignores any such field the browser sent, re-reads the
+  parent before a comment and refuses one on an item that is not visible, and validates required
+  fields and dates again on the server (the page's checks are for the person, the server's for
+  security).
+- **Table permissions grant Read, Create, Append and Append To only** - no Write, no Delete - so
+  nothing anyone created can be changed or removed through the site.
+- **A double press makes one row**: the button is disabled on submit (measured: two quick presses
+  created one comment). A server-side check that refuses a second identical write from the same
+  contact within a few seconds also covers a retry loop - the same build left duplicate debug rows
+  from its own retries.
+
+What it did not cover, and the next build should: identity for unlicensed people (section 18), and
+freshness of back-office changes (section 6).

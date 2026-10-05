@@ -18,6 +18,7 @@
 //                         the browser is back on the site (not on a sign-in host) and, when given,
 //                         the site's own signed-in marker is visible. Waits up to 10 minutes.
 //   node site-walk.mjs walk --scenario <file.json> [--out <dir>] [--json <file>] [--allow-writes]
+//                         [--token-cmd "<command>"] [--work-dir <dir>]
 //                         walk the scenario; table on stdout, full report with --json
 //   node site-walk.mjs --selftest [--logic-only]
 //                         prove every finding fires on known-bad fixtures and the good ones pass
@@ -28,23 +29,47 @@
 //         --headed          walk with a visible browser
 //         --allow-writes    required to walk a scenario that declares "writes": true (it posts
 //                           comments, saves forms); without it such a scenario is refused
+//         --token-cmd       a command that prints a Dataverse bearer token for orgUrl (overrides the
+//                           scenario's dataverseTokenCommand; DATAVERSE_TOKEN in the environment wins)
+//         --work-dir        where writes.json is logged (default .ship-work in the current folder)
 //
 // Scenario (see assets/scenarios/site-walk.example.json):
 //   baseUrl        the site, e.g. https://<site>.powerappsportals.com
 //   widths         viewport widths, default [1440, 390]; the sideways-scroll check runs after
 //                  every width change and on every page
 //   signInPattern  regex for sign-in URLs (default: Entra, b2c, /SignIn, /Account/Login)
-//   writes         true when the steps create or change data
-//   pages          [{path, name?, expectText?: [..], expectSelector?: [..], screenshotSelector?}]
+//   writes         true when the steps create or change data; then "restore" (how the test rows are
+//                  removed, e.g. the owner's cleanup script) and "confirm" are required
+//   orgUrl, dataverseTokenCommand   the Dataverse org and a command printing a token for it (confirm)
+//   pages          [{path, name?, expectText?: [..], expectSelector?: [..], expectNoText?: [..],
+//                   screenshotSelector?, expectWithin?}]
 //                  visited at every width; a screenshot named <name>-<width>.png when name is set
 //   steps          [{goto}|{fill, value}|{click}|{select, value}|{press, selector?}|{expectText}|
-//                   {expectNoText}|{expectUrl}|{wait}|{screenshot}]  performed once, at the first width
-//   api            [{name?, method?, path, body?, expectStatus?, expectNoRows?}]  sent from inside the
-//                  signed-in page with fetch, carrying the site's anti-forgery token from
+//                   {expectNoText}|{expectUrl}|{wait}|{screenshot}|{capture}]  performed once, at the
+//                  first width. Any step may also carry "capture" (taken after the step).
+//   api            [{name?, method?, path, body?, expectStatus?, expectNoRows?, capture?}]  sent from
+//                  inside the signed-in page with fetch, carrying the site's anti-forgery token from
 //                  /_layout/tokenhtml. expectStatus: a number, a list, or "2xx" / "4xx".
+//   confirm        [{table, filter, expect?: {column: value}, count?, absent?, changedDuringRun?,
+//                   within?}]  read back over the Dataverse Web API after the steps and probes. table
+//                  is the entity set (entitySet is accepted too). A value matches the raw value or its
+//                  formatted label. changedDuringRun (default: true when the scenario writes) needs
+//                  every matched row's modifiedon after the walk started, so a row from an earlier
+//                  run cannot pass. within: seconds to keep re-reading (a flow that writes later).
 //   signedOut      [{path, mustNotShow?: [..], expectNoRows?}]  in a fresh context with no cookies:
 //                  a page must redirect to sign-in or show none of mustNotShow (no mustNotShow: it
 //                  must redirect); an /_api path must return no rows
+//
+// Captures and variables: {"capture": {"name": "key", "from": "url"|"text"|"json", "selector"?,
+//   "pattern"?, "path"?}} stores a value (pattern's first group, or the whole source; "path" walks a
+//   JSON response, e.g. "value.0.id") and any later string may use {{key}}. Built in: {{runId}} (one
+//   value per walk, so test rows are unique) and {{today}}, {{today+N}}, {{today-N}} (YYYY-MM-DD).
+//   An unknown {{name}} fails the step that uses it.
+//
+// Eventual consistency: "expectWithin": <seconds> on an expectText / expectNoText step or a page
+//   keeps reloading (every "every" seconds, default 10) until the expectation holds. The report
+//   records how long it took, so a site cache delay is measured, not hidden; past the limit it is
+//   SW-STALE.
 //
 // Finding codes:
 //   SW-NAV            a page failed to load (HTTP 400+), or a signed-in page landed on sign-in
@@ -57,16 +82,22 @@
 //   SW-API-STATUS     any other status mismatch
 //   SW-API-ROWS       a call that must return nothing returned rows
 //   SW-SIGNEDOUT-LEAK signed out, a page or the Web API showed data
+//   SW-CONFIRM        a Dataverse read-back did not hold (no row, wrong value, an old row, or no token)
+//   SW-STALE          an expectWithin expectation still failed when its time ran out
 //
-// Exit: 0 clean; 1 findings; 2 nothing examined (no browser, empty scenario, scenario refused) -
-// NOT a pass. Screenshots are of the page only (never browser chrome): full-page captures of the
+// A walk with "writes": true appends {at, scenario, tool} to <work-dir>/writes.json, the log the
+// plugin gate's seed check reads (the same file canvas-browser.mjs walk writes).
+//
+// Exit: 0 clean; 1 findings; 2 nothing examined (no browser, empty scenario, scenario refused,
+// a writing scenario without confirm or restore) - NOT a pass. Screenshots are of the page only (never browser chrome): full-page captures of the
 // document, or of screenshotSelector's element.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, rmSync, mkdtempSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
@@ -97,10 +128,99 @@ export function validateScenario(s) {
     if (typeof a.path !== 'string' || !a.path.startsWith('/')) errs.push(`api[${i}].path must start with /`);
     if (a.expectStatus === undefined && !a.expectNoRows) errs.push(`api[${i}] needs expectStatus or expectNoRows (a probe with no expectation proves nothing)`);
   }
-  const verbs = ['goto', 'fill', 'click', 'select', 'press', 'expectText', 'expectNoText', 'expectUrl', 'wait', 'screenshot'];
-  for (const [i, st] of (s.steps || []).entries()) if (!verbs.some((v) => v in st)) errs.push(`steps[${i}] has none of ${verbs.join(', ')}`);
+  const verbs = ['goto', 'fill', 'click', 'select', 'press', 'expectText', 'expectNoText', 'expectUrl', 'wait', 'screenshot', 'capture'];
+  for (const [i, st] of (s.steps || []).entries()) {
+    if (!verbs.some((v) => v in st)) errs.push(`steps[${i}] has none of ${verbs.join(', ')}`);
+    if (st.expectWithin !== undefined && !(Number(st.expectWithin) > 0)) errs.push(`steps[${i}].expectWithin must be a number of seconds`);
+    if (st.capture) errs.push(...captureErrors(st.capture, `steps[${i}].capture`));
+  }
+  for (const [i, a] of (s.api || []).entries()) if (a.capture) errs.push(...captureErrors(a.capture, `api[${i}].capture`));
   for (const [i, o] of (s.signedOut || []).entries()) if (typeof o.path !== 'string') errs.push(`signedOut[${i}].path is missing`);
+  if (s.confirm && !Array.isArray(s.confirm)) errs.push('confirm must be a list');
+  for (const [i, c] of (s.confirm || []).entries()) {
+    if (!(c.table || c.entitySet)) errs.push(`confirm[${i}] needs "table" (the entity set, e.g. app_comments)`);
+    if (typeof c.filter !== 'string' || !c.filter.trim()) errs.push(`confirm[${i}] needs a "filter" (OData), so it reads only this run's rows`);
+    if (!c.absent && !c.expect && c.count === undefined) errs.push(`confirm[${i}] asserts nothing: give "expect", "count" or "absent"`);
+  }
+  if ((s.confirm || []).length && !/^https?:\/\//.test(s.orgUrl || '')) errs.push('confirm needs "orgUrl" (the Dataverse org, e.g. https://<org>.crm.dynamics.com)');
+  // As in canvas-browser walk: a screen that says "Saved" proves nothing about the row.
+  if (s.writes === true && !(s.confirm || []).length) errs.push('a scenario that writes must have "confirm" checks that read the rows back in Dataverse');
+  if (s.writes === true && !(typeof s.restore === 'string' && s.restore.trim())) errs.push('a scenario that writes must say how its rows are removed ("restore", e.g. the owner\'s cleanup script)');
   return errs;
+}
+
+function captureErrors(c, where) {
+  if (!c || typeof c !== 'object') return [`${where} must be an object`];
+  const e = [];
+  if (!/^[A-Za-z_]\w*$/.test(c.name || '')) e.push(`${where}.name must be a simple name (letters, digits, _)`);
+  if (!['url', 'text', 'json'].includes(c.from || 'text')) e.push(`${where}.from must be url, text or json`);
+  if (c.from === 'json' && !c.path) e.push(`${where}: from json needs a "path" (e.g. value.0.id)`);
+  if (c.pattern) { try { new RegExp(c.pattern); } catch (x) { e.push(`${where}.pattern: ${x.message}`); } }
+  return e;
+}
+
+// {{name}} substitution in every string of a value. Built in: runId, today, today+N, today-N.
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export function subst(value, vars, now = new Date()) {
+  if (typeof value === 'string') {
+    return value.replace(/\{\{\s*([A-Za-z_]\w*)\s*(?:([+-])\s*(\d+))?\s*\}\}/g, (m, name, sign, n) => {
+      if (name === 'today') { const d = new Date(now); d.setDate(d.getDate() + (sign ? (sign === '-' ? -1 : 1) * Number(n) : 0)); return isoDay(d); }
+      if (sign) throw new Error(`variable {{${name}${sign}${n}}}: only {{today}} takes an offset`);
+      if (!(name in vars)) throw new Error(`unknown variable {{${name}}} (capture it in an earlier step)`);
+      return String(vars[name]);
+    });
+  }
+  if (Array.isArray(value)) return value.map((v) => subst(v, vars, now));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, k === 'capture' ? v : subst(v, vars, now)]));
+  return value;
+}
+
+// A capture's value from its source text (a URL, a page's text, or a JSON body).
+export function captureValue(c, source) {
+  let v = source;
+  if ((c.from || 'text') === 'json') {
+    let j; try { j = JSON.parse(source); } catch { throw new Error(`capture ${c.name}: the response is not JSON`); }
+    v = String(c.path).split('.').reduce((o, k) => (o == null ? undefined : o[/^\d+$/.test(k) ? Number(k) : k]), j);
+    if (v === undefined || v === null) throw new Error(`capture ${c.name}: nothing at ${c.path}`);
+    v = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  }
+  if (c.pattern) {
+    const m = new RegExp(c.pattern).exec(v);
+    if (!m) throw new Error(`capture ${c.name}: /${c.pattern}/ matched nothing`);
+    v = m[1] ?? m[0];
+  }
+  if (v === '' || v === undefined) throw new Error(`capture ${c.name}: empty value`);
+  return String(v);
+}
+
+// Judge rows read back from Dataverse for one confirm check -> list of reasons (empty = holds).
+const SKEW_MS = 60000;   // clock difference between this machine and Dataverse
+export function judgeRows(rows, c, runStartMs, writes) {
+  const why = [];
+  if (c.absent) { if (rows.length) why.push(`${rows.length} row(s) match, expected none`); return why; }
+  if (c.count !== undefined && rows.length !== Number(c.count)) why.push(`${rows.length} row(s), expected ${c.count}`);
+  else if (c.count === undefined && !rows.length) why.push('no row matches');
+  const fresh = c.changedDuringRun ?? c.changedThisRun ?? !!writes;
+  rows.forEach((r, k) => {
+    for (const [col, want] of Object.entries(c.expect || {})) {
+      const got = r[col];
+      const label = r[col + '@OData.Community.Display.V1.FormattedValue'];
+      const same = got === want || (got !== undefined && got !== null && want !== null && String(got).toLowerCase() === String(want).toLowerCase())
+        || (label !== undefined && String(label) === String(want));
+      if (!same) why.push(`row ${k + 1}: ${col} is ${JSON.stringify(got)}${label !== undefined ? ' ("' + label + '")' : ''}, expected ${JSON.stringify(want)}`);
+    }
+    if (fresh && runStartMs) {
+      const m = Date.parse(r.modifiedon || r.createdon || '');
+      if (!m) why.push(`row ${k + 1}: no modifiedon returned, so this run's write cannot be told from an old row`);
+      else if (m < runStartMs - SKEW_MS) why.push(`row ${k + 1}: last modified ${r.modifiedon || r.createdon}, before this walk started - this run did not write it`);
+    }
+  });
+  return why;
+}
+
+export function confirmUrl(orgUrl, c) {
+  const cols = new Set([...Object.keys(c.expect || {}), 'modifiedon', 'createdon'].map((x) => x.trim()).filter(Boolean));
+  return String(orgUrl).replace(/\/+$/, '') + '/api/data/v9.2/' + (c.table || c.entitySet) + '?$filter=' + encodeURIComponent(c.filter) + '&$select=' + [...cols].join(',') + '&$top=50';
 }
 
 export function countRows(bodyText) {
@@ -158,7 +278,7 @@ export function exitCode(report) {
 
 function table(rows) {
   const w1 = Math.min(56, Math.max(4, ...rows.map((r) => r.step.length)));
-  const lines = rows.map((r) => `${r.step.slice(0, 56).padEnd(w1)}  ${String(r.width ?? '-').padStart(5)}  ${r.code ? r.code + ' ' + r.msg : 'ok'}`);
+  const lines = rows.map((r) => `${r.step.slice(0, 56).padEnd(w1)}  ${String(r.width ?? '-').padStart(5)}  ${r.code ? r.code + ' ' + r.msg : r.note ? 'ok (' + r.note + ')' : 'ok'}`);
   return [`${'step'.padEnd(w1)}  width  result`, ...lines].join('\n');
 }
 
@@ -227,14 +347,17 @@ async function shot(page, out, name, width, selector) {
 }
 
 // Walk one scenario. ctx is a signed-in context; freshContext() makes a cookie-free one.
-export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = false }) {
+// getToken(scenario) returns a Dataverse token for orgUrl (or throws); runStart defaults to now.
+export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = false, getToken = null, runStart = Date.now() }) {
   const rows = [];
-  const add = (step, width, f) => rows.push({ step, width, code: f ? f.code : null, msg: f ? f.msg : '' });
+  const add = (step, width, f, note = '') => rows.push({ step, width, code: f ? f.code : null, msg: f ? f.msg : '', note });
   const errs = validateScenario(s);
   if (errs.length) { errs.forEach((e) => add('scenario: ' + e, null, { code: 'SW-STEP', msg: 'scenario refused' })); return { examined: 0, rows, refused: true }; }
   if (s.writes && !allowWrites) { add('scenario declares "writes": true', null, { code: 'SW-STEP', msg: 'refused without --allow-writes' }); return { examined: 0, rows, refused: true }; }
   const signIn = new RegExp(s.signInPattern || DEFAULT_SIGNIN, 'i');
   const widths = s.widths?.length ? s.widths : [1440, 390];
+  const vars = { runId: s.runId || new Date(runStart).toISOString().replace(/[-:TZ.]/g, '').slice(0, 14) };
+  const timings = [];
   let examined = 0;
   const page = ctx.pages()[0] || await ctx.newPage();
 
@@ -248,53 +371,109 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
     return true;
   }
 
+  // Keep re-checking (reloading between tries) until check() holds or `within` seconds pass.
+  // The first try needs no reload. Returns {ok, secs, tries}; secs is how long the site took.
+  async function eventually(check, within, every) {
+    const t0 = Date.now(), end = t0 + within * 1000;
+    let tries = 0;
+    for (;;) {
+      tries++;
+      if (await check()) return { ok: true, secs: Math.round((Date.now() - t0) / 1000), tries };
+      if (Date.now() + every * 1000 > end) return { ok: false, secs: Math.round((Date.now() - t0) / 1000), tries };
+      await page.waitForTimeout(every * 1000);
+      await page.reload({ waitUntil: 'load', timeout: 45000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    }
+  }
+  const bodyText = () => page.locator('body').innerText().catch(() => '');
+
+  async function capture(c, jsonText = null) {
+    const from = c.from || 'text';
+    const source = from === 'url' ? page.url() : from === 'json' ? jsonText
+      : c.selector ? await page.locator(c.selector).first().innerText({ timeout: 10000 }) : await bodyText();
+    if (source === null || source === undefined) throw new Error(`capture ${c.name}: no response to read`);
+    vars[c.name] = captureValue(c, source);
+    return vars[c.name];
+  }
+
   for (const [wi, width] of widths.entries()) {
     await page.setViewportSize({ width, height: 900 });
     if (page.url() !== 'about:blank') add(`resize to ${width}`, width, await scrollCheck(page));
-    for (const p of s.pages || []) {
+    for (const raw of s.pages || []) {
+      let p;
+      try { p = subst(raw, vars); } catch (e) { add(`page ${raw.name || raw.path}`, width, { code: 'SW-STEP', msg: e.message }); continue; }
       const label = `page ${p.name || p.path}`;
       if (!(await visit(p.path, label, width))) continue;
-      const body = await page.locator('body').innerText().catch(() => '');
-      let f = null;
-      for (const t of p.expectText || []) if (!body.includes(t)) { f = { code: 'SW-TEXT', msg: `missing text ${JSON.stringify(t)}` }; break; }
-      if (!f) for (const sel of p.expectSelector || []) if (!(await page.locator(sel).count())) { f = { code: 'SW-TEXT', msg: `missing ${sel}` }; break; }
-      for (const t of p.expectNoText || []) if (!f && body.includes(t)) f = { code: 'SW-TEXT', msg: `shows ${JSON.stringify(t)}` };
-      add(label, width, f);
+      const judge = async () => {
+        const body = await bodyText();
+        for (const t of p.expectText || []) if (!body.includes(t)) return { code: 'SW-TEXT', msg: `missing text ${JSON.stringify(t)}` };
+        for (const sel of p.expectSelector || []) if (!(await page.locator(sel).count())) return { code: 'SW-TEXT', msg: `missing ${sel}` };
+        for (const t of p.expectNoText || []) if (body.includes(t)) return { code: 'SW-TEXT', msg: `shows ${JSON.stringify(t)}` };
+        return null;
+      };
+      let f = await judge(), note = '';
+      if (f && p.expectWithin) {
+        const r = await eventually(async () => !(f = await judge()), Number(p.expectWithin), Number(p.every || 10));
+        timings.push({ step: label, width, seconds: r.secs, ok: r.ok });
+        if (r.ok) note = `after ${r.secs} s`; else f = { code: 'SW-STALE', msg: `${f.msg} after ${r.secs} s (limit ${p.expectWithin} s)` };
+      }
+      add(label, width, f, note);
       add(label + ': sideways scroll', width, await scrollCheck(page));
       await shot(page, out, p.name, width, p.screenshotSelector);
     }
     if (wi === 0) {
-      for (const [i, st] of (s.steps || []).entries()) {
-        const label = `step ${i + 1}: ` + Object.entries(st).map(([k, v]) => `${k} ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' ').slice(0, 50);
-        const to = Number(st.timeout || 15000);
+      for (const [i, rawStep] of (s.steps || []).entries()) {
+        const what = Object.entries(rawStep).filter(([k]) => k !== 'capture').map(([k, v]) => `${k} ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' ').slice(0, 50);
+        const label = `step ${i + 1}: ` + (what || 'capture ' + rawStep.capture?.name);
+        const to = Number(rawStep.timeout || 15000);
+        let st;
+        try { st = subst(rawStep, vars); } catch (e) { add(label, width, { code: 'SW-STEP', msg: e.message }); continue; }
+        let f = null, note = '', checked = false;
         try {
-          if ('goto' in st) { if (!(await visit(st.goto, label, width))) continue; add(label, width, await scrollCheck(page)); continue; }
-          if ('fill' in st) await page.locator(st.fill).first().fill(String(st.value ?? ''), { timeout: to });
+          if ('goto' in st) { if (!(await visit(st.goto, label, width))) continue; f = await scrollCheck(page); }
+          else if ('fill' in st) await page.locator(st.fill).first().fill(String(st.value ?? ''), { timeout: to });
           else if ('select' in st) await page.locator(st.select).first().selectOption(String(st.value), { timeout: to });
           else if ('click' in st) { await page.locator(st.click).first().click({ timeout: to }); await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); }
           else if ('press' in st) { if (st.selector) await page.locator(st.selector).first().press(st.press); else await page.keyboard.press(st.press); await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); }
           else if ('wait' in st) await page.waitForTimeout(Number(st.wait));
           else if ('screenshot' in st) await shot(page, out, st.screenshot, width, st.selector);
-          else if ('expectText' in st) {
-            const ok = await page.getByText(st.expectText, { exact: false }).first().waitFor({ timeout: Number(st.timeout || 10000) }).then(() => true, () => false);
-            examined++; add(label, width, ok ? null : { code: 'SW-TEXT', msg: `missing text ${JSON.stringify(st.expectText)}` }); continue;
-          } else if ('expectNoText' in st) {
-            const body = await page.locator('body').innerText().catch(() => '');
-            examined++; add(label, width, body.includes(st.expectNoText) ? { code: 'SW-TEXT', msg: `shows ${JSON.stringify(st.expectNoText)}` } : null); continue;
+          else if ('expectText' in st || 'expectNoText' in st) {
+            checked = true;
+            const want = 'expectText' in st;
+            const text = want ? st.expectText : st.expectNoText;
+            const once = async (first) => {
+              if (want) return page.getByText(text, { exact: false }).first().waitFor({ timeout: first ? Number(st.timeout || 10000) : 3000 }).then(() => true, () => false);
+              return !(await bodyText()).includes(text);
+            };
+            let ok = await once(true);
+            if (!ok && st.expectWithin) {
+              let first = true;
+              const r = await eventually(async () => { if (first) { first = false; return false; } return once(false); }, Number(st.expectWithin), Number(st.every || 10));
+              timings.push({ step: label, width, seconds: r.secs, ok: r.ok });
+              ok = r.ok;
+              if (ok) note = `after ${r.secs} s`;
+              else f = { code: 'SW-STALE', msg: `${want ? 'missing' : 'still shows'} ${JSON.stringify(text)} after ${r.secs} s (limit ${st.expectWithin} s)` };
+            }
+            if (!ok && !f) f = { code: 'SW-TEXT', msg: `${want ? 'missing text' : 'shows'} ${JSON.stringify(text)}` };
           } else if ('expectUrl' in st) {
-            examined++; add(label, width, new RegExp(st.expectUrl).test(page.url()) ? null : { code: 'SW-URL', msg: `url ${page.url()} does not match ${st.expectUrl}` }); continue;
+            checked = true;
+            if (!new RegExp(st.expectUrl).test(page.url())) f = { code: 'SW-URL', msg: `url ${page.url()} does not match ${st.expectUrl}` };
           }
-          add(label, width, null);
-        } catch (e) { add(label, width, { code: 'SW-STEP', msg: e.message.split('\n')[0].slice(0, 140) }); }
+          if (st.capture && !f) { const v = await capture(st.capture); note = (note ? note + '; ' : '') + `${st.capture.name} = ${v.slice(0, 40)}`; }
+        } catch (e) { f = { code: 'SW-STEP', msg: e.message.split('\n')[0].slice(0, 140) }; }
+        if (checked) examined++;
+        add(label, width, f, note);
       }
     }
   }
 
   if ((s.api || []).length) {
     const from = s.apiFrom || s.pages?.[0]?.path || '/';
-    await visit(from, 'api: open ' + from, widths[0]);
-    for (const a of s.api) {
-      const label = 'api ' + (a.name || `${a.method || 'GET'} ${a.path}`);
+    await visit(subst(from, vars), 'api: open ' + from, widths[0]);
+    for (const rawProbe of s.api) {
+      const label = 'api ' + (rawProbe.name || `${rawProbe.method || 'GET'} ${rawProbe.path}`);
+      let a;
+      try { a = subst(rawProbe, vars); } catch (e) { add(label, null, { code: 'SW-STEP', msg: e.message }); continue; }
       const r = await page.evaluate(async ({ path, method, body }) => {
         let token = '';
         try { const t = await (await fetch('/_layout/tokenhtml', { credentials: 'include' })).text(); token = (t.match(/value="([^"]+)"/) || [])[1] || ''; } catch { /* no token endpoint */ }
@@ -304,7 +483,44 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
         return { status: res.status, text: (await res.text()).slice(0, 20000), token: !!token };
       }, { path: a.path, method: (a.method || 'GET').toUpperCase(), body: a.body }).catch((e) => ({ status: 0, text: '', err: e.message }));
       examined++;
-      add(label, null, r.err ? { code: 'SW-STEP', msg: r.err.split('\n')[0] } : apiVerdict(a, r.status, r.text));
+      let f = r.err ? { code: 'SW-STEP', msg: r.err.split('\n')[0] } : apiVerdict(a, r.status, r.text), note = '';
+      if (!f && a.capture) {
+        try { note = `${a.capture.name} = ${(await capture(a.capture, r.text)).slice(0, 40)}`; }
+        catch (e) { f = { code: 'SW-STEP', msg: e.message }; }
+      }
+      add(label, null, f, note);
+    }
+  }
+
+  // Read the rows back where they land, every run: a page that says "Saved" proves nothing.
+  if ((s.confirm || []).length) {
+    let token = null, cannot = null;
+    try { token = getToken ? await getToken(s) : null; if (!token) cannot = 'no Dataverse token: add "dataverseTokenCommand" to the scenario, pass --token-cmd, or set DATAVERSE_TOKEN'; }
+    catch (e) { cannot = 'the token command failed: ' + String(e.stderr || e.message).split('\n').find((x) => x.trim()); }
+    for (const rawCheck of s.confirm) {
+      const label = 'confirm ' + (rawCheck.table || rawCheck.entitySet) + ' ' + String(rawCheck.filter).slice(0, 40);
+      examined++;
+      if (cannot) { add(label, null, { code: 'SW-CONFIRM', msg: 'cannot confirm - ' + cannot + '. NOT a pass.' }); continue; }
+      let c;
+      try { c = subst(rawCheck, vars); } catch (e) { add(label, null, { code: 'SW-CONFIRM', msg: e.message }); continue; }
+      const read = async () => {
+        try {
+          const res = await fetch(confirmUrl(s.orgUrl, c), { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0',
+            Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"' } });
+          const body = await res.text();
+          if (!res.ok) return ['HTTP ' + res.status + ': ' + ((() => { try { return JSON.parse(body).error.message; } catch { return body.slice(0, 160); } })())];
+          return judgeRows(JSON.parse(body).value || [], c, runStart, s.writes === true);
+        } catch (e) { return [e.message]; }
+      };
+      let why = await read(), note = '';
+      if (why.length && c.within) {
+        const t0 = Date.now(), end = t0 + Number(c.within) * 1000;
+        while (why.length && Date.now() + 5000 <= end) { await new Promise((ok) => setTimeout(ok, 5000)); why = await read(); }
+        const secs = Math.round((Date.now() - t0) / 1000);
+        timings.push({ step: label, width: null, seconds: secs, ok: !why.length });
+        if (!why.length) note = `after ${secs} s`;
+      }
+      add(label, null, why.length ? { code: 'SW-CONFIRM', msg: why.join('; ').slice(0, 300) } : null, note);
     }
   }
 
@@ -327,7 +543,30 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
     }
     await fresh.close();
   }
-  return { examined, rows };
+  return { examined, rows, vars, timings };
+}
+
+// The token for confirm: DATAVERSE_TOKEN, else the last line printed by --token-cmd, the scenario's
+// dataverseTokenCommand or DATAVERSE_TOKEN_COMMAND.
+function tokenFor(s) {
+  if (process.env.DATAVERSE_TOKEN) return process.env.DATAVERSE_TOKEN.trim();
+  const command = (flag('token-cmd') && flag('token-cmd') !== true ? String(flag('token-cmd')) : null) || s.dataverseTokenCommand || process.env.DATAVERSE_TOKEN_COMMAND;
+  if (!command) return null;
+  const outText = execSync(command, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180000 });
+  const lines = outText.trim().split(/\r?\n/);
+  return lines[lines.length - 1].trim() || null;
+}
+
+// The same log canvas-browser.mjs walk keeps, so the plugin gate's seed check sees site writes too.
+export function logWrite(workDir, name) {
+  const file = join(resolve(workDir), 'writes.json');
+  try {
+    let w = []; try { w = JSON.parse(readFileSync(file, 'utf8')); } catch { /* first */ }
+    w.push({ at: new Date().toISOString(), scenario: name, tool: 'site-walk' });
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(w.slice(-100), null, 1));
+    return file;
+  } catch { return null; }   // unwritable work folder
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -365,15 +604,23 @@ async function cmdWalk() {
   const chromium = await loadPlaywright(); if (!chromium) noBrowser('walk');
   const ctx = await persistent(chromium, !has('headed'));
   let plain = null;
+  const runStart = Date.now();
   const report = await runWalk(s, {
     ctx, out: flag('out') && flag('out') !== true ? resolve(String(flag('out'))) : null, allowWrites: has('allow-writes'),
     freshContext: async () => { plain = plain || await plainBrowser(chromium); return plain.newContext(); },
+    getToken: async (sc) => tokenFor(sc), runStart,
   });
   await ctx.close(); if (plain) await plain.close();
+  if (s.writes === true && !report.refused) {
+    const logged = logWrite(flag('work-dir') && flag('work-dir') !== true ? String(flag('work-dir')) : '.ship-work', s.name || String(file));
+    if (logged) log(`(write logged in ${logged}; the seed check must run after it)`);
+  }
   log(table(report.rows));
   const n = report.rows.filter((r) => r.code).length;
   const code = exitCode(report);
   log(code === 2 ? '\nNOTHING EXAMINED - not a pass.' : `\n${report.examined} check(s), ${n} finding(s).`);
+  for (const t of report.timings || []) log(`  ${t.ok ? 'settled' : 'STALE'} after ${t.seconds} s: ${t.step}`);
+  if (s.writes === true && !report.refused) log(`  Test rows from this run carry ${report.vars?.runId}. Remove them with: ${s.restore}`);
   if (flag('json') && flag('json') !== true) writeFileSync(String(flag('json')), JSON.stringify({ scenario: file, ...report, exit: code }, null, 2));
   process.exit(code);
 }
@@ -384,12 +631,31 @@ async function cmdWalk() {
 function fixtureServer() {
   const html = (title, body) => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="margin:0;font-family:Arial">${body}</body></html>`;
   const signedIn = (req) => /(^|;\s*)sid=1/.test(req.headers.cookie || '');
+  // A fake Dataverse: comments posted by the page land here with this run's timestamps; one old row
+  // stands for a leftover from an earlier run.
+  const comments = [{ app_commentid: 1, app_body: 'OLD', app_status: 1, createdon: '2020-01-01T00:00:00Z', modifiedon: '2020-01-01T00:00:00Z' }];
+  let eventualHits = 0;
+  const postScript = "(async()=>{const v=document.getElementById('c').value;const r=await fetch('/post-comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:v})});const j=await r.json();document.getElementById('out').textContent='Posted: '+v+' (id '+j.id+')';})()";
   const srv = createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     const send = (code, type, body, extra = {}) => { res.writeHead(code, { 'Content-Type': type, ...extra }); res.end(body); };
     const json = (code, o) => send(code, 'application/json', JSON.stringify(o));
     const p = decodeURIComponent(u.pathname);
-    if (p === '/ok') return send(200, 'text/html', html('ok', '<h1>Work items</h1><p>DEMO-1001 Fix the thing</p><form><input id="c"><button id="post" type="button" onclick="document.getElementById(\'out\').textContent=\'Posted: \'+document.getElementById(\'c\').value">Post</button></form><p id="out"></p>'));
+    if (p === '/ok') return send(200, 'text/html', html('ok', `<h1>Work items</h1><p>DEMO-1001 Fix the thing</p><form><input id="c"><button id="post" type="button" onclick="${postScript}">Post</button></form><p id="out"></p>`));
+    if (p === '/post-comment' && req.method === 'POST') {
+      let b = ''; req.on('data', (d) => { b += d; });
+      req.on('end', () => { const now = new Date().toISOString(); const id = comments.length + 41; comments.push({ app_commentid: id, app_body: JSON.parse(b).body, app_status: 1, createdon: now, modifiedon: now }); json(200, { id }); });
+      return;
+    }
+    if (p.startsWith('/api/data/v9.2/app_comments')) {
+      if (req.headers.authorization !== 'Bearer dvtok') return json(401, { error: { message: 'no token' } });
+      const m = /app_body eq '((?:[^']|'')*)'/.exec(u.searchParams.get('$filter') || '');
+      const want = m ? m[1].replace(/''/g, "'") : null;
+      return json(200, { value: comments.filter((c) => c.app_body === want).map((c) => ({ ...c, 'app_status@OData.Community.Display.V1.FormattedValue': c.app_status === 1 ? 'New' : 'Closed' })) });
+    }
+    if (p.startsWith('/item/')) return send(200, 'text/html', html('item', `<h1>Item ${p.slice(6)}</h1>`));
+    if (p === '/eventual') { eventualHits++; return send(200, 'text/html', html('eventual', `<p>Status: ${eventualHits >= 3 ? 'To Do' : 'Backlog'}</p>`)); }
+    if (p === '/never') return send(200, 'text/html', html('never', '<p>Status: Backlog</p>'));
     if (p === '/wide') return send(200, 'text/html', html('wide', '<div style="width:600px;height:40px;background:#0066B3">fixed 600px</div>'));
     if (p === '/SignIn') return send(200, 'text/html', html('sign in', '<p>Please sign in</p>'));
     if (p === '/secret') return signedIn(req) ? send(200, 'text/html', html('secret', '<p>SECRET-ITEM</p>')) : send(302, 'text/plain', '', { Location: '/SignIn' });
@@ -400,6 +666,7 @@ function fixtureServer() {
       if (req.headers.__requestverificationtoken !== 'tok123') return json(400, { error: { message: 'missing token' } });
       if (p === '/_api/items(1)') return json(403, { error: { code: '90040120', message: 'no permission' } });
       if (p === '/_api/items(2)') return json(200, { '@odata.context': 'x', id: 2, title: 'hidden' });
+      if (p === '/_api/items(3)') return json(200, { '@odata.context': 'x', id: 3, title: 'shared' });
       if (p === '/_api/items' && req.method === 'GET') return json(200, { value: u.searchParams.get('$filter') ? [] : [{ id: 3 }] });
       return json(405, { error: { message: 'not allowed' } });
     }
@@ -434,6 +701,43 @@ async function selftest() {
   check('exit 2 when nothing examined', exitCode({ examined: 0, rows: [] }) === 2);
   check('exit 1 on a finding', exitCode({ examined: 1, rows: [{ code: 'SW-TEXT' }] }) === 1);
   check('exit 0 when clean', exitCode({ examined: 1, rows: [{ code: null }] }) === 0);
+
+  // Variables and captures.
+  const day = new Date(2026, 0, 30);
+  check('subst: runId and captured names', subst('[TEST] {{runId}} on {{ cid }}', { runId: 'R1', cid: '42' }, day) === '[TEST] R1 on 42');
+  check('subst: today+N crosses the month', subst('{{today+2}} {{today}} {{today-30}}', {}, day) === '2026-02-01 2026-01-30 2025-12-31');
+  let threw = ''; try { subst({ fill: '#x', value: '{{nope}}' }, {}); } catch (e) { threw = e.message; }
+  check('subst: unknown variable throws, naming it', /unknown variable \{\{nope\}\}/.test(threw));
+  check('subst: nested lists and objects, capture spec untouched', JSON.stringify(subst({ a: ['{{x}}'], capture: { name: 'y', pattern: '{{x}}' } }, { x: 'v' })) === '{"a":["v"],"capture":{"name":"y","pattern":"{{x}}"}}');
+  check('capture: json path', captureValue({ name: 'id', from: 'json', path: 'value.0.id' }, '{"value":[{"id":7}]}') === '7');
+  check('capture: pattern group from text', captureValue({ name: 'cid', pattern: 'id (\\d+)' }, 'Posted: x (id 42)') === '42');
+  threw = ''; try { captureValue({ name: 'k', pattern: 'DEMO-\\d+' }, 'nothing here'); } catch (e) { threw = e.message; }
+  check('capture: no match throws', /matched nothing/.test(threw));
+  threw = ''; try { captureValue({ name: 'k', from: 'json', path: 'value.3.id' }, '{"value":[]}'); } catch (e) { threw = e.message; }
+  check('capture: missing json path throws', /nothing at value\.3\.id/.test(threw));
+
+  // Confirm judgement and the write rules.
+  const start = Date.parse('2026-10-05T12:00:00Z');
+  const fresh = { app_status: 1, 'app_status@OData.Community.Display.V1.FormattedValue': 'New', modifiedon: '2026-10-05T12:01:00Z' };
+  check('confirm: value by label and freshness hold', judgeRows([fresh], { expect: { app_status: 'New' }, count: 1 }, start, true).length === 0);
+  check('confirm: raw value holds', judgeRows([fresh], { expect: { app_status: 1 } }, start, true).length === 0);
+  check('confirm: wrong value fails', judgeRows([fresh], { expect: { app_status: 'Closed' } }, start, true).some((w) => /expected "Closed"/.test(w)));
+  check('confirm: an old row fails when the scenario writes', judgeRows([{ ...fresh, modifiedon: '2026-10-04T09:00:00Z' }], { expect: { app_status: 1 } }, start, true).some((w) => /before this walk started/.test(w)));
+  check('confirm: an old row passes when changedDuringRun is false', judgeRows([{ ...fresh, modifiedon: '2026-10-04T09:00:00Z' }], { expect: { app_status: 1 }, changedDuringRun: false }, start, true).length === 0);
+  check('confirm: count and absent', judgeRows([fresh, fresh], { count: 1, changedDuringRun: false }, start, false).length === 1 && judgeRows([fresh], { absent: true }, start, false).length === 1 && judgeRows([], { absent: true }, start, false).length === 0);
+  check('confirm: no row fails', judgeRows([], { expect: { a: 1 } }, start, false).some((w) => /no row/.test(w)));
+  check('confirm url', confirmUrl('https://org.example/', { table: 'app_comments', filter: "app_body eq 'a b'", expect: { app_status: 1 } }) === "https://org.example/api/data/v9.2/app_comments?$filter=app_body%20eq%20'a%20b'&$select=app_status,modifiedon,createdon&$top=50");
+  const writerSpec = { baseUrl: 'https://x', writes: true, steps: [{ goto: '/' }] };
+  check('writing scenario without confirm or restore refused', validateScenario(writerSpec).filter((e) => /confirm|restore/.test(e)).length === 2);
+  check('confirm without orgUrl refused', validateScenario({ ...writerSpec, restore: 'cleanup', confirm: [{ table: 't', filter: 'a eq 1', count: 1 }] }).some((e) => /orgUrl/.test(e)));
+  check('confirm that asserts nothing refused', validateScenario({ baseUrl: 'https://x', orgUrl: 'https://o', confirm: [{ table: 't', filter: 'a eq 1' }] }).some((e) => /asserts nothing/.test(e)));
+  check('bad capture name refused', validateScenario({ baseUrl: 'https://x', steps: [{ capture: { name: '1x' } }] }).some((e) => /simple name/.test(e)));
+  check('complete writing scenario accepted', validateScenario({ ...writerSpec, restore: 'cleanup', orgUrl: 'https://o', confirm: [{ table: 't', filter: 'a eq 1', count: 1 }] }).length === 0);
+  const wd = mkdtempSync(join(tmpdir(), 'site-walk-writes-'));
+  logWrite(join(wd, '.ship-work'), 'one'); logWrite(join(wd, '.ship-work'), 'two');
+  const logged = JSON.parse(readFileSync(join(wd, '.ship-work', 'writes.json'), 'utf8'));
+  check('writes.json appended in the shape the seed gate reads', logged.length === 2 && logged[1].scenario === 'two' && !!Date.parse(logged[1].at));
+  rmSync(wd, { recursive: true, force: true });
 
   if (has('logic-only')) {
     log(fails.length ? `\n${fails.length} FAILED` : '\nlogic half passed. Browser half NOT run (--logic-only): run --selftest without it where Playwright is installed.');
@@ -483,8 +787,37 @@ async function selftest() {
 
   const stepFail = await run({ baseUrl: base, widths: [1440], steps: [{ goto: '/ok' }, { click: '#nope', timeout: 1 }, { expectUrl: '/elsewhere' }] });
   check('missing selector -> SW-STEP, wrong url -> SW-URL', codes(stepFail).has('SW-STEP') && codes(stepFail).has('SW-URL'));
-  const writes = await run({ baseUrl: base, writes: true, pages: [{ path: '/ok' }] });
+  const writer = (extra) => ({ baseUrl: base, widths: [1440], writes: true, restore: 'the fixture forgets on exit', orgUrl: base, ...extra });
+  const writes = await run(writer({ pages: [{ path: '/ok' }], confirm: [{ table: 'app_comments', filter: "app_body eq 'x'", count: 1 }] }));
   check('writes refused without --allow-writes (exit 2)', exitCode(writes) === 2);
+
+  // A write performed, captured, carried forward and confirmed in (fake) Dataverse.
+  const dv = { allowWrites: true, getToken: async () => 'dvtok' };
+  const goodWrite = await run(writer({
+    steps: [{ goto: '/ok' }, { fill: '#c', value: '[TEST] {{runId}}' }, { click: '#post' },
+      { expectText: 'Posted: [TEST] {{runId}}', capture: { name: 'cid', selector: '#out', pattern: 'id (\\d+)' } },
+      { goto: '/item/{{cid}}' }, { expectText: 'Item {{cid}}' }],
+    apiFrom: '/ok', api: [{ name: 'list', path: '/_api/items', expectStatus: 200, capture: { name: 'iid', from: 'json', path: 'value.0.id' } },
+      { name: 'captured id opens', path: '/_api/items({{iid}})', expectStatus: 200 }],
+    confirm: [{ table: 'app_comments', filter: "app_body eq '[TEST] {{runId}}'", expect: { app_status: 'New' }, count: 1 }],
+  }), dv);
+  check('write: posted, captured, carried, confirmed - no findings', codes(goodWrite).size === 0 && goodWrite.examined > 0 && /^\d+$/.test(goodWrite.vars?.cid || '') && goodWrite.vars?.iid === '3');
+  if (codes(goodWrite).size) log(table(goodWrite.rows.filter((r) => r.code)));
+  const badConfirm = await run(writer({ steps: [{ goto: '/ok' }],
+    confirm: [{ table: 'app_comments', filter: "app_body eq 'OLD'", count: 1 }, { table: 'app_comments', filter: "app_body eq 'OLD'", expect: { app_status: 'Closed' }, changedDuringRun: false }] }), dv);
+  check('old row and wrong value -> SW-CONFIRM (twice)', badConfirm.rows.filter((r) => r.code === 'SW-CONFIRM').length === 2);
+  const noToken = await run(writer({ steps: [{ goto: '/ok' }], confirm: [{ table: 'app_comments', filter: "app_body eq 'OLD'", count: 1 }] }), { allowWrites: true, getToken: async () => null });
+  check('no token -> SW-CONFIRM, never a pass', noToken.rows.some((r) => r.code === 'SW-CONFIRM' && /NOT a pass/.test(r.msg)));
+  const unknownVar = await run({ baseUrl: base, widths: [1440], steps: [{ goto: '/item/{{missing}}' }] });
+  check('unknown variable -> SW-STEP', unknownVar.rows.some((r) => r.code === 'SW-STEP' && /unknown variable/.test(r.msg)));
+
+  // A cache delay is measured, and a page that never settles is SW-STALE.
+  const late = await run({ baseUrl: base, widths: [1440], steps: [{ goto: '/eventual' }, { expectText: 'Status: To Do', expectWithin: 20, every: 1, timeout: 500 }] });
+  const lateRow = late.rows.find((r) => /expectText/.test(r.step));
+  check('expectWithin: settles after reloads, time recorded', codes(late).size === 0 && /^after \d+ s$/.test(lateRow?.note || '') && late.timings.length === 1 && late.timings[0].ok);
+  const stale = await run({ baseUrl: base, widths: [1440], steps: [{ goto: '/never' }, { expectText: 'Status: To Do', expectWithin: 3, every: 1, timeout: 500 }],
+    pages: [{ path: '/never', expectText: ['Status: Done'], expectWithin: 2, every: 1 }] });
+  check('expectWithin: never settles -> SW-STALE (step and page)', stale.rows.filter((r) => r.code === 'SW-STALE').length === 2);
   const empty = await run({ baseUrl: base });
   check('empty scenario: nothing examined (exit 2)', exitCode(empty) === 2);
 

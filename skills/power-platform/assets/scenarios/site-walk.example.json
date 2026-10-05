@@ -1,15 +1,21 @@
 {
   "_comment": [
     "Example for scripts/site-walk.mjs: a work requests portal where signed-in people browse shared items,",
-    "comment on them, ask for new work and see their own requests. Replace the paths, the table set name",
+    "comment on them, ask for new work and see their own requests. Replace the paths, the table set names",
     "(contoso_workitems here), the ids and the expected text with your site's. Ids come from a read of the",
-    "table before the walk: HIDDEN_ID is a row the site must never show; MINE_ID is a request of the",
-    "signed-in person; OTHER_ID is another person's request. Comment rows start with [TEST] so the",
-    "owner can find and remove them. Walk with --allow-writes, because the steps post a comment."
+    "table before the walk: HIDDEN_ID is a row the site must never show; OTHER_ID is another person's",
+    "request. Test rows carry [TEST] and this run's {{runId}}, so they are unique and the owner can find",
+    "and remove them (restore). Walk with --allow-writes: the steps post a comment and a request, and the",
+    "confirm checks read both back in Dataverse. The request's key is captured from the confirmation and",
+    "carried into the later steps; the last check waits for the site cache to show a status change."
   ],
+  "name": "portal-acceptance",
   "baseUrl": "https://<your-site>.powerappsportals.com",
+  "orgUrl": "https://<your-org>.crm.dynamics.com",
+  "dataverseTokenCommand": "powershell -NoProfile -File scripts/dv-token.ps1 -OrgUrl https://<your-org>.crm.dynamics.com",
   "widths": [1440, 390],
   "writes": true,
+  "restore": "The owner's cleanup script removes rows whose title or body starts with [TEST]",
   "pages": [
     { "path": "/", "name": "home", "expectText": ["Work items"] },
     { "path": "/items", "name": "list", "expectText": ["DEMO-"] },
@@ -21,27 +27,52 @@
     { "goto": "/items/detail?id=<VISIBLE_ID>" },
     { "click": "button:has-text('Post')" },
     { "expectText": "Write a comment before posting" },
-    { "fill": "textarea[name='comment']", "value": "[TEST] Checked by the site walk" },
+    { "fill": "textarea[name='comment']", "value": "[TEST] {{runId}} checked by the site walk" },
     { "click": "button:has-text('Post')" },
-    { "expectText": "[TEST] Checked by the site walk" },
+    { "expectText": "[TEST] {{runId}} checked by the site walk" },
+
     { "goto": "/request" },
     { "click": "button[type='submit']" },
     { "expectText": "Title is required" },
     { "screenshot": "request-error" },
+    { "fill": "#title", "value": "[TEST] {{runId}} request from the site walk" },
+    { "fill": "#description", "value": "Created by the acceptance walk." },
+    { "fill": "#needed-by", "value": "{{today+14}}" },
+    { "click": "button[type='submit']" },
+    { "expectText": "Request sent", "capture": { "name": "key", "from": "text", "pattern": "(DEMO-\\d+)" } },
+    { "goto": "/my-requests" },
+    { "expectText": "{{key}}" },
+
     { "goto": "/items/detail?id=<HIDDEN_ID>" },
     { "expectNoText": "<HIDDEN_TITLE>" }
   ],
+  "apiFrom": "/items",
   "api": [
     { "name": "hidden item by id", "path": "/_api/contoso_workitems(<HIDDEN_ID>)", "expectStatus": [403, 404] },
-    { "name": "hidden item by filter", "path": "/_api/contoso_workitems?$filter=contoso_number eq '<HIDDEN_NUMBER>'", "expectStatus": [200, 403], "expectNoRows": true },
+    { "name": "hidden item by filter", "path": "/_api/contoso_workitems?$filter=contoso_number eq '<HIDDEN_NUMBER>'", "expectStatus": [200, 403, 404], "expectNoRows": true },
     { "name": "another person's request", "path": "/_api/contoso_workitems(<OTHER_ID>)", "expectStatus": [403, 404] },
-    { "name": "change an item", "method": "PATCH", "path": "/_api/contoso_workitems(<MINE_ID>)", "body": { "contoso_name": "[TEST] changed" }, "expectStatus": "4xx" },
-    { "name": "delete an item", "method": "DELETE", "path": "/_api/contoso_workitems(<MINE_ID>)", "expectStatus": "4xx" },
-    { "name": "comment on a hidden item", "method": "POST", "path": "/_api/contoso_comments", "body": { "contoso_body": "[TEST] must be refused", "contoso_WorkItem@odata.bind": "/contoso_workitems(<HIDDEN_ID>)" }, "expectStatus": "4xx" }
+    { "name": "my request by key, for its id", "path": "/_api/contoso_workitems?$filter=contoso_key eq '{{key}}'&$select=contoso_workitemid", "expectStatus": [200, 403, 404],
+      "capture": { "name": "mine", "from": "json", "path": "value.0.contoso_workitemid" } },
+    { "name": "change my request", "method": "PATCH", "path": "/_api/contoso_workitems({{mine}})", "body": { "contoso_name": "[TEST] changed" }, "expectStatus": "4xx" },
+    { "name": "delete my request", "method": "DELETE", "path": "/_api/contoso_workitems({{mine}})", "expectStatus": "4xx" },
+    { "name": "comment on a hidden item", "method": "POST", "path": "/_api/contoso_comments", "body": { "contoso_body": "[TEST] {{runId}} must be refused", "contoso_WorkItem@odata.bind": "/contoso_workitems(<HIDDEN_ID>)" }, "expectStatus": "4xx" }
+  ],
+  "confirm": [
+    { "table": "contoso_comments", "filter": "contoso_body eq '[TEST] {{runId}} checked by the site walk'",
+      "expect": { "contoso_authoremail": "<SIGNED_IN_EMAIL>" }, "count": 1 },
+    { "table": "contoso_workitems", "filter": "contoso_name eq '[TEST] {{runId}} request from the site walk'",
+      "expect": { "contoso_status": "Backlog", "contoso_stakeholdervisible": false, "contoso_requesteremail": "<SIGNED_IN_EMAIL>" }, "count": 1 },
+    { "table": "contoso_comments", "filter": "contoso_body eq '[TEST] {{runId}} must be refused'", "absent": true }
   ],
   "signedOut": [
     { "path": "/items", "mustNotShow": ["DEMO-"] },
     { "path": "/my-requests" },
     { "path": "/_api/contoso_workitems" }
+  ],
+  "_freshness": [
+    "To measure how long a change in Dataverse takes to show on the site (a cached list), change the",
+    "request's status in Dataverse, then walk a second scenario with this step; the report says how many",
+    "seconds it took, and SW-STALE when it did not show within the limit:",
+    "{ \"goto\": \"/my-requests\" }, { \"expectText\": \"To Do\", \"expectWithin\": 240, \"every\": 15 }"
   ]
 }
