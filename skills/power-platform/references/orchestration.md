@@ -18,22 +18,29 @@ handed screens to helper agents finished first. This reference is the pattern th
 ## 1. The shape: one lead, lanes after the schema
 
 ```
-lead: acceptance contract + every decision with its recommendation          (~5 min)
-  |
-  +--> design helper: impeccable init -> DESIGN.md -> design/prototype.html (every screen at
-  |      1440 and 390, report mock) -> one critique -> one fix batch -> tokens  (~15-20 min)
-  +--> lead, lane 0: tables.json -> deploy-tables.py -> seed -> read back -> this build's
-  |      connections (Dataverse, Outlook, Approvals reference, Fabric)         (same time)
-  |
-  +--> after lane 0:      lane B flows, lane C reporting (both in one message)
-  +--> after the design:  lane A canvas (App.pa.yaml, then one helper per screen, compile, ship)
-  |                                                                            (~25 min)
-  v
-lead: walks in the foreground at both widths, screenshots, critique from screenshots
-  |   + independent reviewer (fresh helper) at the same time                  (~10 min)
-  v
-lead: one fix batch, ship once, confirm once, seed re-applied, report refreshed last, hand-back
+ 0  lead: acceptance contract + decisions (recommendations taken when no person is present)
+    |
+ 2  +--> design helper: impeccable init -> DESIGN.md -> design/prototype.html (every screen at
+    |      1440 and 390, report mock) -> one critique -> one fix -> design/app-formulas.txt  (to ~13)
+    +--> lead, lane 0: tables.json -> deploy-tables.py -> seed -> this build's connections
+    |      (Dataverse, Outlook, Approvals reference, Fabric); create the app        (to ~9)
+ 6  +--> lanes B flows and C reporting, in one message; each proves itself and hands back
+13  +--> lane A canvas: App.pa.yaml from app-formulas.txt, then EVERY screen to a helper in one
+    |      message; compile, check-all, ship                                        (to ~30)
+30  first publish --> in ONE message: critique helper + reviewer helper (read-only, 15 min cap)
+    |                 + the lead's own walks, write walks included (one walk call)
+45  both back --> ONE fix batch (helpers) -> publish (the driver refuses a third publish before
+    |             both records exist) -> one walk call, every scenario
+55  seed restored and checked (the Stop gate holds the hand-back until it is) -> report refresh
+    |   in the background while the lead writes STATE, review.md and the hand-back
+65  hand-back
 ```
+
+The critical path is the lead's, and the measured builds lost their time waiting on it, not
+working: in the slowest the lead spent 36 minutes in loops waiting for helpers, ran the report
+refresh itself twice while the reporting helper also ran it, and shipped a second fix batch because
+the reviewer, started late, reported twenty minutes after the first. Start the long helpers early
+and give the lead work while they run.
 
 - **Plan and decide first, in minutes.** The acceptance contract is the plan: every numbered
   requirement as a row someone can perform, the business rules the brief leaves implicit (what a
@@ -61,8 +68,11 @@ lead: one fix batch, ship once, confirm once, seed re-applied, report refreshed 
   (`init` writes `DESIGN.md`, creating the theme when none is given), builds
   `design/prototype.html` from `assets/templates/design-prototype.html`, critiques it once with
   impeccable (its detector and browser checks work on HTML) and fixes it once; it does not loop on
-  polish. The screen helpers start when it returns, each with its frame of the prototype and the
-  tokens; the reporting lane gets the report mock. The build whose design the person rated best was
+  polish. It ends by writing `design/app-formulas.txt`: the App `Formulas` block (colour, font and
+  layout tokens, the phone breakpoint) and `MinScreenWidth: =320`, so the lead pastes the app shell
+  instead of writing it (four minutes on the critical path in a measured build). The screen helpers
+  start when it returns, each with its frame of the prototype and the tokens; the reporting lane
+  gets the report mock. The build whose design the person rated best was
   the first to run this step; builds that left design to "required" in the guidance skipped it
   (`project-setup.md` section 3).
 - **Ship in batches, walk in one call.** A measured build that met every requirement still took 107
@@ -77,9 +87,13 @@ lead: one fix batch, ship once, confirm once, seed re-applied, report refreshed 
   spacing) were visible in the prototype: take the prototype critique at 390 px seriously, and run
   `check-canvas-format.mjs` and the clip sweep before the first ship, not after.
 - **The time budget.** For a five-screen app, two flows and a medallion, about an hour of agent
-  time: decisions 5 minutes, design and schema together 15 to 20, lanes 25, walks, critique and
-  review together 10, the fix batch and the final refresh 5. Microsoft's plugins built this brief in
-  63 minutes; a build that spends more is spending it on rework or on bookkeeping, so check which.
+  time, on the timeline above. Microsoft's plugins built this brief in 63 minutes with no design
+  steps; the design, critique and review steps here are what made the better builds better, and they
+  fit in the hour only when they run beside the lead's work instead of after it.
+- **Wait by working.** While helpers run, the lead has its own list: the write walks, the approval
+  answers for its own test rows, `docs/STATE.md`, the hand-back draft. A foreground wait loop is for
+  when that list is empty. Never run a step a helper owns (the report refresh belongs to the
+  reporting lane until it hands back; then to the lead, once, at the end).
 
 - **Schema and sample data come first and alone.** Every other lane reads them. Seed enough
   realistic rows (`scripts/seed-data.py`, from a JSON or CSV file, idempotent by name or key) that
@@ -89,9 +103,9 @@ lead: one fix batch, ship once, confirm once, seed re-applied, report refreshed 
 - **Then the three lanes run at the same time**, each in its own helper agent, because none of them
   writes what another reads: the canvas lane writes `canvas/`, the flow lane writes `flows/`, the
   reporting lane writes `fabric/` and the workspace folder.
-- **Inside the canvas lane, fan out again**: write `App.pa.yaml` (tokens, named formulas, data
-  sources) and a short screen plan first, then one helper per screen writing only its own
-  `.pa.yaml`. Compile once, after all of them return.
+- **Inside the canvas lane, fan out again**: write `App.pa.yaml` (from `design/app-formulas.txt`)
+  and a short screen plan first, then one helper per screen, every screen, in one message, each
+  writing only its own `.pa.yaml`. Compile once, after all of them return.
 - **Never end a turn while helpers or background commands are running.** Wait for every helper's
   notification before the final message. A headless run (`claude -p`) is terminated 600 s after the
   lead's turn ends while background helpers continue; the harness sets
@@ -224,6 +238,9 @@ else is the agent's work.
   Coauthoring on because the authoring server needs it, so accepting is the recommendation, listed
   with the other up-front decisions; `"acceptCoauthoringTerms": false` in `scripts/canvas-app.json`
   makes the driver stop and report instead.
+- Two walks at once (the lead's and the reviewer's) need no second sign-in: when the profile is held,
+  `walk` runs on a temporary copy taken from the snapshot the last walk left, and removes it after.
+  Do not create extra profiles with `--profile` for helpers; each one needs its own sign-in.
 - With the Playwright MCP tools, close each tab you opened when you are done with it
   (`browser_tabs` close), and check the tab list before handing back.
 - Close Studio through its Back button; never leave a held co-authoring session behind.
@@ -231,31 +248,41 @@ else is the agent's work.
 
 ## 7. The finish: one verification round, one fix batch, one confirm
 
-1. The lead walks every acceptance row in the published app, at desktop and phone width, and
-   captures the screenshots the design critique needs. The walks run in the foreground (see
-   section 1). Report screenshots show the report canvas only: never the Power BI header (it shows
-   the signed-in person's photo and the organisation's logo) or the workspace rail.
-2. Run the design critique (impeccable `critique`) on those screenshots and the report, and the
-   clipping, overlap and dead-click sweeps. Truncation counts: text cut with an ellipsis where the
-   full value matters to the task is a defect at phone width, not a pass.
-3. **An independent reviewer before the fix batch.** Start a fresh helper agent with no build
-   context, using `assets/templates/reviewer-prompt.md`: it walks the acceptance contract against the
-   published app and Dataverse, runs `seed-data.py check` against the seed manifest, reads
-   `docs/design-critique.md` against the prototype, and looks for what a user would hit that the
-   contract does not say. It returns findings only (`docs/review/findings.json`); it changes nothing
-   but its own test rows, and never answers an approval it did not raise. The lead does not argue
-   with a finding: it fixes it or records why not. A blind evaluator found three failures a measured
-   build's own walks had passed (seed rows left changed, a refresh that served stale data, a stamp
-   shown to users); a reviewer with fresh eyes is cheaper than the rework.
-4. Fix everything found (critique and reviewer) in one batch, ship once, confirm once. Do not loop
-   on polish.
-5. **Put the data back.** Walks that lend, return or approve change the seed rows. Re-apply the seed
-   (`seed-data.py seed --update --apply`) after the last walk, and list any evidence rows you leave
-   (prefixed so a cleanup can find them). A measured build left two seed assets in the wrong state,
-   which failed its own data row and hid an item from a filter.
+1. **Straight after the first publish, in one message,** start the two helpers and the lead's walks:
+   - the critique helper: captures the published screens at 1440 and 390 px (and the report canvas
+     from the reporting lane), runs impeccable `critique` on them, writes `docs/design-critique.md`;
+   - the reviewer (step 3), which runs read-only, so it never collides with the lead's writes;
+   - the lead: one walk call over every scenario, writes allowed (`walk canvas/walks --allow-writes`).
+   Report screenshots show the report canvas only: never the Power BI header (it shows the signed-in
+   person's photo and the organisation's logo) or the workspace rail.
+2. The walks include a phone scenario that resizes in the same session (`{"viewport": [390, 844]}`);
+   the driver measures horizontal scroll after every resize and fails the step when the page is
+   wider than the window. Truncation counts: text cut with an ellipsis where the full value matters
+   to the task is a defect at phone width, not a pass.
+3. **An independent reviewer, read-only and time-boxed.** A fresh helper with no build context,
+   using `assets/templates/reviewer-prompt.md`: one walk call over the scenarios without the write
+   ones (`--skip-writes`), its own read-only look at both widths, the write paths judged from the
+   lead's walk results and Dataverse, `seed-data.py check`, the critique against the prototype, and
+   what a user would hit that the contract does not say. Fifteen minutes, then it returns what it
+   has (`docs/review/findings.json`). A measured reviewer that re-ran every write path and answered
+   its own approvals took 25 minutes and became the critical path. The lead does not argue with a
+   finding: it fixes it or records why not (`docs/review.md`).
+4. **One fix batch, when both are back.** Fix every high and medium finding from the walks, the
+   critique and the reviewer together, ship, publish once, then one walk call over every scenario.
+   The driver refuses a third publish until `docs/design-critique.md` and
+   `docs/review/findings.json` exist (`--unreviewed "<reason>"` overrides, and is recorded).
+5. **Put the data back, last.** Write scenarios work on rows they create: lend a seed asset, then
+   return the loan the walk created, never a seeded loan. After the last write walk, re-apply the
+   seed (`seed-data.py seed --update --apply`, which re-checks and records the result) and list any
+   evidence rows you leave (prefixed so a cleanup can find them). The plugin's Stop gate holds the
+   hand-back while a write walk is newer than the last clean seed check. A measured build restored
+   its seed, then ran more walks that returned seeded loans, and handed back saying the seed held.
 6. The hand-back states what passed, what was not measured and why, and never says "clean" for a
    check that did not cover truncation, both widths and every role. It includes both design
    scores (prototype and product), the reviewer's findings and what was done with each, and, when
    DOD was used, `dod close` and its prediction rate.
-7. **Refresh the report last.** After the last walk and the seed re-apply, run the pipeline once
-   more from Fabric and reconcile, so the report and Dataverse agree at hand-back.
+7. **Refresh the report last, in the background.** After the seed re-apply, start the pipeline
+   refresh and reconcile once (`run_in_background`), write `docs/STATE.md`, `docs/review.md` and the
+   hand-back while it runs, then read its result before the final message (the Stop gate holds a
+   turn that ends with it still running). The reporting lane proved the refresh earlier
+   (`fabric.py prove-refresh`); this run only brings the report up to the final data.

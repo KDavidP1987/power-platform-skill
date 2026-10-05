@@ -573,6 +573,23 @@ the platform decides `X` and `Y` at render time, so those controls cannot be pla
 result there proves nothing about overlap or clipping. For auto-layout screens, rely on the render
 checks below.
 
+### Phone width: App.MinScreenWidth
+
+A screen's default size is `Max(App.Width, App.MinScreenWidth)`, and the player will not let the app
+narrower than `App.MinScreenWidth`. At its default the app stays wider than a 390 px phone window:
+the layout switches to its phone branch and the page still scrolls sideways. Two measured builds
+passed their own phone walks and a blind evaluator, resizing the window, found the sideways scroll
+(597 px of content in a 390 px window). Any app with a phone branch sets, in `App.pa.yaml`:
+
+```yaml
+App:
+  Properties:
+    MinScreenWidth: =320
+```
+
+`check-canvas-format.mjs` reports an app with an `App.Width <` breakpoint and no `MinScreenWidth`
+of 400 or less, and the walk driver measures horizontal scroll after every `viewport` step.
+
 ### Verifying a responsive app (either route)
 
 Measure in the **published player** at each size the app claims, by performing the task at that

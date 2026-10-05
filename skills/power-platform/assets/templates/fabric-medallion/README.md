@@ -44,3 +44,8 @@ deployed into one workspace folder by `scripts/fabric.py`.
 - "Today" is one time zone everywhere (silver, the flows, the reconcile checks), or "overdue"
   differs by a day between the email and the report.
 - `pbi-theme.example.json` shows the generated theme for a sample blue/teal palette.
+- The notebooks run on `environment/` (Spark runtime 1.3): a workspace's default runtime can be
+  retired, and its settings are the owner's.
+- `dataflow-bronze-webapi/` is the bronze for an environment whose TDS endpoint lists no tables
+  (off, or tables too new): the Web API with one connection on the API base. Point the manifest's
+  Dataflow `source` at it instead of `dataflow-bronze`.

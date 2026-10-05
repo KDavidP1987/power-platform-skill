@@ -11,6 +11,52 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-10-05
+
+Test G (0.20.1) fixed the Studio churn (5 publishes against 21, no blank tabs, no stalled dialog) but
+not the time (112 agent minutes) or the hand-back (32 of 35). The lead spent 36 minutes waiting on
+helpers in loops, the reviewer started late and took 25 minutes re-running every write path, its
+finding forced a second fix batch, the report was refreshed four times at the end by two agents, and
+walks run after the seed restore returned seeded loans while the hand-back said the seed held. Each
+fix below is enforced by a hook, the driver or a check, or ships as a working template.
+
+### Added
+
+- **Seed gate** (`plugin-gate.mjs`, Stop run check R3, applies with or without the project harness):
+  the hand-back is held while a walk wrote production data after the last clean seed check, or the
+  last check found drift. `seed-data.py check` records its result in `.ship-work/seed-check.json`;
+  `seed --update --apply` re-checks by itself; walks with writes log to `.ship-work/writes.json`.
+  6 self-test cases.
+- **One fix batch, enforced:** `canvas-browser.mjs publish` refuses a third publish until
+  `docs/design-critique.md` and `docs/review/findings.json` exist. `--unreviewed "<reason>"`
+  overrides, and the reason is recorded in the publish log. 5 self-test cases.
+- **Sideways scroll is measured after every resize:** a walk's `viewport` step fails when the page is
+  wider than the window. Run against the previous build's live app, it found 597 px of content in a
+  390 px window that its own walks had passed.
+- **Phone-width rule** (`check-canvas-format.mjs`, rule 7): an app with an `App.Width <` breakpoint
+  needs `App.MinScreenWidth` at 400 or less. 4 self-test cases. `canvas-layout.md`, "Phone width".
+- `walk --skip-writes`: a read-only pass over the same scenarios, for the reviewer.
+- **Walks can run side by side:** when the browser profile is held (another walk, a held Studio),
+  `walk`, `play` and `check` run on a temporary copy taken from a snapshot the last walk left (the
+  live cookie store is locked while a browser runs), and remove it afterwards. Tested with two
+  concurrent walks on a live app. 2 self-test cases.
+- **Fabric templates from two builds' discoveries:** `environment/` (Spark runtime 1.3; the workspace
+  default 1.1 was retired) with `fabric.py` binding notebooks to it (`"environment"`), and
+  `dataflow-bronze-webapi/` for environments whose TDS endpoint lists no tables. Each cost a measured
+  reporting lane about fifteen minutes.
+
+### Changed
+
+- **The finish runs beside the lead, not after it** (`orchestration.md`, a timeline to 65 minutes):
+  critique, reviewer and the lead's walks start together straight after the first publish; the
+  reviewer is read-only with a fifteen-minute budget; one fix batch when both are back; the seed
+  restored last; the final refresh in the background while the hand-back is written.
+- The design helper ends by writing `design/app-formulas.txt` (the App tokens and
+  `MinScreenWidth`), and every screen goes to a helper in one message.
+- Write walks work on rows they create, never on seeded loans.
+- `reporting.md`: `COUNTROWS(...) + 0`, averages that leave out rows without a duration, one owner
+  for the refresh.
+
 ## [0.20.1] - 2026-10-04
 
 Test F (0.20.0, impeccable, no DOD) was the first build to meet all 35 acceptance rows, with the best

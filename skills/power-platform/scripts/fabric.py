@@ -35,8 +35,9 @@ The manifest (assets/templates/fabric-medallion/fabric.example.json):
       "items": [
         { "type": "Lakehouse",    "name": "APP_Bronze" },
         { "type": "Dataflow",     "name": "APP_Bronze_Dataverse", "source": "fabric/dataflow-bronze" },
+        { "type": "Environment",  "name": "APP_Spark", "source": "fabric/environment" },
         { "type": "Notebook",     "name": "APP_Silver", "source": "fabric/notebooks/silver.py",
-          "lakehouse": "APP_Silver" },
+          "lakehouse": "APP_Silver", "environment": "APP_Spark" },
         { "type": "DataPipeline", "name": "APP_Refresh", "source": "fabric/pipeline/pipeline-content.json" },
         { "type": "SemanticModel","name": "APP Model",  "source": "fabric/model" },
         { "type": "Report",       "name": "APP Report", "source": "fabric/report" }
@@ -46,7 +47,7 @@ The manifest (assets/templates/fabric-medallion/fabric.example.json):
 Items deploy in manifest order, so list what others refer to first. "source" is a folder (every file
 under it becomes a definition part at its relative path) or one file (Notebook .py/.ipynb, or the
 pipeline's pipeline-content.json). A Notebook .py becomes a one-cell ipynb bound to "lakehouse" as
-its default lakehouse.
+its default lakehouse, and to "environment" (an Environment item listed earlier) when given.
 
 Placeholders in source files are resolved at deploy time:
     {{workspaceId}}                 the workspace id
@@ -159,13 +160,17 @@ def b64(data):
     return base64.b64encode(data if isinstance(data, bytes) else data.encode("utf-8")).decode("ascii")
 
 
-def notebook_ipynb(src, lakehouse_id, lakehouse_name, ws):
+def notebook_ipynb(src, lakehouse_id, lakehouse_name, ws, environment_id=None):
     meta = {"language_info": {"name": "python"}, "kernel_info": {"name": "synapse_pyspark"},
             "kernelspec": {"name": "synapse_pyspark", "display_name": "Synapse PySpark"}}
     if lakehouse_id:
         meta["dependencies"] = {"lakehouse": {"default_lakehouse": lakehouse_id,
                                               "default_lakehouse_name": lakehouse_name,
                                               "default_lakehouse_workspace_id": ws}}
+    if environment_id:
+        # The workspace's default Spark runtime can be retired (measured: 1.1), and workspace settings
+        # are the owner's. A notebook bound to this folder's own Environment item runs on its runtime.
+        meta.setdefault("dependencies", {})["environment"] = {"environmentId": environment_id, "workspaceId": ws}
     return json.dumps({"nbformat": 4, "nbformat_minor": 5, "metadata": meta,
                        "cells": [{"cell_type": "code", "metadata": {}, "execution_count": None,
                                   "outputs": [], "source": src.splitlines(keepends=True)}]}, indent=1)
@@ -252,7 +257,14 @@ def build_definition(item, root, fab, vars_, pending, apply):
                 lh_id = lh["id"] if lh else ("<pending>" if not apply else None)
                 if apply and not lh_id:
                     raise Finding("Notebook %s: lakehouse %r not found in the folder" % (item["name"], item["lakehouse"]))
-            body = notebook_ipynb(body, lh_id, item.get("lakehouse"), fab.ws)
+            env_id = None
+            if item.get("environment"):
+                env, _ = fab.find("Environment", item["environment"])
+                env_id = env["id"] if env else ("<pending>" if not apply else None)
+                if apply and not env_id:
+                    raise Finding("Notebook %s: environment %r not found in the folder (list it earlier in the manifest)"
+                                  % (item["name"], item["environment"]))
+            body = notebook_ipynb(body, lh_id, item.get("lakehouse"), fab.ws, env_id)
         parts = {"notebook-content.ipynb": body}
         fmt = "ipynb"
     definition = {"parts": [{"path": p, "payload": b64(c), "payloadType": "InlineBase64"} for p, c in parts.items()]}

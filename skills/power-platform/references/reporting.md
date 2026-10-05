@@ -253,6 +253,27 @@ repo's design doc. Keep the Demo source filterable end to end.
   notebook (semantic-link) as the last pipeline activity, so data and model refresh in one run.
 - **Name the refresh identity.** A dataflow on one person's Dataverse connection stops when that
   account does. Record it as an open decision until a service account or workspace identity owns it.
+- **Run the notebooks on the folder's own Environment item (Spark runtime 1.3).** A workspace's
+  default runtime can be retired (two measured builds found 1.1 retired, and each spent minutes
+  working it out), and workspace settings are the owner's. The template ships `environment/` and
+  binds both notebooks to it (`"environment"` in the manifest).
+- **When the TDS endpoint lists no tables, read the Web API.** The template's bronze reads the
+  Dataverse SQL (TDS) endpoint; it can be off in an environment, and tables created minutes earlier
+  were missing from it in a measured build. `dataflow-bronze-webapi/` reads the same tables through
+  the Web API: one Web connection on the API base with `RelativePath` (a URL per table makes the
+  service ask for a credential per table), organizational account, no `OData-Version` header,
+  lookups as `_<column>_value`. Decide at the start: if the TDS endpoint lists this build's tables
+  when the lane starts, use it; otherwise use the Web API template straight away.
+- **A count that can be empty needs `+ 0`.** `COUNTROWS` over an empty filter is blank: the card
+  shows "(Blank)" and the reconcile compares null with 0. Write `COUNTROWS(...) + 0` in measures and
+  in the checks, and colour an alert figure only when it is above zero.
+- **An average leaves out the rows it is not about.** A rejected or still-pending request has no
+  duration; counting it as zero days pulls an average loan length down. State the rows each average
+  covers in the measure's description.
+- **One owner for the refresh.** The reporting lane runs and proves it (`prove-refresh`) while it
+  builds. After it hands back, only the lead refreshes, once, after the seed is restored, in the
+  background while it writes the hand-back. A measured build refreshed four times at the end, from
+  two agents.
 
 **The report's look comes from the design, never from the default theme.** Power BI's default
 palette (with purple and magenta series) shipped in a measured build because nothing replaced it.

@@ -8,14 +8,57 @@
     "workspaceName": "<workspace display name, for the report's connection string>"
   },
   "items": [
-    { "type": "Lakehouse", "name": "{PREFIX}_Bronze" },
-    { "type": "Lakehouse", "name": "{PREFIX}_Silver" },
-    { "type": "Lakehouse", "name": "{PREFIX}_Gold" },
-    { "type": "Dataflow", "name": "{PREFIX}_Bronze_Dataverse", "source": "dataflow-bronze" },
-    { "type": "Notebook", "name": "{PREFIX}_Silver_Transform", "source": "notebooks/silver.py", "lakehouse": "{PREFIX}_Silver" },
-    { "type": "Notebook", "name": "{PREFIX}_Gold_Build", "source": "notebooks/gold.py", "lakehouse": "{PREFIX}_Gold" },
-    { "type": "DataPipeline", "name": "{PREFIX}_Refresh_Pipeline", "source": "pipeline/pipeline-content.json" },
-    { "type": "SemanticModel", "name": "{PREFIX} Model", "source": "model" },
-    { "type": "Report", "name": "{PREFIX} Report", "source": "report" }
-  ]
+    {
+      "type": "Lakehouse",
+      "name": "{PREFIX}_Bronze"
+    },
+    {
+      "type": "Lakehouse",
+      "name": "{PREFIX}_Silver"
+    },
+    {
+      "type": "Lakehouse",
+      "name": "{PREFIX}_Gold"
+    },
+    {
+      "type": "Environment",
+      "name": "{PREFIX}_Spark",
+      "source": "environment"
+    },
+    {
+      "type": "Dataflow",
+      "name": "{PREFIX}_Bronze_Dataverse",
+      "source": "dataflow-bronze"
+    },
+    {
+      "type": "Notebook",
+      "name": "{PREFIX}_Silver_Transform",
+      "source": "notebooks/silver.py",
+      "lakehouse": "{PREFIX}_Silver",
+      "environment": "{PREFIX}_Spark"
+    },
+    {
+      "type": "Notebook",
+      "name": "{PREFIX}_Gold_Build",
+      "source": "notebooks/gold.py",
+      "lakehouse": "{PREFIX}_Gold",
+      "environment": "{PREFIX}_Spark"
+    },
+    {
+      "type": "DataPipeline",
+      "name": "{PREFIX}_Refresh_Pipeline",
+      "source": "pipeline/pipeline-content.json"
+    },
+    {
+      "type": "SemanticModel",
+      "name": "{PREFIX} Model",
+      "source": "model"
+    },
+    {
+      "type": "Report",
+      "name": "{PREFIX} Report",
+      "source": "report"
+    }
+  ],
+  "_environmentWhy": "The notebooks run on this folder's own Environment item (Spark runtime 1.3): a workspace's default runtime can be retired (two measured builds found 1.1 retired) and workspace settings are the owner's."
 }

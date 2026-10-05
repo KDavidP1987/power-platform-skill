@@ -45,7 +45,12 @@ never overwritten unless --update, and then only the columns the seed file names
 `check` is read-only and meant for the end of a build: walks that lend, return or approve change
 seed rows, and a build that hands back with its own test edits still in the data fails its data
 check. It prints one line per drifted or missing row (compact: a table, then the differences) and
-exits 1 on any drift; re-apply with `seed --update --apply`.
+exits 1 on any drift; re-apply with `seed --update --apply`, which runs the check again by itself.
+Every check records its result in .ship-work/seed-check.json (in the folder it runs from), and the
+power-platform plugin's Stop gate reads it: a build that wrote production data (a walk with
+--allow-writes logs each one in .ship-work/writes.json) cannot hand back until a clean check is newer
+than the last write. A measured build restored its seed, ran more walks that returned seeded loans,
+and handed back saying the seed held.
 
 Cleanup is list-only without --apply. "cleanup": "delete" deletes the seed rows of that table (and,
 with "cleanupFilter", every row matching that OData filter - test rows a walk created);
@@ -295,6 +300,18 @@ def cmd_check(dv, meta, seed, only, today):
     return 1 if bad else 0
 
 
+def record_check(rc, seed_path, work=None):
+    """The Stop gate's evidence: when the last seed check ran, and whether it was clean."""
+    work = work or os.path.join(os.getcwd(), ".ship-work")
+    try:
+        os.makedirs(work, exist_ok=True)
+        with open(os.path.join(work, "seed-check.json"), "w", encoding="utf-8") as f:
+            json.dump({"at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-4] + "Z",
+                       "clean": rc == 0, "seed": seed_path}, f)
+    except OSError:
+        pass
+
+
 def cmd_cleanup(dv, meta, seed, only, apply, today, seed_path):
     tables = [t for t in seed.get("tables") or [] if t.get("cleanup") and (not only or t["table"] in only)]
     count = 0
@@ -374,9 +391,19 @@ def run(argv, transport=None, today=None):
         day = today or today_in(seed.get("timezone"))
         only = set(a.only or [])
         if a.command == "seed":
-            return cmd_seed(dv, meta, seed, only, a.apply, a.update, day)
+            rc = cmd_seed(dv, meta, seed, only, a.apply, a.update, day)
+            if a.apply and a.update and not only:
+                print("re-checking the seed after the update:")
+                rc2 = cmd_check(dv, meta, seed, only, day)
+                if not transport:
+                    record_check(rc2, a.seed)
+                rc = rc or rc2
+            return rc
         if a.command == "check":
-            return cmd_check(dv, meta, seed, only, day)
+            rc = cmd_check(dv, meta, seed, only, day)
+            if not transport and not only:
+                record_check(rc, a.seed)
+            return rc
         return cmd_cleanup(dv, meta, seed, only, a.apply, day, a.seed)
     except Finding as e:
         print("FINDING %s" % e)
@@ -553,6 +580,16 @@ def selftest():
             {"table": "app_asset", "key": "app_assettag", "csv": "assets.csv"}]}), "--apply")
         check("CSV rows load and empty cells are left out", rc == 0 and len(db["app_assets"]) == 2
               and "app_name" not in next(r for r in db["app_assets"] if r["app_assettag"] == "C-02"))
+
+        work = os.path.join(tmp, ".ship-work")
+        record_check(1, "seed.json", work)
+        with open(os.path.join(work, "seed-check.json"), encoding="utf-8") as f:
+            r1 = json.load(f)
+        record_check(0, "seed.json", work)
+        with open(os.path.join(work, "seed-check.json"), encoding="utf-8") as f:
+            r0 = json.load(f)
+        check("a check records its time and result for the Stop gate", r1["clean"] is False and r0["clean"] is True
+              and r0["at"].endswith("Z") and len(r0["at"]) == 24)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

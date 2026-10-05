@@ -41,6 +41,11 @@
 //       scripts/canvas-app.json) and the last message asks the person a question: take the
 //       recommendation, record it, carry on. A measured build stopped three times to ask questions
 //       it had already answered with a recommendation.
+//   R3. the seed is not proven back: production data was written (a walk with --allow-writes logs
+//       each one in .ship-work/writes.json) and there is no clean seed check (seed-data.py check,
+//       which records .ship-work/seed-check.json) newer than the last write, or the last check found
+//       drift. Two measured builds handed back with their own test edits still in the seed rows; one
+//       said "the final seed check showed no drift" after walks that ran later returned seeded loans.
 // After tools (--post, PostToolUse on Bash and PowerShell) it keeps the build to its budget, with
 // numbers rather than advice: every 40 shell calls it reports the count (a measured lead made 472
 // single calls, each re-sending the whole conversation) and points at the batched tools, and at 45,
@@ -196,9 +201,29 @@ export function asksPerson(text) {
   const t = text || '';
   return ASKS_STRONG.test(t) || (/\?/.test(t) && ASKS_WEAK.test(t));
 }
+// R3, pure: null when the seed is proven back (or nothing was written), else what is wrong.
+export function seedState(root) {
+  const work = path.join(root, appConfig(root).workDir || '.ship-work');
+  const writes = readJson(path.join(work, 'writes.json'));
+  const check = readJson(path.join(work, 'seed-check.json'));
+  const lastWrite = Array.isArray(writes) && writes.length ? writes[writes.length - 1] : null;
+  if (check && check.clean === false) return `the last seed check (${check.at}) found drift`;
+  if (!lastWrite) return null;
+  if (!check) return `production data was written (last: "${lastWrite.scenario}" at ${lastWrite.at}) and no seed check has run`;
+  if (Date.parse(check.at) < Date.parse(lastWrite.at)) {
+    return `the last seed check (${check.at}) is older than the last write ("${lastWrite.scenario}" at ${lastWrite.at})`;
+  }
+  return null;
+}
 export function runChecks(root, input = {}, env = process.env) {
   const facts = transcriptFacts(input.transcript_path || '');
   const out = [];
+  const seed = seedState(root);
+  if (seed) {
+    out.push(`The seed data is not proven back: ${seed}. Walks that lend, return or approve change seed rows, and a hand-back ` +
+      'with test edits in them fails its data checks. Run python scripts/seed-data.py seed --seed <seed file> --update --apply ' +
+      '(it re-checks and records the result), list any test rows you leave, and only then hand back. Run no write walk after it.');
+  }
   if (facts.pending.length) {
     out.push(`Background shell work started in this session is still running (${facts.pending.slice(0, 5).join(', ')}). ` +
       'When this turn ends a headless run ends with it and the work is killed. Wait for it now (Monitor with an until-loop on its ' +
@@ -489,6 +514,20 @@ function selftest() {
     check('post: a jump past several marks reports once', post(1, t0 + 125 * 60000), (g) => typeof g === 'string' && g.includes('125 minutes'));
     check('post: silent outside a build folder', (put('scripts/canvas-app.json', '{}'), rm('canvas'), decidePost(tmp, { tool_name: 'Bash', session_id: 'b9' }, st3, t0)), silent);
     fs.rmSync(st3, { recursive: true, force: true });
+    // R3 seed state
+    const sw = (rel, obj) => put('.ship-work/' + rel, JSON.stringify(obj));
+    rm('.ship-work');
+    check('R3: nothing written, no check: silent', seedState(tmp), silent);
+    sw('writes.json', [{ at: '2026-10-05T03:00:00.000Z', scenario: 'lend' }]);
+    check('R3: a write and no check blocks', seedState(tmp), (g) => typeof g === 'string' && g.includes('no seed check'));
+    sw('seed-check.json', { at: '2026-10-05T02:59:00.000Z', clean: true });
+    check('R3: a clean check older than the write blocks', seedState(tmp), (g) => typeof g === 'string' && g.includes('older than the last write'));
+    sw('seed-check.json', { at: '2026-10-05T03:05:00.000Z', clean: true });
+    check('R3: a clean check after the last write passes', seedState(tmp), silent);
+    sw('seed-check.json', { at: '2026-10-05T03:06:00.000Z', clean: false });
+    check('R3: a check that found drift blocks', seedState(tmp), (g) => typeof g === 'string' && g.includes('found drift'));
+    check('R3: reaches the stop as a run check', runChecks(tmp, {}, {}).join(' '), (g) => g.includes('seed-data.py seed'));
+    rm('.ship-work');
     put('canvas/app/Src/Screen1.pa.yaml', 'Screens: {}'); put('scripts/canvas-app.json', '{}');
     put('fabric/notebooks/refresh.py', "token = get_token()\nnotebookutils.fs.put('Files/landing/t.txt', token, True)\n");
     check('token written to a lakehouse blocks', evaluate(tmp, {}, env), blocks('access token', 'fabric/notebooks/refresh.py:2'));
@@ -507,7 +546,7 @@ function selftest() {
   if (fails.length) { console.log('selftest FAILED:\n  ' + fails.join('\n  ')); process.exit(1); }
   console.log(`selftest ok: ${CASES} plugin-gate cases (Stop: unrelated silent, design missing, three blocks per session then a note, per-session count, ` +
     'no-id fallback, harness present, two opt-outs, designed, shipped without critique/review, complete, dod opt-in, background shell pending and done, unattended question, attended question, unattended hand-back, unattended flag, sidechain, run-check cap, run checks with harness, token to ' +
-    'lakehouse, token file over REST, non-token write, report-only; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
+    'lakehouse, token file over REST, non-token write, report-only; R3: silent, write without check, stale check, clean after write, drift, as a run check; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
     'App.pa.yaml, _EditorState, shell read, other tools, prototype missing, designed, deploy-tables with and without --plan, bare template, ' +
     'filled contract, dod plan, opt-out, unrelated write)');
   process.exit(0);

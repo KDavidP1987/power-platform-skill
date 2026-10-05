@@ -28,6 +28,10 @@
 //    Anything it cannot resolve is counted as not examined - never as a pass.
 // 6. LITERAL TEXT FIT. A literal caption or hint is measured like data: a two-line hint in a
 //    one-line box clips just the same.
+// 7. PHONE WIDTH. An app with a phone branch (App.Width < N in its formulas) must let App.Width go
+//    down to a phone: App.MinScreenWidth set to 400 or less. At its default the player stays wider
+//    than a 390 px window, so the phone layout scrolls sideways; two measured builds passed their own
+//    phone walks (loaded wide, then resized) and a blind evaluator found the sideways scroll.
 //
 // Usage:
 //   node check-canvas-format.mjs <Src folder or .pa.yaml files>... [--schema cols.json]
@@ -618,6 +622,16 @@ const COLOUR_PROPS = /(Color|Fill|Background|Border(Color)?)$/i;
 const LITERAL_COLOUR = /\b(RGBA\s*\(|ColorValue\s*\(|Color\.(?!Transparent\b)[A-Z][A-Za-z]+)|"#[0-9A-Fa-f]{3,8}"/;
 const LITERAL_FONT = /\bFont\.('[^']+'|[A-Za-z]+)|^="[^"]+"$/;
 
+// Rule 7, pure: the finding for App.pa.yaml text, or null.
+export function minWidthFinding(appText) {
+  const t = String(appText || '');
+  if (!/App\.Width\s*<=?\s*\d+/.test(t)) return null;
+  const m = t.match(/^\s*MinScreenWidth:\s*=\s*(\d+)\s*$/m);
+  if (m && Number(m[1]) <= 400) return null;
+  return { level: 'error', code: 'min-screen-width', line: 0, control: 'App',
+    msg: `App has a phone branch (App.Width < ...) but ${m ? 'MinScreenWidth is ' + m[1] : 'no MinScreenWidth'}: at the default the player stays wider than a phone and the page scrolls sideways. Set App.MinScreenWidth: =320 (canvas-layout.md, "Phone width").` };
+}
+
 export function analyse(files, { schema = null, screenWidth = 1366, screenHeight = 768, galleriesOnly = false, theme = true, stampVar = 'gblBuild' } = {}) {
   const findings = [];
   const stampRe = stampVar ? new RegExp('(^|[^A-Za-z0-9_])' + String(stampVar).replace(/[^A-Za-z0-9_]/g, '') + '($|[^A-Za-z0-9_])') : null;
@@ -628,6 +642,8 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
   const consts = evalFormulaConstants(appText, readConstants(appText), screenWidth, screenHeight);
   const tokens = readThemeTokens(appText);
   const cmap = readColourMap(appText);
+  const mw = appFile ? minWidthFinding(appText) : null;
+  if (mw) findings.push({ ...mw, file: appFile.path });
   const toMap = (obj) => new Map(Object.entries(obj || {}).flatMap(([k, v]) => { const c = columnInfo(v); return c ? [[k, c], [k.toLowerCase(), c]] : []; }));
   const flatCols = schema ? (schema.columns || (schema.tables ? {} : schema)) : null;
   const schemaMap = flatCols ? toMap(flatCols) : new Map();
@@ -1211,6 +1227,11 @@ function selftest() {
   expect('stamp: admins only', free([['lblBuild', 'Label', { ...box, Text: '="Build " & gblBuild', Visible: '=gblIsAdmin' }]]), []);
   expect('stamp: a layout condition is not a gate', free([['lblBuild', 'Label', { ...box, Text: '=gblBuild', Visible: '=!lyPhone' }]]), ['build-stamp-visible']);
   expect('stamp: a name that merely contains it', free([['lblBuild', 'Label', { ...box, Text: '="Build " & gblBuildNotes' }]]), []);
+  // Phone width: a phone branch needs MinScreenWidth at phone size.
+  const appPhone = ['App:', '  Properties:', '    Formulas: |-', '      =lyPhone = App.Width < 768;'].join('\n') + '\n';
+  const mwCases = [['phone branch, no MinScreenWidth', appPhone, true], ['phone branch, MinScreenWidth 320', appPhone + '    MinScreenWidth: =320\n', false],
+    ['phone branch, MinScreenWidth 640', appPhone + '    MinScreenWidth: =640\n', true], ['no phone branch', 'App:\n  Properties:\n    OnStart: =Set(a, 1)\n', false]];
+  for (const [nm, txt, want] of mwCases) if (!!minWidthFinding(txt) !== want) fails.push('min-screen-width: ' + nm);
   // Layout constants from Named Formulas: If on a resolved breakpoint, Mod and RoundDown.
   const cst = evalFormulaConstants(APP2, new Map(), 1366, 768), cstP = evalFormulaConstants(APP2, new Map(), 390, 844);
   if (cst.get('lyPad') !== 28 || cstP.get('lyPad') !== 14 || cst.get('lyCols') !== 6) fails.push(`formula constants: lyPad ${cst.get('lyPad')}/${cstP.get('lyPad')}, lyCols ${cst.get('lyCols')}`);
@@ -1220,7 +1241,7 @@ function selftest() {
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 4 literal-fit and 5 build-stamp cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 4 literal-fit, 5 build-stamp and 4 phone-width cases decided as expected`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }

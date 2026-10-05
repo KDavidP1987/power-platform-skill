@@ -58,6 +58,9 @@
 //        --timeout <ms>   --port <n>  --settle <ms>  --continue-on-fail  --trace
 //        --fresh          delete the player's IndexedDB/Cache Storage before loading (stale build)
 //        --allow-writes   required to walk a scenario that declares "writes": true
+//        --skip-writes    skip those scenarios instead (a read-only pass, e.g. the reviewer's)
+//   publish: refused when the source is unchanged (--again), and from the third publish until
+//        docs/design-critique.md and docs/review/findings.json exist (--unreviewed "<reason>")
 //        --keep-browser   close-studio: release the edit lock but leave the browser running
 //        --expect a,b     second-tab: control names to wait for
 //        --selectors <path>  UI anchor table (default: the skill's assets/selectors.json)
@@ -83,7 +86,7 @@ async function pw() {
   }
   return chromium;
 }
-import { readFileSync, mkdirSync, writeFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, existsSync, statSync, readdirSync, cpSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -233,15 +236,47 @@ function needApp() {
 }
 
 // --- browser plumbing ----------------------------------------------------------------------
-async function launch(opts) {
-  mkdirSync(PROFILE, { recursive: true });
+// A walk while another process holds the profile (the lead's walks and the reviewer's at the same
+// time, or a held Studio) runs on a copy of the signed-in profile instead of failing. A running
+// browser locks its cookie store, so the copy is taken from a snapshot that every walk on the real
+// profile refreshes when it closes it (about 30 MB: locks, caches and service workers left out).
+// The copy is removed when the walk ends. Only read-mostly commands do this; Studio work always
+// needs the one real profile.
+const COPY_OK = new Set(['walk', 'play', 'check']);
+export function profileCopyFilter(src) {
+  const name = src.replace(/\\/g, '/').split('/').pop();
+  return !/^(Singleton(Lock|Socket|Cookie)|lockfile|LOCK|Cache|Code Cache|GPUCache|GrShaderCache|ShaderCache|DawnCache|DawnGraphiteCache|CacheStorage|ScriptCache|Service Worker|Crashpad|BrowserMetrics.*|.*\.tmp)$/i.test(name);
+}
+const SNAPSHOT = () => PROFILE.replace(/[\\/]+$/, '') + '-snapshot';
+let USED_PROFILE = null;
+function refreshSnapshot() {
+  if (USED_PROFILE !== PROFILE) return;
+  try {
+    const tmp = SNAPSHOT() + '-new';
+    rmSync(tmp, { recursive: true, force: true });
+    cpSync(PROFILE, tmp, { recursive: true, filter: profileCopyFilter, force: true });
+    rmSync(SNAPSHOT(), { recursive: true, force: true });
+    cpSync(tmp, SNAPSHOT(), { recursive: true, force: true });
+    rmSync(tmp, { recursive: true, force: true });
+  } catch { /* a locked file: keep the previous snapshot */ }
+}
+function copyProfile() {
+  if (!existsSync(SNAPSHOT())) throw new Error('profile in use and no snapshot yet: run one walk on its own first (it leaves the snapshot), or wait for the other walk');
+  const dest = PROFILE.replace(/[\\/]+$/, '') + '-copy-' + process.pid;
+  cpSync(SNAPSHOT(), dest, { recursive: true, force: true });
+  process.on('exit', () => { try { rmSync(dest, { recursive: true, force: true }); } catch { /* still closing */ } });
+  return dest;
+}
+
+async function launch(opts, profileDir = PROFILE) {
+  mkdirSync(profileDir, { recursive: true });
   mkdirSync(OUT, { recursive: true });
   // No session restore and no crash-restore bubble: each run starts from one tab, not the last run's.
   const args = ['--disable-blink-features=AutomationControlled', '--no-first-run', '--hide-crash-restore-bubble', '--disable-session-crashed-bubble'];
   if (opts.debugPort) args.push('--remote-debugging-port=' + opts.debugPort);
   let ctx;
   try {
-    ctx = await (await pw()).launchPersistentContext(PROFILE, {
+    ctx = await (await pw()).launchPersistentContext(profileDir, {
       headless: !!opts.headless,
       // 'chromium' means Playwright's own bundled build, which takes no channel.
       ...(CHANNEL === 'chromium' ? {} : { channel: CHANNEL }),
@@ -256,7 +291,7 @@ async function launch(opts) {
     if (!CHANNEL_GIVEN && CHANNEL === 'chrome' && /Opening in existing browser session/i.test(e.message)) {
       log('  Chrome would only open inside the running Chrome session here - using Edge instead (--channel msedge).');
       CHANNEL = 'msedge';
-      return launch(opts);
+      return launch(opts, profileDir);
     }
     // A persistent profile can be held by only one Chrome. `close-studio --keep-browser` (or a
     // `studio` process still running in the background) keeps it; deleting Singleton* files
@@ -267,8 +302,12 @@ async function launch(opts) {
       log('  Neither: run `npx playwright install chromium` (ask the user first), then --channel chromium.');
       process.exit(8);
     }
+    if (/already in use|ProcessSingleton|existing browser session/i.test(e.message) && profileDir === PROFILE && COPY_OK.has(cmd) && !has('no-profile-copy')) {
+      log('  profile in use (another walk or a held Studio): walking on a temporary copy of it');
+      return launch(opts, copyProfile());
+    }
     if (/already in use|ProcessSingleton|existing browser session/i.test(e.message)) {
-      log('PROFILE IN USE: ' + PROFILE);
+      log('PROFILE IN USE: ' + profileDir);
       log('  Another Chrome holds this profile - usually a `studio` process still running.');
       log('  Run `close-studio` (it quits the held browser), or stop that process, then retry.');
       log('  If nothing holds it, pass --profile <new dir> and run `login` again.');
@@ -278,6 +317,7 @@ async function launch(opts) {
     throw e;
   }
   ctx.setDefaultTimeout(TIMEOUT);
+  USED_PROFILE = profileDir;
   return ctx;
 }
 
@@ -610,9 +650,32 @@ const MEASURE = {
   },
 };
 
+// The widest scrollable surface in the page or the app frame, when it is wider than the window;
+// 0 when nothing scrolls sideways. Small inner scrollers (a gallery, a table) are not the page.
+async function horizontalOverflow(page, frame) {
+  const probe = () => {
+    const vw = window.innerWidth; let worst = 0;
+    const els = [document.scrollingElement || document.documentElement, ...document.querySelectorAll('div, main, section')];
+    for (const el of els) {
+      if (!el || el.clientWidth < vw * 0.8) continue;
+      const ox = el === document.scrollingElement || el === document.documentElement ? 'auto' : getComputedStyle(el).overflowX;
+      if (!/auto|scroll/.test(ox)) continue;
+      if (el.scrollWidth > el.clientWidth + 2) worst = Math.max(worst, el.scrollWidth);
+    }
+    return worst;
+  };
+  let worst = 0;
+  for (const target of [page, frame]) {
+    try { worst = Math.max(worst, await target.evaluate(probe)); } catch { /* detached frame */ }
+  }
+  return worst;
+}
+
 // --- scenario steps --------------------------------------------------------------------------
 // Verbs (combine freely in one step; they run in this order):
 //   {"wait": 3000}                          settle
+//   {"viewport": [390, 844]}                re-lay out at another size; horizontal scroll is then
+//                                           measured and fails the step ("mustBeClean": false notes it)
 //   {"click": "Approve", "nth": 0}          click a control by accessible name / text (0-based nth)
 //   {"type": "abc", "into": "Search"}       fill by placeholder/label, then Tab so .Value commits
 //   {"select": "Closed", "nth": 1}          choose an option in the nth <select> (DropDown)
@@ -650,6 +713,16 @@ async function runSteps(page, frameRef, steps, results) {
         await page.setViewportSize({ width: vw, height: vh });
         log(tag + 'viewport ' + vw + 'x' + vh);
         await page.waitForTimeout(Number(step.settle || 2500));
+        // Measured after every resize, without being asked: two builds whose layouts switched to
+        // the phone branch still left the player wider than the window (App.MinScreenWidth at its
+        // default), so a phone user scrolled sideways. Their walks passed; a blind evaluator did not.
+        const wide = await horizontalOverflow(page, frame);
+        if (wide) {
+          const detail = 'viewport ' + vw + 'x' + vh;
+          const msg = 'horizontal scroll: content ' + wide + ' px wide in a ' + vw + ' px window (most likely App.MinScreenWidth at its default: set it to 320; canvas-layout.md, "Phone width")';
+          if (step.mustBeClean === false) log(tag + 'note: ' + msg);
+          else { results.failed.push({ step: i + 1, detail, error: msg }); log(tag + '!! ' + msg); }
+        } else log(tag + 'no horizontal scroll at ' + vw + ' px');
       }
 
       if (step.click) {
@@ -1038,10 +1111,17 @@ function selftest() {
     ['no source found publishes', !publishRefused(null, { hash: null }, false)],
     ['terms dialog selector covers dialog and alertdialog', /\[role="dialog"\]/.test(COAUTHOR_TERMS) && /alertdialog/.test(COAUTHOR_TERMS) && /Accept/.test(COAUTHOR_TERMS)],
     ['autoTidy skips holding commands', NO_TIDY.has('studio') && NO_TIDY.has('close-studio') && !NO_TIDY.has('walk')],
+    ['profile copy leaves out locks and caches', !profileCopyFilter('C:/p/SingletonLock') && !profileCopyFilter('C:/p/Default/Cache') && !profileCopyFilter('C:/p/Default/Code Cache') && !profileCopyFilter('C:/p/Default/Service Worker')],
+    ['profile copy keeps the sign-in', profileCopyFilter('C:/p/Default/Network/Cookies') && profileCopyFilter('C:/p/Local State') && profileCopyFilter('C:/p/Default/Login Data')],
+    ['first and second publish need no review', reviewMissing(0, [], '').length === 0 && reviewMissing(1, [], '').length === 0],
+    ['third publish needs critique and review', reviewMissing(2, [], '').length === 2],
+    ['third publish with both passes', reviewMissing(2, REVIEW_FILES, '').length === 0],
+    ['third publish names the one missing', reviewMissing(3, ['docs/design-critique.md'], '').join() === 'docs/review/findings.json'],
+    ['--unreviewed overrides', reviewMissing(5, [], 'Studio-only fix').length === 0],
   ].filter(([, okc]) => !okc).map(([k]) => 'publish/tabs: ' + k);
   tabs.push(...P);
   const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0 && tabs.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 7 publish-guard, terms-dialog and auto-tidy cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 14 publish-guard, review-gate, profile-copy, terms-dialog and auto-tidy cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
          : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}], tabs -> [${tabs.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }
@@ -1142,11 +1222,27 @@ async function cmdWalk() {
     const v = await walkOne(f);
     summary.push([v || 'FAIL', f, process.exitCode || 0]);
   }
+  const counted = summary.filter((x) => x[0] !== 'SKIP');
   if (files.length > 1) {
-    log('\n=== WALKS: ' + summary.filter((x) => x[0] === 'PASS').length + ' of ' + summary.length + ' pass ===');
-    for (const [v, f, c] of summary) log('  ' + v.padEnd(5) + ' ' + f + (c && v !== 'PASS' ? '  (exit ' + c + ')' : ''));
+    log('\n=== WALKS: ' + counted.filter((x) => x[0] === 'PASS').length + ' of ' + counted.length + ' pass' +
+        (counted.length < summary.length ? ', ' + (summary.length - counted.length) + ' skipped (writes)' : '') + ' ===');
+    for (const [v, f, c] of summary) log('  ' + v.padEnd(5) + ' ' + f + (c && v !== 'PASS' && v !== 'SKIP' ? '  (exit ' + c + ')' : ''));
   }
-  process.exitCode = summary.every((x) => x[0] === 'PASS') ? 0 : (summary.find((x) => x[0] !== 'PASS')[2] || 4);
+  process.exitCode = counted.every((x) => x[0] === 'PASS') ? 0 : (counted.find((x) => x[0] !== 'PASS')[2] || 4);
+}
+
+// Every walk that wrote production data is logged in the work folder. The plugin's Stop gate reads
+// it: a seed check (seed-data.py check, which logs its own result there) must be clean and newer
+// than the last write before the build hands back. A measured build restored its seed, then ran
+// more walks that returned seeded loans, and handed back saying the seed held.
+const WRITES_LOG = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'writes.json');
+function logWrite(name) {
+  try {
+    let w = []; try { w = JSON.parse(readFileSync(WRITES_LOG(), 'utf8')); } catch { /* first */ }
+    w.push({ at: new Date().toISOString(), scenario: name });
+    mkdirSync(dirname(WRITES_LOG()), { recursive: true });
+    writeFileSync(WRITES_LOG(), JSON.stringify(w.slice(-100), null, 1));
+  } catch { /* unwritable work folder */ }
 }
 
 async function walkOne(file) {
@@ -1154,6 +1250,10 @@ async function walkOne(file) {
   const scenario = JSON.parse(readFileSync(resolve(file), 'utf8'));
   const problems = lintScenario(scenario);
   if (problems.length) { problems.forEach((e) => log('BAD  ' + e)); process.exitCode = 1; return; }
+  if (scenario.writes === true && has('skip-writes')) {
+    log('SKIP: "' + scenario.name + '" writes production data (--skip-writes: a read-only pass, e.g. the reviewer\'s).');
+    return 'SKIP';
+  }
   if (scenario.writes === true && !has('allow-writes')) {
     // A negative test whose gate is OPEN writes a real row. Refuse unless the operator has
     // confirmed the restore (and parked any flow that would message a person about the row).
@@ -1174,6 +1274,7 @@ async function walkOne(file) {
   // the previous package while every offline check says the new one shipped.
   const steps = scenario.build ? [{ expect: scenario.build }, ...scenario.steps] : scenario.steps;
   const runStart = Date.now();
+  if (scenario.writes === true) logWrite(scenario.name);
   await runSteps(page, frameRef, steps, results);
   const real = reportConsole(errors, scenario.name);
   writeTrace(trace, scenario.name);
@@ -1195,6 +1296,7 @@ async function walkOne(file) {
   writeFileSync(join(OUT, scenario.name + '.result.json'),
     JSON.stringify({ scenario: scenario.name, at: new Date().toISOString(), runStart: new Date(runStart).toISOString(), verdict, ...results, appErrors: real, dataverse: confirmation }, null, 2), 'utf8');
   await ctx.close();
+  refreshSnapshot();
   process.exitCode = verdict === 'PASS' ? 0 : 4;
   return verdict;
 }
@@ -1534,6 +1636,15 @@ function srcHash() {
 }
 const PUBLISH_LOG = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'publish-log.json');
 export function publishRefused(h, last, again) { return !!(h && last && last.hash === h && !again); }
+// One fix batch. The first publish ships the build and the second may repair what the first walks
+// found; from the third on, the screenshot critique and the independent review must both be back,
+// so their findings land in one batch. A measured build shipped a fix batch, then a second one when
+// the reviewer's finding arrived twenty minutes later. --unreviewed "<reason>" overrides, recorded.
+export const REVIEW_FILES = ['docs/design-critique.md', 'docs/review/findings.json'];
+export function reviewMissing(count, present, override) {
+  if (count < 2 || override) return [];
+  return REVIEW_FILES.filter((f) => !present.includes(f));
+}
 function publishLog() { try { return JSON.parse(readFileSync(PUBLISH_LOG(), 'utf8')); } catch { return []; } }
 
 async function cmdPublish() {
@@ -1544,6 +1655,15 @@ async function cmdPublish() {
     log('  REFUSED: the canvas source has not changed since the last publish (' + last.at + '). Publishing again re-tests nothing.');
     log('  Batch the fixes, push them, save, then publish once. --again publishes anyway (e.g. after a Studio-only change).');
     process.exitCode = 7; return;
+  }
+  const override = typeof flag('unreviewed', '') === 'string' ? flag('unreviewed', '') : '';
+  const gap = reviewMissing(plog.length, REVIEW_FILES.filter((f) => existsSync(join(REPO, f))), override);
+  if (gap.length) {
+    log('  REFUSED: this would be publish ' + (plog.length + 1) + ', and ' + gap.join(' and ') + (gap.length > 1 ? ' are' : ' is') + ' not written yet.');
+    log('  Start the screenshot critique and the independent reviewer straight after the FIRST publish (orchestration.md section 7),');
+    log('  walk while they run, then fix everything they and the walks found in ONE batch and publish once.');
+    log('  --unreviewed "<reason>" publishes anyway; the reason is recorded in the publish log.');
+    process.exitCode = 8; return;
   }
   const { browser, ctx } = await attach();
   const studio = studioPage(ctx);
@@ -1580,7 +1700,7 @@ async function cmdPublish() {
   log('  Publish ships what was SAVED when it started; the player can lag the publish by ten minutes.');
   try {
     mkdirSync(dirname(PUBLISH_LOG()), { recursive: true });
-    plog.push({ at: new Date().toISOString(), hash });
+    plog.push({ at: new Date().toISOString(), hash, ...(override ? { unreviewed: override } : {}) });
     writeFileSync(PUBLISH_LOG(), JSON.stringify(plog.slice(-50), null, 1));
     log('  publish ' + plog.length + ' of this build' + (plog.length > 4 ? ' - more than four publishes means fixes are being shipped one at a time; batch them.' : '.'));
   } catch { /* unwritable work folder */ }
@@ -2232,7 +2352,7 @@ const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, connecti
 if (argv.includes('--selftest')) selftest();
 else if (!commands[cmd]) {
   log('canvas-browser - drive Power Apps Studio and the published player\n');
-  log('  login | check | play [--screen N] [--trace] [--fresh] | walk <scenario.json> [--trace] [--fresh] [--allow-writes]');
+  log('  login | check | play [--screen N] [--trace] [--fresh] | walk <scenario.json|folder> [...] [--trace] [--fresh] [--allow-writes | --skip-writes]');
   log('  confirm <scenario.json> [--since ISO]   run only the scenario\'s Dataverse checks');
   log('  connection --connector dataverse|outlook|approvals|<api> --name N [--apply] [--json]');
   log('  create --name N --solution-id GUID [--form-factor tablet|phone] [--layout responsive|fixed] [--tables a,b] [--publish] [--close]');

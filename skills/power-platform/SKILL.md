@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.20.1"
+  version: "0.20.2"
 ---
 
 # Power Platform development
@@ -56,21 +56,26 @@ app or a multi-part build, before any table, screen or flow:
 4. **Build in lanes.** Flows and reporting start as soon as the schema is in; canvas (one helper per
    screen) as soon as the prototype is. Wait for every helper and every background command before
    ending a turn; run walks in the foreground (`references/orchestration.md`).
-5. **Prove and hand back.** Walks at both widths, impeccable `critique` from screenshots into
-   `docs/design-critique.md`, the independent reviewer into `docs/review.md`, one fix batch, the
-   seed restored, the report refreshed last from Fabric, then the hand-back. Budget: about an hour
-   of agent time for a five-screen app with two flows and a medallion.
+5. **Prove and hand back.** Straight after the first publish, in one message: the critique helper,
+   the read-only reviewer (fifteen minutes) and the lead's own walks. Then one fix batch for
+   everything they found, one publish, one walk call, the seed restored and checked, the report
+   refreshed in the background while the hand-back is written. Budget: about an hour of agent time
+   for a five-screen app with two flows and a medallion (`references/orchestration.md`, the
+   timeline).
 
 The plugin enforces this order with its own hooks, no project setup needed. Before a tool runs, it
 refuses a new app's screen `.pa.yaml` until DESIGN.md and `design/prototype.html` exist, and a table
 deploy until the plan exists (a filled `docs/acceptance-contract.md`, or a DOD plan when the person
 chose DOD). At the end it blocks the hand-back, up to three times, while the critique or the
-reviewer's record is missing, while background work this session started is still running, or, with
-no person present, while the last message asks the person a question. After shell calls it reports the
+reviewer's record is missing, while background work this session started is still running, while a
+walk wrote data after the last clean seed check, or, with no person present, while the last message
+asks the person a question. After shell calls it reports the
 budget (the call count every 40, the elapsed time at 45, 60, 90 and 120 minutes). The browser driver
 enforces its own hygiene: it closes blank tabs after every command, keeps one Studio tab, answers
 Studio's Coauthoring terms dialog per `acceptCoauthoringTerms`, refuses a publish when the canvas
-source has not changed since the last one, and runs every walk scenario in one call (`walk <folder>`).
+source has not changed since the last one, refuses a third publish until the critique and the
+review are both written (one fix batch), runs every walk scenario in one call (`walk <folder>`), and
+fails a step where the page scrolls sideways after a resize.
 A denial is an instruction: do the named step with its tool, then retry; do not work around it.
 
 ## The non-negotiables

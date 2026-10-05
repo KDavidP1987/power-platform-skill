@@ -1,0 +1,12 @@
+{
+  "formatVersion": "202502",
+  "computeEngineSettings": {},
+  "name": "{PREFIX}_Bronze_Dataverse",
+  "queryGroups": [],
+  "documentLocale": "en-US",
+  "gatewayObjectId": null,
+  "queriesMetadata": {
+    "{table}": { "queryId": "00000000-0000-4000-8000-000000000001", "queryName": "{table}", "loadEnabled": true },
+    "{table}_DataDestination": { "queryId": "00000000-0000-4000-8000-000000000002", "queryName": "{table}_DataDestination", "isHidden": true, "loadEnabled": false }
+  }
+}
