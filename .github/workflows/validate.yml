@@ -24,12 +24,17 @@ jobs:
       # Version agreement between plugin.json, marketplace.json and SKILL.md.
       - run: node scripts/validate-skills.mjs --check-versions
       - run: node scripts/tests/check-versions.test.mjs
+      - run: node scripts/sync-backlog.mjs --selftest
+      - run: node scripts/sync-backlog.mjs --check
       # Every bundled checker must prove it can go red on a known-bad input.
       - run: node skills/power-platform/scripts/lint-flows.mjs --selftest
       - run: node skills/power-platform/scripts/check-canvas-format.mjs --selftest
       - run: node skills/power-platform/scripts/check-canvas-overlap.mjs --selftest
       - run: node skills/power-platform/scripts/hooks/check-pa-yaml.mjs --selftest
-      - run: python skills/power-platform/scripts/inspect-artifact.py --help
+      - run: node skills/power-platform/scripts/hooks/check-standards.mjs --selftest
+      - run: node skills/power-platform/scripts/hooks/preflight.mjs --selftest
+      - run: node skills/power-platform/scripts/hooks/lib.mjs --selftest
+      - run: python skills/power-platform/scripts/inspect-artifact.py --selftest
       - run: python skills/power-platform/scripts/check-drift.py --selftest
       - run: python skills/power-platform/scripts/deploy-tables.py --selftest
       - run: python skills/power-platform/scripts/ship-canvas.py --selftest
@@ -52,3 +57,9 @@ jobs:
       - run: node skills/power-platform/scripts/canvas-browser.mjs --selftest
       - run: pip install python-docx pillow
       - run: python skills/power-platform/assets/doc-kit/doc_kit.py --selftest
+      # The site walker's selftest has a browser half: a real Chromium against a local fixture site.
+      # Kept last so node_modules does not exist while the repository checks above run.
+      - run: node skills/power-platform/scripts/site-walk.mjs --selftest --logic-only
+      - run: npm i --no-save playwright@1.63.0
+      - run: npx playwright install --with-deps chromium
+      - run: node skills/power-platform/scripts/site-walk.mjs --selftest --channel chromium

@@ -3,10 +3,124 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>power-platform skill: documentation</title>
-<meta http-equiv="refresh" content="0; url=evaluation.html">
-<link rel="canonical" href="evaluation.html">
-<style>body{margin:0;padding:40px 16px;font:16px/1.6 system-ui,sans-serif;color:#14212c;background:#f5f7f9}a{color:#0b6e72}@media (prefers-color-scheme:dark){body{color:#e3eaf0;background:#0e161d}a{color:#4fbcb6}}</style>
+<title>power-platform skill</title>
+<meta name="description" content="An Agent Skill for Power Platform development the way software is built: definitions in git, deliberate deployment, and every change proved in the product.">
+<style>
+:root {
+  --sheet: #f5f7f9; --paper: #ffffff; --ink: #14212c; --muted: #4b5b69; --hair: #c8d3dc; --grid: #e6ecf1;
+  --live: #0b6e72; --live-soft: #d5ecec; --focus: #1d5fa8;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sheet: #0e161d; --paper: #131e27; --ink: #e3eaf0; --muted: #a3b2bf; --hair: #2b3a46; --grid: #18242e;
+    --live: #4fbcb6; --live-soft: #15363a; --focus: #7ab4f0;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; color: var(--ink); background-color: var(--sheet);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+a { color: var(--live); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 2px; }
+code { font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; font-size: .88em; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 40px 16px 64px; }
+.drawing { background: var(--paper); border: 1px solid var(--hair); box-shadow: 0 1px 2px rgb(20 33 44 / .06), 0 12px 32px -18px rgb(20 33 44 / .25); }
+header.drawing { padding: 36px 36px 28px; }
+.kicker { margin: 0 0 10px; color: var(--muted); font-size: .85rem; letter-spacing: .06em; text-transform: uppercase; }
+h1 { font-size: clamp(1.8rem, 1.2rem + 2.4vw, 2.8rem); line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 14px; max-width: 22ch; text-wrap: balance; }
+.lead { margin: 0 0 22px; max-width: 64ch; color: var(--muted); font-size: 1.08rem; }
+nav.links { display: flex; flex-wrap: wrap; gap: 10px; }
+nav.links a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--hair); text-decoration: none; font-weight: 600; background: var(--paper); }
+nav.links a.primary { background: var(--live); border-color: var(--live); color: var(--paper); }
+section.drawing { margin-top: 24px; padding: 28px 36px 32px; }
+h2 { font-size: 1.3rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+section p { max-width: 70ch; margin: 0 0 16px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0; border-top: 1px solid var(--hair); border-left: 1px solid var(--hair); margin: 0; }
+.facts div { border-right: 1px solid var(--hair); border-bottom: 1px solid var(--hair); padding: 14px 16px; }
+.facts dt { font-size: .8rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.facts dd { margin: 4px 0 0; font-weight: 600; }
+.scroll { overflow-x: auto; border: 1px solid var(--hair); }
+table.backlog { border-collapse: collapse; width: 100%; min-width: 720px; font-size: .95rem; }
+table.backlog th, table.backlog td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--hair); }
+table.backlog thead th { background: var(--live-soft); font-size: .8rem; letter-spacing: .05em; text-transform: uppercase; }
+table.backlog td.n { font-variant-numeric: tabular-nums; color: var(--muted); width: 2.5em; }
+table.backlog td:last-child { min-width: 14em; }
+table.backlog tbody tr:last-child td { border-bottom: 0; }
+footer { margin-top: 24px; color: var(--muted); font-size: .9rem; }
+@media (max-width: 600px) {
+  header.drawing, section.drawing { padding: 22px 18px 24px; }
+}
+@media (max-width: 700px) {
+  .scroll { overflow: visible; border: 0; }
+  table.backlog, table.backlog tbody, table.backlog tr, table.backlog td { display: block; min-width: 0; width: auto; }
+  table.backlog thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  table.backlog tr { border: 1px solid var(--hair); margin-bottom: 12px; padding: 6px 0; }
+  table.backlog td { border: 0; padding: 6px 14px; }
+  table.backlog td::before { content: attr(data-label); display: block; font-size: .75rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  table.backlog td.n::before { display: inline; margin-right: 8px; }
+  table.backlog td:last-child { min-width: 0; font-weight: 600; }
+}
+</style>
 </head>
-<body><p>Opening the <a href="evaluation.html">evaluation report</a>. The skill itself lives in the <a href="https://github.com/KDavidP1987/power-platform-skill">repository</a>.</p></body>
+<body>
+<div class="wrap">
+  <header class="drawing">
+    <p class="kicker">Agent Skill · public beta</p>
+    <h1>Power Platform development the way software is built</h1>
+    <p class="lead">Canvas apps, Dataverse solutions, Power Automate flows and Power Pages sites with the
+      definition in git, a portable artifact built from it, a deliberate deployment, and every change
+      proved by performing the task in the product, driven by Playwright.</p>
+    <nav class="links" aria-label="Project links">
+      <a class="primary" href="https://github.com/KDavidP1987/power-platform-skill">Repository and install</a>
+      <a href="evaluation.html">Evaluation report</a>
+      <a href="https://github.com/KDavidP1987/power-platform-skill/blob/main/ROADMAP.md">Roadmap</a>
+      <a href="https://github.com/KDavidP1987/power-platform-skill/blob/main/CHANGELOG.md">Changelog</a>
+    </nav>
+  </header>
+
+  <section class="drawing" aria-labelledby="status">
+    <h2 id="status">Where it stands</h2>
+    <dl class="facts">
+      <div><dt>Release</dt><dd>0.21.0</dd></div>
+      <div><dt>Last graded evaluation</dt><dd>217/222 with, 136/222 without (0.7.1)</dd></div>
+      <div><dt>Scripts with a self-test in CI</dt><dd>Every bundled script</dd></div>
+      <div><dt>Licence</dt><dd>MIT</dd></div>
+    </dl>
+  </section>
+
+  <section class="drawing" aria-labelledby="road">
+    <h2 id="road">Road to 1.0</h2>
+    <p>What still stands between this release and the 1.0 criteria, in the order it is being worked. The
+      same table is in the README and the roadmap; CI fails when they differ.</p>
+    <div class="scroll" role="region" aria-label="Backlog to 1.0" tabindex="0">
+<!-- backlog:start -->
+<table class="backlog">
+<thead><tr><th scope="col">#</th><th scope="col">Item</th><th scope="col">Why it matters</th><th scope="col">Status</th></tr></thead>
+<tbody>
+<tr><td class="n" data-label="#">1</td><td data-label="Item">Power Pages: a site walk driver with sign-in, refusal and <code>/_api</code> proofs, and a reference covering row visibility, &quot;my records&quot;, Private sign-in, deploy and teardown</td><td data-label="Why it matters">The thinnest area: written from one real site, and nothing could walk a site or prove a refusal on one</td><td data-label="Status">Built in 0.21; a measured build against Microsoft's Power Pages plugin is under way</td></tr>
+<tr><td class="n" data-label="#">2</td><td data-label="Item">Speed and cost against Microsoft's plugins</td><td data-label="Why it matters">The last four canvas builds beat them on quality but not on time or cost</td><td data-label="Status">0.21: data-source check on <code>create</code>, a design-helper time box, no single-issue publishes after the fix batch; to be measured</td></tr>
+<tr><td class="n" data-label="#">3</td><td data-label="Item">A self-test in CI for every script, and a floor that refuses to pass when nothing was examined</td><td data-label="Why it matters">A 1.0 criterion; four scripts had none</td><td data-label="Status">Done in 0.21</td></tr>
+<tr><td class="n" data-label="#">4</td><td data-label="Item">Teardown order for Fabric: Dataflows before their lakehouse</td><td data-label="Why it matters">Dataflows can refuse deletion once their destination is gone</td><td data-label="Status">Done in 0.21</td></tr>
+<tr><td class="n" data-label="#">5</td><td data-label="Item">Stabilise (0.9): one interface table, the compatibility file, upgrade notes</td><td data-label="Why it matters">Users need options, exit codes and finding codes that stop moving</td><td data-label="Status">Interface table and compatibility file drafted in 0.21; freeze at 0.9</td></tr>
+<tr><td class="n" data-label="#">6</td><td data-label="Item">Re-run the graded evaluation on the current version: ten or more task types (adding Power Pages, model-driven and SharePoint), three runs each, the held-out triggering set</td><td data-label="Why it matters">A 1.0 criterion; the last graded run was 0.7.1 (217/222 with the skill, 136/222 without) and much has changed since</td><td data-label="Status">Open</td></tr>
+<tr><td class="n" data-label="#">7</td><td data-label="Item">Publish the 0.7.x results and the measured builds on the evaluation page</td><td data-label="Why it matters">The page still shows the 0.5.1 run</td><td data-label="Status">Open</td></tr>
+<tr><td class="n" data-label="#">8</td><td data-label="Item">A model-driven app with a responsive canvas companion, built and verified in a tenant</td><td data-label="Why it matters">Clears most of the snippets still marked &quot;confirm in your tenant&quot;</td><td data-label="Status">Open</td></tr>
+<tr><td class="n" data-label="#">9</td><td data-label="Item">SharePoint as a data source: delegation, the 5,000-item threshold, staying on a standard licence</td><td data-label="Why it matters">Common in real tenants; written down nowhere yet</td><td data-label="Status">Open</td></tr>
+<tr><td class="n" data-label="#">10</td><td data-label="Item">Approvals in Teams and Outlook, and the one-Approvals-connection-per-person limit</td><td data-label="Why it matters">Every approval flow meets it</td><td data-label="Status">Open</td></tr>
+<tr><td class="n" data-label="#">11</td><td data-label="Item">Two independent real builds in different tenants</td><td data-label="Why it matters">A 1.0 criterion; every build so far ran in one tenant</td><td data-label="Status">Open: needs a second tenant</td></tr>
+</tbody>
+</table>
+<!-- backlog:end -->
+    </div>
+  </section>
+
+  <footer>An Agent Skill by SkillEra. Issues and contributions on
+    <a href="https://github.com/KDavidP1987/power-platform-skill/issues">GitHub</a>.</footer>
+</div>
+</body>
 </html>

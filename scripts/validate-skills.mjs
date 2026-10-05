@@ -175,8 +175,10 @@ function checkSkill(name) {
   if (existsSync(scriptsDir)) {
     for (const f of readdirSync(scriptsDir).filter((f) => /\.(mjs|js|cjs)$/.test(f))) {
       const p = join(scriptsDir, f);
-      if (!readFileSync(p, "utf8").includes("--selftest")) { warnings.push(`scripts/${f} has no --selftest — add one so CI can prove it works`); continue; }
-      const r = spawnSync(process.execPath, [p, "--selftest"], { encoding: "utf8", timeout: 60_000 });
+      const src = readFileSync(p, "utf8");
+      if (!src.includes("--selftest")) { warnings.push(`scripts/${f} has no --selftest — add one so CI can prove it works`); continue; }
+      // A selftest with a browser half advertises --logic-only: run the half that needs no browser here.
+      const r = spawnSync(process.execPath, [p, "--selftest", ...(src.includes("--logic-only") ? ["--logic-only"] : [])], { encoding: "utf8", timeout: 60_000 });
       const out = ((r.stdout ?? "") + (r.stderr ?? "")).trim().split(/\r?\n/).at(-1) ?? "";
       if (r.status !== 0) errors.push(`scripts/${f} --selftest failed (exit ${r.status}): ${out}`);
     }

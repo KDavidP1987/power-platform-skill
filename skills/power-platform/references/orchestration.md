@@ -21,16 +21,19 @@ handed screens to helper agents finished first. This reference is the pattern th
  0  lead: acceptance contract + decisions (recommendations taken when no person is present)
     |
  2  +--> design helper: impeccable init -> DESIGN.md -> design/prototype.html (every screen at
-    |      1440 and 390, report mock) -> one critique -> one fix -> design/app-formulas.txt  (to ~13)
+    |      1440 and 390, report mock) -> one critique -> one fix -> design/app-formulas.txt
+    |      (20-minute cap: it returns what it has; to ~22 at the latest)
     +--> lead, lane 0: tables.json -> deploy-tables.py -> seed -> this build's connections
-    |      (Dataverse, Outlook, Approvals reference, Fabric); create the app        (to ~9)
+    |      (Dataverse, Outlook, Approvals reference, Fabric); create the app, which reopens the
+    |      saved app and proves its tables are attached                              (to ~9)
  6  +--> lanes B flows and C reporting, in one message; each proves itself and hands back
 13  +--> lane A canvas: App.pa.yaml from app-formulas.txt, then EVERY screen to a helper in one
     |      message; compile, check-all, ship                                        (to ~30)
 30  first publish --> in ONE message: critique helper + reviewer helper (read-only, 15 min cap)
     |                 + the lead's own walks, write walks included (one walk call)
 45  both back --> ONE fix batch (helpers) -> publish (the driver refuses a third publish before
-    |             both records exist) -> one walk call, every scenario
+    |             both records exist, and any publish after the fix batch until a new batch is
+    |             declared) -> one walk call, every scenario
 55  seed restored and checked (the Stop gate holds the hand-back until it is) -> report refresh
     |   in the background while the lead writes STATE, review.md and the hand-back
 65  hand-back
@@ -75,6 +78,20 @@ and give the lead work while they run.
   gets the report mock. The build whose design the person rated best was
   the first to run this step; builds that left design to "required" in the guidance skipped it
   (`project-setup.md` section 3).
+- **The design helper has twenty minutes.** Put the cap in its prompt: "Budget: twenty minutes from
+  DESIGN.md. Then write what you have: the prototype as it stands, `design/app-formulas.txt`, and in
+  your reply the critique findings you did not fix." A measured build's
+  design helper ran 42 minutes (a second critique round and polish nobody asked for) while the screen
+  helpers, which need its tokens, waited. The plugin reports once when `DESIGN.md` is more than
+  twenty minutes old and `design/prototype.html` is still missing; the lead then tells the helper to
+  return. The prototype fixes the direction, the tokens and every screen's structure; finish belongs
+  to the screenshot critique after the first publish.
+- **`create` proves the tables stayed.** The "data source added" toast reflects Studio's memory, not
+  the saved app: in a measured build the tables were confirmed added and saved, and were gone when the
+  app reopened, and nobody noticed for 14 minutes while every lane waited on the app. `canvas-browser.mjs
+  create --tables ...` now reopens the saved app from the server, reads its Data pane, re-adds a
+  missing table once and saves again, and fails (exit 4) naming the table if it is still missing.
+  Do not start the screen helpers until it reports every table present.
 - **Ship in batches, walk in one call.** A measured build that met every requirement still took 107
   minutes, mostly in Studio churn: 29 Studio opens, 27 saves, 21 publishes, 81 walk calls and 472
   single shell calls. The driver now refuses a publish when the canvas source has not changed since
@@ -83,6 +100,10 @@ and give the lead work while they run.
   time against the budget. Fix a whole batch, push it, save, publish once, walk once.
 - **The fix round has a budget too.** After the screenshot critique and the reviewer, fix every high
   and medium finding in one batch; list the low ones in the hand-back instead of shipping for each.
+  The publish that ships with both review records present is recorded as the fix batch, and the
+  driver refuses every publish after it (exit 10): two measured builds spent their last two publishes
+  on one phone banner. A new batch is for the person's change request or a defect found after
+  hand-back: gather all of it, then `publish --batch "<what this batch fixes>"`, once.
   Most findings in a measured fix round (phone width, pill and tag styles, banners, dialog
   spacing) were visible in the prototype: take the prototype critique at 390 px seriously, and run
   `check-canvas-format.mjs` and the clip sweep before the first ship, not after.

@@ -328,6 +328,18 @@ standard-licence or mirroring caveats the app already carries.
 **Do not wire new gold tables into production reports** until the owner confirms the first live
 period reconciles; build, verify, and hand over the model and the reconciliation numbers.
 
+**Teardown is an owner step, in a fixed order.** `fabric.py` never deletes; `fabric.py teardown-plan
+--workspace <ws> --folder <folder>` prints the folder's items in the order the owner's cleanup script
+(or the person, in the portal) removes them: reports and semantic models first, then pipelines,
+**Dataflows before lakehouses**, notebooks and environments, warehouses and lakehouses last, then
+the empty folder. The order matters: in a measured close-out, five Dataflow Gen2 items whose
+destination lakehouses were already gone could not be deleted through the API at all (UnknownError,
+400, on both the dataflows and the items endpoints); they had to be removed in the Fabric portal.
+Delete a Dataflow while its lakehouse still exists. A lakehouse's SQL analytics endpoint goes with
+the lakehouse: do not delete it separately (that returns 404, which is expected). When the API still
+refuses an item, list it for the person with the portal path (workspace, folder, item, Delete); do
+not retry it in a loop.
+
 A dedicated Power BI and Fabric skill (reports, semantic models, DAX, custom visuals) is planned;
 until it exists, this section is the pattern to follow.
 

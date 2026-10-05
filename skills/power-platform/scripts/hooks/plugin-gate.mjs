@@ -49,7 +49,9 @@
 // After tools (--post, PostToolUse on Bash and PowerShell) it keeps the build to its budget, with
 // numbers rather than advice: every 40 shell calls it reports the count (a measured lead made 472
 // single calls, each re-sending the whole conversation) and points at the batched tools, and at 45,
-// 60, 90 and 120 minutes it reports the elapsed time against the one-hour budget. It never blocks.
+// 60, 90 and 120 minutes it reports the elapsed time against the one-hour budget; and once, when
+// DESIGN.md is more than 20 minutes old and design/prototype.html is still missing, it tells the lead
+// the design helper is past its cap (a measured helper ran 42 minutes). It never blocks.
 // Self-test: node plugin-gate.mjs --selftest
 import fs from 'node:fs';
 import os from 'node:os';
@@ -289,6 +291,17 @@ export function budgetNote(state, now = Date.now()) {
   }
   return notes.join('\n');
 }
+// The design helper's cap. A measured build's helper ran 42 minutes (a second critique round and
+// polish) while the screen helpers waited for its tokens. DESIGN.md's write time starts the clock;
+// the prototype ends it. Reported once, never blocks: the lead tells the helper to return.
+export const DESIGN_BUDGET_MIN = 20;
+export function designOverdue(root, now = Date.now()) {
+  const d = ['DESIGN.md', 'docs/DESIGN.md'].map((r) => path.join(root, r)).find((p) => fs.existsSync(p));
+  if (!d || fs.existsSync(path.join(root, 'design/prototype.html'))) return 0;
+  let since = 0;
+  try { since = Math.floor((now - fs.statSync(d).mtimeMs) / 60000); } catch { return 0; }
+  return since > DESIGN_BUDGET_MIN ? since : 0;
+}
 export function decidePost(root, input = {}, stateDir = os.tmpdir(), now = Date.now()) {
   if (!/^(Bash|PowerShell)$/.test(input.tool_name || '')) return null;
   if (loadConfig(root).pluginGate === false || appConfig(root).pluginGate === false) return null;
@@ -297,7 +310,14 @@ export function decidePost(root, input = {}, stateDir = os.tmpdir(), now = Date.
   const f = path.join(stateDir, `pp-plugin-budget-${sid}.json`);
   const state = readJson(f) || { start: now, shell: 0, nextNudge: SHELL_NUDGE_EVERY, marks: [] };
   state.shell++;
-  const note = budgetNote(state, now);
+  let note = budgetNote(state, now);
+  const late = state.designNoted ? 0 : designOverdue(root, now);
+  if (late) {
+    state.designNoted = true;
+    note = [note, `Budget: DESIGN.md was written ${late} minutes ago and design/prototype.html does not exist yet; the design helper's cap is ` +
+      `${DESIGN_BUDGET_MIN} minutes (orchestration.md section 1). Tell it to write the prototype as it stands, design/app-formulas.txt and ` +
+      'its unfixed critique findings now, then start the screen helpers. Finish belongs to the screenshot critique after the first publish.'].filter(Boolean).join('\n');
+  }
   try { fs.writeFileSync(f, JSON.stringify(state)); } catch { /* unwritable temp */ }
   return note || null;
 }
@@ -512,6 +532,15 @@ function selftest() {
     check('post: 45 minutes reports the budget once', post(1, t0 + 46 * 60000), (g) => typeof g === 'string' && g.includes('46 minutes') && g.includes('ship once'));
     check('post: the same mark is not repeated', post(1, t0 + 50 * 60000), silent);
     check('post: a jump past several marks reports once', post(1, t0 + 125 * 60000), (g) => typeof g === 'string' && g.includes('125 minutes'));
+    // Design helper cap: DESIGN.md's write time starts the clock, the prototype stops it.
+    rm('design'); put('DESIGN.md', '# Design');
+    const dAt = fs.statSync(path.join(tmp, 'DESIGN.md')).mtimeMs;
+    const dpost = (sid, mins) => decidePost(tmp, { tool_name: 'Bash', session_id: sid }, st3, dAt + mins * 60000);
+    check('post: design 15 minutes in says nothing', dpost('d1', 15), silent);
+    check('post: design past 20 minutes reports once', dpost('d1', 25), (g) => typeof g === 'string' && g.includes('25 minutes ago') && g.includes('design/app-formulas.txt'));
+    check('post: the design note is not repeated', dpost('d1', 30), silent);
+    put('design/prototype.html', '<!doctype html>');
+    check('post: prototype written, no design note', dpost('d2', 40), silent);
     check('post: silent outside a build folder', (put('scripts/canvas-app.json', '{}'), rm('canvas'), decidePost(tmp, { tool_name: 'Bash', session_id: 'b9' }, st3, t0)), silent);
     fs.rmSync(st3, { recursive: true, force: true });
     // R3 seed state
@@ -546,7 +575,7 @@ function selftest() {
   if (fails.length) { console.log('selftest FAILED:\n  ' + fails.join('\n  ')); process.exit(1); }
   console.log(`selftest ok: ${CASES} plugin-gate cases (Stop: unrelated silent, design missing, three blocks per session then a note, per-session count, ` +
     'no-id fallback, harness present, two opt-outs, designed, shipped without critique/review, complete, dod opt-in, background shell pending and done, unattended question, attended question, unattended hand-back, unattended flag, sidechain, run-check cap, run checks with harness, token to ' +
-    'lakehouse, token file over REST, non-token write, report-only; R3: silent, write without check, stale check, clean after write, drift, as a run check; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
+    'lakehouse, token file over REST, non-token write, report-only; R3: silent, write without check, stale check, clean after write, drift, as a run check; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, design cap silent, design cap once, design note once only, design cap stops at the prototype, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
     'App.pa.yaml, _EditorState, shell read, other tools, prototype missing, designed, deploy-tables with and without --plan, bare template, ' +
     'filled contract, dod plan, opt-out, unrelated write)');
   process.exit(0);

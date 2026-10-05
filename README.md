@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.20.2](https://img.shields.io/badge/plugin-0.20.2-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.21.0](https://img.shields.io/badge/plugin-0.21.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.20.2 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.21.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -42,9 +42,32 @@ The skill is usable today and is being hardened toward 1.0; see the [roadmap](RO
   with the symptom, what you expected, and the shortest reproduction. Leave out tenant, company and
   person identifiers.
 
+## Road to 1.0
+
+The backlog between this release and the [1.0 criteria](ROADMAP.md#10-the-criteria), in the order it
+is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10) by
+`scripts/sync-backlog.mjs`, and CI fails when the two differ.
+
+<!-- backlog:start -->
+| # | Item | Why it matters | Status |
+|---|---|---|---|
+| 1 | Power Pages: a site walk driver with sign-in, refusal and `/_api` proofs, and a reference covering row visibility, "my records", Private sign-in, deploy and teardown | The thinnest area: written from one real site, and nothing could walk a site or prove a refusal on one | Built in 0.21; a measured build against Microsoft's Power Pages plugin is under way |
+| 2 | Speed and cost against Microsoft's plugins | The last four canvas builds beat them on quality but not on time or cost | 0.21: data-source check on `create`, a design-helper time box, no single-issue publishes after the fix batch; to be measured |
+| 3 | A self-test in CI for every script, and a floor that refuses to pass when nothing was examined | A 1.0 criterion; four scripts had none | Done in 0.21 |
+| 4 | Teardown order for Fabric: Dataflows before their lakehouse | Dataflows can refuse deletion once their destination is gone | Done in 0.21 |
+| 5 | Stabilise (0.9): one interface table, the compatibility file, upgrade notes | Users need options, exit codes and finding codes that stop moving | Interface table and compatibility file drafted in 0.21; freeze at 0.9 |
+| 6 | Re-run the graded evaluation on the current version: ten or more task types (adding Power Pages, model-driven and SharePoint), three runs each, the held-out triggering set | A 1.0 criterion; the last graded run was 0.7.1 (217/222 with the skill, 136/222 without) and much has changed since | Open |
+| 7 | Publish the 0.7.x results and the measured builds on the evaluation page | The page still shows the 0.5.1 run | Open |
+| 8 | A model-driven app with a responsive canvas companion, built and verified in a tenant | Clears most of the snippets still marked "confirm in your tenant" | Open |
+| 9 | SharePoint as a data source: delegation, the 5,000-item threshold, staying on a standard licence | Common in real tenants; written down nowhere yet | Open |
+| 10 | Approvals in Teams and Outlook, and the one-Approvals-connection-per-person limit | Every approval flow meets it | Open |
+| 11 | Two independent real builds in different tenants | A 1.0 criterion; every build so far ran in one tenant | Open: needs a second tenant |
+<!-- backlog:end -->
+
 ## Contents
 
 1. [Status: public beta (0.x)](#status-public-beta-0x)
+1. [Road to 1.0](#road-to-10)
 1. [Why this skill exists](#why-this-skill-exists)
 2. [What you get](#what-you-get)
 3. [Install](#install)
@@ -335,6 +358,18 @@ python deploy-tables.py --manifest tables.json --org https://<org>.crm.dynamics.
 Exit codes: `0` deployed and read back, `1` a conflict or something missing on read-back, `2` a
 manifest error or a run that could not complete, which is never a pass.
 
+### `site-walk.mjs`: a Power Pages site walked as a signed-in person
+
+`signin` opens a headed browser once so the person signs in with Entra ID; `walk` then drives the
+live site from a JSON scenario at 1440 and 390 px: pages, steps and expected text, a sideways-scroll
+check on every page, and page-only screenshots. Its refusal probes run inside the signed-in page and
+call the site's own `/_api` with the anti-forgery token, so they test what a person could really do:
+a hidden row by id or filter, another person's row, a PATCH, a DELETE, a forbidden create. Signed-out
+checks run in a fresh context and fail on any data shown. Example in
+`assets/scenarios/site-walk.example.json`. Exit codes: `0` clean, `1` findings (`SW-SCROLL`,
+`SW-API-ALLOWED`, `SW-SIGNEDOUT-LEAK` and others in `references/interfaces.md`), `2` nothing
+examined.
+
 ### `inspect-artifact.py`: what a solution zip or `.msapp` really contains
 
 Root components against built metadata, security roles, workflows, `LoadFromYaml`, the build
@@ -504,7 +539,7 @@ touches it, it points there rather than repeating it.
 | | [`canvas-controls-and-patterns`](skills/power-platform/references/canvas-controls-and-patterns.md) | TextInput, ComboBox, DropDown, gallery and timer behaviour; one picker for "All", "None" and real records; read models; save handlers, concurrency and partial failure |
 | | [`canvas-layout`](skills/power-platform/references/canvas-layout.md) | Responsive screens (computed geometry or auto-layout containers, verified at three widths), measured text width, wrap and clipping, galleries, z-order, unclickable controls, geometry audits, accessibility and contrast |
 | | [`browser-verification`](skills/power-platform/references/browser-verification.md) | Playwright against Studio and the player, the stale player cache, proving a save or publish, scenario design, negative tests, the acceptance contract that turns a request into walks |
-| Power Pages | [`power-pages`](skills/power-platform/references/power-pages.md) | Choosing the app type by audience and licence; a site in git with hand-written records; table permissions plus the Web API column allow-list; Append and Append To on both sides of a lookup; Private-site sign-in, consent and claims; Liquid reads and Web API writes; the site cache; proving the refusals; designing the site in the organisation's identity (with the impeccable design skill), with phone-first forms |
+| Power Pages | [`power-pages`](skills/power-platform/references/power-pages.md) | Choosing the app type by audience and licence; a site in git with hand-written records; table permissions plus the Web API column allow-list; Append and Append To on both sides of a lookup; Private-site sign-in, consent and claims; Liquid reads and Web API writes; the site cache; classic or code site; rows only some people may see; "my records"; Web API settings and refusal codes; Private-site access and the trial; the site lifecycle without the Azure CLI; teardown; proving the refusals with `site-walk.mjs`; designing the site in the organisation's identity (with the impeccable design skill), with phone-first forms |
 | Dataverse | [`dataverse`](skills/power-platform/references/dataverse.md) | Solution shape, asserting on the artifact, schema hygiene, attribute types and table shapes (a team of one, membership with allocation), connection references, safe data writes |
 | | [`dataverse-web-api`](skills/power-platform/references/dataverse-web-api.md) | Tokens, names, idempotent provisioning, eventual consistency, choice members, alternate keys, dependency checks, paging |
 | | [`security-and-access`](skills/power-platform/references/security-and-access.md) | Roles kept out of the solution, roles as code, impersonation, sharing, column security, onboarding |
@@ -519,6 +554,7 @@ touches it, it points there rather than repeating it.
 | | [`alm-pipelines`](skills/power-platform/references/alm-pipelines.md) | CI/CD with `pac` in GitHub Actions and Azure DevOps: service principals, Solution Checker, managed vs unmanaged, deployment settings, activating flows, the skill's tools as gates. Each statement marked documented, observed or untested |
 | | [`first-run`](skills/power-platform/references/first-run.md) | From nothing to a working agent: rights, machine, pac, a self-renewing token, a browser that signs in by itself, Studio, the app config, the hand-back pattern, the smoke test, every identity signed in once |
 | | [`tooling-and-auth`](skills/power-platform/references/tooling-and-auth.md) | `pac`, tokens, the TDS endpoint, MCP servers, Windows and PowerShell traps |
+| | [`interfaces`](skills/power-platform/references/interfaces.md) | Every script's options, exit codes and finding codes in one table, and upgrade notes from earlier 0.x releases (the 0.9 interface freeze candidate) |
 
 ## Rules the skill will not bend
 
@@ -590,10 +626,14 @@ inputs and harness are in [`evals/`](evals/).
 - **Browser selectors track today's player and Studio.** Microsoft changes both. The driver fails
   loudly, with a screenshot and an accessibility snapshot, rather than passing when a selector
   stops matching.
-- **Power Pages coverage comes from one site** (submit, list, detail with a conversation, on the
-  enhanced data model). Basic forms, lists, file uploads, external identity providers and
-  production licensing are not yet covered. Claims mapping on the built-in Entra provider did not fill the
-  contact; the reference gives the identity-by-object-id approach instead.
+- **Power Pages: one real site so far, a second being measured.** The reference was written from one
+  site (submit, list, detail with a conversation, on the enhanced data model) and extended in 0.21
+  from Microsoft Learn: row-level visibility, "my records", Private-site access, the site lifecycle
+  through the Power Platform API, and teardown. Statements not yet tried in a tenant are marked
+  "confirm in your tenant". `site-walk.mjs` passes its self-test against a local fixture site and has
+  not yet walked a live one. File uploads and external identity providers are not covered. Claims
+  mapping on the built-in Entra provider did not fill the contact; the reference gives the
+  identity-by-object-id approach instead.
 - **Microsoft's official plugins** (`microsoft/power-platform-skills`) generate apps; this skill is
   the method for shipping and verifying them in a real tenant and drives the same canvas authoring
   server. Code apps, Power Pages code sites, mobile apps, PCF controls and the model-driven app

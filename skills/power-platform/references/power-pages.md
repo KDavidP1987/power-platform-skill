@@ -6,6 +6,23 @@ choose one, how to keep it in git, how to secure it, how to build pages that rea
 to prove it works. Everything here was observed on a real site (enhanced data model, 2026) unless
 it is marked as coming from documentation.
 
+**Before the first page, settle three things** (sections 10 to 12): classic site or code site; how
+rows that some signed-in people must not see are kept from them (table permissions cannot filter on
+a column such as a "published" Yes/No); and how a row records whose it is. Getting any of them
+wrong is a security defect, not a style choice, and the last two can need a schema change the owner
+must agree to.
+
+| Section | Covers |
+|---|---|
+| 1-9 | app type, git, the two guards, sign-in, Liquid and Web API, cache, verification, security review, design |
+| 10 | classic site or code site, and how each deploys |
+| 11 | row-level visibility (a column decides who sees a row) |
+| 12 | "my records": the contact lookup, scopes, Append and Append To |
+| 13 | Web API settings, the anti-forgery token, error codes |
+| 14 | Private sites, granting access, the trial |
+| 15 | creating, activating and restarting a site without the Azure CLI |
+| 16 | teardown |
+
 ## 1. Choose the app type before the first screen
 
 | | Canvas app | Power Pages site | Model-driven app |
@@ -22,8 +39,8 @@ customers) get a Pages site over a few tables; the few who evaluate, approve and
 get a canvas or model-driven app over the same tables. Do not mirror Dataverse into SharePoint to
 avoid licences for readers - that is multiplexing, and it does not reduce the licences required.
 
-A new site starts as a **trial** (in a production environment it expires after 90 days unless
-converted, and converting needs capacity licences). Say so to the owner when you create one; the
+A new site starts as a **trial** (section 14: 90 days in a production or sandbox environment, 30 in
+a trial environment, and converting needs licences). Say so to the owner when you create one; the
 conversion is their licensing decision, not a build step.
 
 ## 2. Keep the site in git
@@ -159,7 +176,10 @@ Show the server's error message on failure: the 403 text names the missing privi
 The running site caches configuration. After an upload that changes **table permissions or site
 settings**, the site keeps the old ones - a correct fix still returns the old 403. Clear it before
 testing: `/_services/about` (as a site administrator), **Clear config**, and **Clear cache** for
-content. Authentication settings can need a site restart from the admin centre.
+content. Authentication settings can need a site restart from the admin centre, or the Power
+Platform API's restart operation (section 15), which needs no person in a portal.
+Changes to the "Power Pages Web API Columns" view can take up to five minutes to reach the Web
+API (documentation).
 
 ## 7. Verify by performing the task, then prove the refusals
 
@@ -174,6 +194,24 @@ content. Authentication settings can need a site restart from the admin centre.
    (for example, no second contact exists yet).
 5. **Phone width**: at 390 px, `document.documentElement.scrollWidth` must equal `clientWidth` on
    every page, and the forms must stack.
+
+**Drive it with `scripts/site-walk.mjs`**, the site counterpart of the canvas walk: `signin` once
+(the person completes the Entra sign-in and consent in the opened browser; the profile is kept),
+then `walk --scenario <file>` for the task steps, the signed-out check, the 390 px scroll check on
+every page, and the refusal probes - `/_api` calls sent from inside the signed-in page with the
+anti-forgery token, each expected to fail with a stated status. A probe that succeeds is a
+security finding, not a flaky test. The refusals to prove on every site:
+
+| Probe | Expected |
+|---|---|
+| GET a row the person must not see, by id and by `$filter` | no row (404, or an empty `value`) |
+| POST with a column outside the allow-list (a stage, a visibility flag, an owner) | 403 `90040101`, or the row saved without it - then read it back to prove which |
+| PATCH and DELETE on a row the person created | 403 `90040102` / `90040104` |
+| POST binding the contact lookup to another contact | 403 `90040105` or `90040106` |
+| POST a child row bound to a parent the person cannot see | 403, and no row |
+| every page and `/_api` signed out | redirect to sign-in (Private) or no data |
+
+Read every write back from Dataverse (Web API as the owner), not from the page.
 
 ## 8. Security review before release
 
@@ -192,7 +230,10 @@ those in your tenant.
    grants (the call will be refused); Create, Write or Delete granted that no code uses; Global
    access for the anonymous or the authenticated role; a column the code writes that the allow-list
    lacks; allow-listed columns nothing uses; process columns (stage, owner, decision, score) in an
-   allow-list; Web API enabled with `*`, with no fields, with no permission, or with no caller.
+   allow-list; Web API enabled with `*`, with no fields, with no permission, or with no caller;
+   Web API enabled on a table some role reads with Global scope (`WEBAPI-GLOBAL-READ`: every row
+   is reachable through `/_api`, whatever the pages show - section 11); and `*` on a table the
+   site's roles may create in or write to (`WEBAPI-WILDCARD-WRITE`).
    Exit 0 clean, 1 findings, 2 nothing examined. On the real site it read three permissions, 57
    settings and 68 code files and found nothing above info. What it cannot see: column
    permissions, the "Power Pages Web API Columns" view, basic forms and lists that use a table
@@ -244,9 +285,11 @@ those in your tenant.
 8. **Prove the refusals** in the running site as in section 7, step 4. The audit says what the
    configuration allows; only a refused call from a signed-in browser proves it.
 
-**Code sites (single-page React, Angular, Vue or Astro sites) are a different build model** - use
-Microsoft's Power Pages plugin (`microsoft/power-platform-skills`) for those; the audit here reads
-Liquid and page JavaScript and has not been run on a code site's bundle.
+**Code sites (single-page React, Angular, Vue or Astro sites) are a different build model**
+(section 10). Every security rule here applies to them unchanged - the Web API and its table
+permissions are the same - but the audit reads Liquid and page JavaScript and has not been run on
+a code site's compiled bundle: for a code site, audit the permissions and settings it reads and
+prove the refusals in the running site.
 
 ## 9. Designing the site: the organisation's identity, not the platform's
 
@@ -309,3 +352,213 @@ The rules below are what that pairing found the platform needs, in order:
    rounds passed: answers echoed in the wrong words, rounded money, headings closer to the text
    above than their own, chips under the wrong heading, a phone order that hid the first field,
    and the brand shape stopping at the home page. Budget two rounds of fixes, then stop.
+10. **Know which theme you are overriding.** A classic site renders on Bootstrap (3 on older sites,
+    5 on newer ones; `pac pages bootstrap-migrate` moves page HTML from 3 to 5, and the Power
+    Platform API can stamp a site as Bootstrap 5 - documentation, confirm the version your site
+    serves before writing selectors) plus `portalbasictheme.css`; put your tokens in custom
+    properties on your own wrapper class and never restyle Bootstrap's global classes, so a
+    platform update cannot undo the brand. A code site has no style workspace and no platform
+    theme on your markup: the framework's own styling is the theme. On either, the logo and
+    photograph are web files (classic) or compiled assets (code site), sized for the header at
+    1x and 2x, with an `alt` naming the organisation.
+
+## 10. Classic site or code site
+
+Two build models share one security model (web roles, table permissions, the Web API). Pick before
+the first page; they do not convert into each other.
+
+| | Classic site | Code site (single-page app) |
+|---|---|---|
+| Pages | web pages, page and web templates, Liquid, basic and multistep forms, lists | one compiled app (React, Angular, Vue or Astro) with client-side routes |
+| Reads | Liquid `fetchxml`, rendered on the server; the Web API | the Web API and server logic only; Liquid is not supported |
+| Deploy | `pac pages download` / `upload --modelVersion 2` | `pac pages upload-code-site --rootPath . [--compiledPath dist] [--siteName ...]`; `download-code-site` |
+| First deploy | create the site (studio or section 15), then download it | the first upload creates an **inactive** site; activate it (section 15) |
+| Studio | pages, styling and forms workspaces | no pages or style workspace; security and set-up only |
+| Fits | content, forms, lists; reads that never need the Web API | a rich interactive app built by a team that already ships a framework |
+
+From documentation, for code sites: `pac` 1.44 or later and a site on 9.7.4 or later; the
+environment must allow `.js` attachments (admin centre, Privacy + Security, remove `js` from
+Blocked Attachments) or the upload fails with "The attachment is either not a valid type or is too
+large"; a `powerpages.config.json` in the root can hold `siteName`, `compiledPath`,
+`defaultLandingPage` and `bundleFilePatterns` (old content-hashed bundles matching those patterns
+are deleted before each upload - without them stale chunks pile up in the site's web files); Power
+Platform Git integration is not supported; the signed-in user is
+`window.Microsoft.Dynamic365.Portal.User`. Never run `pac pages upload` on a code site project -
+Microsoft's own Power Pages plugin forbids it because it damages the code site's metadata (confirm
+in your tenant only on a throwaway site).
+
+**The security consequence:** a code site reads everything through `/_api`, so every table it
+shows has the Web API on, and section 11 decides whether hidden rows stay hidden. A classic site can
+keep a table's Web API off and read it only in server-rendered Liquid.
+
+## 11. Row-level visibility: when a column decides who sees a row
+
+Table permissions scope by relationship (Global, Contact, Account, Self, Parent), not by a column's
+value. "Signed-in people see only the items marked visible" cannot be a Contact or Global
+permission: **Global Read on a table whose Web API is enabled exposes every row through
+`/_api/<entity set>` and `$filter`, whatever the pages render** - the Web API follows table
+permissions, not page code. `audit-pages-permissions.py` reports this as `WEBAPI-GLOBAL-READ`.
+
+Options, strongest first. Each needs a refusal probe in the running site (section 7).
+
+1. **Custom access type** (documentation; preview): a table permission whose access is a FetchXML
+   `filter` (for example `<condition attribute="app_published" operator="eq" value="1" />`); only
+   the filter element is evaluated. Available only on sites opted in to **enhanced authorization**,
+   which maps contacts and web roles to Dataverse system users and security roles - a site-wide
+   change the owner must agree to (Microsoft warns that plug-ins whose "Run As" user lacks
+   privileges can fail after the switch). Confirm in your tenant that the filter applies to `/_api`
+   and Liquid alike before relying on it.
+2. **Server logic** (documentation; announced generally available in April 2026 - Microsoft's own
+   plugin still calls it preview, so check the Learn page's banner). Server-side JavaScript at
+   `/_api/serverlogics/<name>` (client, with the anti-forgery token) or the `{% serverlogic %}`
+   Liquid tag. Its function reads with `Server.Connector.Dataverse.RetrieveMultipleRecords` and a
+   filter on the column, and returns only the rows and columns the page needs. Its own access goes
+   through web roles and table permissions, so the table still has a Read permission - **leave
+   `Webapi/<table>/enabled` off** so `/_api/<entity set>` answers 404 and server logic is the only
+   way in (confirm in your tenant that server logic reads a table whose Web API is off). Limits:
+   no browser APIs (`fetch`, `XMLHttpRequest`), and scripts containing `eval(`, `Function(`,
+   `setTimeout(`, `require(`, `delete`, `prototype` and similar are rejected (the DELETE handler is
+   named `del`); 120 s timeout by default, up to 240 (`ServerLogic/TimeoutInSeconds`).
+3. **Classic Liquid with the Web API off**: list and detail both read with `fetchxml` carrying the
+   condition. **The detail page must re-check the condition with the id it was given** - a detail
+   page that loads by id alone shows a hidden row to anyone who changes the id.
+4. **A relationship you can scope by** (a lookup to an audience or parent row that Account or Parent
+   scope can follow). Strong, but a schema change.
+
+Not options: hiding rows in page code, a client-side `$filter`, a view. **Writes that depend on
+visibility need the same check**: a child row (a comment) created through the Web API can be bound
+to any parent the role can read. If the parent permission is Global Read, a crafted POST comments on
+a hidden item - create such children through server logic that re-reads the parent first, or keep
+the parent unreadable outside the filter.
+
+## 12. "My records": the contact lookup, scopes, Append and Append To
+
+- **Contact scope needs a relationship** from contact to the table: a lookup column on the table
+  that points at contact (choose it when creating the permission). Account scope follows the
+  contact's account; Self is the contact row itself; Parent is a child permission through a
+  relationship to a parent permission (the studio adds it as a child permission; the Parent type
+  itself is in the Portal Management app). No lookup, no "my records" - that is a schema change to
+  agree with the owner before building.
+- **Set the lookup on create to the signed-in contact**: `"<navigation property>@odata.bind":
+  "/contacts(<user.id>)"` (the navigation property name is in `ManyToOneRelationships`). With
+  Contact granted Self scope and Append plus Append To, a bind to anyone else's contact is refused
+  (measured, section 3). Or set it in server logic from `Server.User.contactid`.
+- **Never take who-it-is from the client.** Keep requester name and email columns out of the
+  `fields` allow-list and fill them on the server: server logic from `Server.User` (`fullname`,
+  `emailaddress1`), or a Dataverse plug-in or flow from the contact lookup. The built-in Entra
+  provider can leave the contact's name and email blank (section 4), so check the contact row first
+  and fall back to `adx_identity_username` against `systemuser.azureactivedirectoryobjectid`.
+- **Lock it after create**: give the person no Write privilege on the table (nothing they created
+  can change) - or, where some edits are allowed, column permissions narrow which columns the Web
+  API may change (documentation; confirm in your tenant).
+- **Append and Append To**: the documented rule is Append on the table that holds the lookup and
+  Append To on the one it points at; measured, both were needed on both sides (section 3).
+- Known issue (documentation): a Web API GET on a table with several levels of Parent, Contact or
+  Account scope can return a Dataverse error; use a `fetchXml` query parameter instead.
+
+## 13. Web API settings, the anti-forgery token and the errors
+
+| Site setting | Value |
+|---|---|
+| `Webapi/<logical name>/enabled` | `true` to expose the table; default `false` |
+| `Webapi/<logical name>/fields` | comma-separated logical names, including each lookup's logical name the page binds. `*` is deprecated and requests to a table configured with it fail |
+| `Webapi/<logical name>/UseFieldsFromView` | `true` adds the columns of a system view named "Power Pages Web API Columns" (site 9.8.8 or later); combined with `fields` |
+| `Webapi/error/innererror` | `false` outside development |
+
+Settings use the table's logical name; URLs use the entity set name, case-sensitively. A lookup reads
+back as `_<column>_value`. The portal Web API does not call Dataverse actions or functions, and does
+not write configuration tables (`adx_webpage`, `adx_sitesetting`, `adx_entitypermission` and the
+rest). Authenticated users' calls need authenticated-user capacity (licensing, documentation).
+
+**The anti-forgery token** goes in a `__RequestVerificationToken` header on every call. On a classic
+page: `shell.getTokenDeferred()` (or `shell.safeAjax`, which wraps it). In a code site or a test
+script: GET `/_layout/tokenhtml` and read the `value="..."` attribute. Send `Accept:
+application/json`, `OData-Version: 4.0`, and `Content-Type: application/json` with a body. A create
+returns the new row's id in the `entityid` response header.
+
+**Errors** (documentation; the body is `{"error": {"code", "message", "cdscode", "innererror"}}`):
+
+| Status | Code | Meaning |
+|---|---|---|
+| 403 | `90040101` | column not in the allow-list ("Attribute ... is not enabled for Web Api") |
+| 403 | `90040102` / `90040103` / `90040104` | no Write / Create / Delete permission |
+| 403 | `90040105` / `90040106` | missing Append / Append To on a bind |
+| 400 | `90040100` | column does not exist |
+| 401 | `90040109` | no site session, or no anti-forgery token (`90040107` is a token that does not match) |
+| 404 | `9004010C` | resource not found - also what a table with the Web API off answers |
+| 405 | | DELETE or PATCH on a collection |
+
+Show the message to the person on failure; for a refusal probe, assert the status and the code.
+
+## 14. Private sites, granting access, and the trial
+
+- **Private is the default.** Only the site's makers, users with the System Administrator role in
+  the environment, and up to 50 granted organisation users can enter, after an Entra sign-in. Public
+  means anyone with the link. Changing visibility restarts the site; a site in a developer
+  environment cannot go Public, and a tenant control can stop non-production sites going Public.
+  Who may change it: Power Platform and Dynamics 365 administrators, and System Administrators
+  unless the tenant setting `enableSystemAdminsToChangeSiteVisibility` is `false`. Turning off Entra
+  authentication breaks a Private site.
+- **Granting one person access**: studio, Security > Site visibility > Grant site access, names or
+  email addresses, Share. The list is kept in an environment variable, so any role that may edit
+  that variable can change it. Documentation does not say whether the grant notifies the person;
+  when a test must reach nobody else, grant only after the test, or confirm in your tenant first.
+  The grant only opens the door: what they see still comes from web roles (the Authenticated Users
+  role covers everyone signed in; a narrower role is assigned to their contact, which the first
+  Entra sign-in creates). Staff signing in with Entra need no invitation.
+- **The trial** (documentation): 90 days in a production or sandbox environment, 30 days (or the
+  environment's own end, if sooner) in a trial environment. At the end the site is suspended; it can
+  still be converted within seven days of suspension. Converting needs licences for the site's
+  users and a production or sandbox environment (not trial or developer), from the admin centre or
+  the API's "Convert Trial To Production". The web application firewall comes on by default at
+  conversion (section 8). Conversion is the owner's licensing decision; never do it as a build step.
+
+## 15. Creating, activating and restarting a site without the Azure CLI
+
+Microsoft's own Power Pages plugin gets its token from the Azure CLI, which needs an administrator
+to install on a managed machine. The calls themselves are the Power Platform API:
+`https://api.powerplatform.com/powerpages/environments/{environmentId}/websites`, api-version
+`2024-10-01` (the plugin uses `2022-03-01-preview`), with a token for the resource
+`https://api.powerplatform.com`. From PowerShell with Az.Accounts:
+`Get-AzAccessToken -ResourceUrl https://api.powerplatform.com` (confirm in your tenant; on newer
+Az.Accounts the token is a SecureString). `pac` has no token command, but `pac pages list` and
+`pac org who` give the site ids and the Dataverse organization id.
+
+| Operation | Call |
+|---|---|
+| List sites | `GET .../websites` |
+| Create or activate | `POST .../websites` with `{"name", "subdomain", "templateName": "DefaultPortalTemplate", "dataverseOrganizationId", "selectedBaseLanguage": 1033}`; add `"websiteRecordId"` to activate an uploaded code site or existing configuration. 202 and an `Operation-Location` to poll; 400 for a taken subdomain, 403 without the site-creator or System Administrator role, 409 if it exists |
+| Restart (clears the runtime cache) | `POST .../websites/{id}/restart` |
+| Visibility | `POST .../websites/{id}/updateSiteVisibility?siteVisibility=<value>` (confirm the value names in your tenant) |
+| Convert the trial | "Convert Trial To Production" (owner decision) |
+| Delete the site host | `DELETE .../websites/{id}` (202) |
+
+`{id}` is the website id from the list, which differs from the Dataverse site record id; match on
+the record id the list returns (confirm the property name in your tenant). Provisioning takes
+minutes and holds the org-wide customization lock (section 2), so deploy schema first.
+
+**Two data models.** The enhanced data model (`--modelVersion 2`) keeps a site as one
+`powerpagesite` row plus `powerpagecomponent` rows typed by `powerpagecomponenttype` (pages,
+templates, settings, table permissions, roles); the standard model uses the `adx_` tables
+(`adx_website`, `adx_webpage` and so on). New sites use the enhanced model; check which one before
+reading or writing records directly, and prefer `pac pages` to direct writes.
+
+## 16. Teardown
+
+A site is three things: the **site host** (the running web app), the **site configuration** in
+Dataverse (the site record and its components), and the **Power Pages solutions** shared by every
+site in the environment. Remove a site in this order, listing first and confirming with the owner:
+
+1. List what belongs to it: `pac pages download` (keep the copy), its web roles, table permissions,
+   site settings, server logic, and any rows its tests created.
+2. Delete the **site host**: admin centre, Power Pages sites > Manage > Delete this site, or the
+   API's DELETE. This removes the hosted resources only; it fails without permissions on the site's
+   Entra application.
+3. Delete the **site configuration**: the site record (`powerpagesite` on the enhanced model, the
+   website record in the Portal Management app on the standard one). Confirm in your tenant that
+   its components go with it, and list any that remain.
+4. Leave the **Power Pages solutions** while any other site uses the environment.
+
+What stays by design: contacts created by sign-ins, rows the site's users wrote, and any column or
+relationship added to your own tables for the site - remove those deliberately, as schema changes of
+their own.

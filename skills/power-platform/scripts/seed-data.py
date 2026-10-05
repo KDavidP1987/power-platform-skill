@@ -66,7 +66,7 @@ Options:
     --selftest          offline tests against a simulated Web API
 
 Exit: 0 done (or planned, or check clean); 1 a finding or (check) drift (unknown choice label, unresolvable lookup, duplicate key);
-2 cannot run (bad seed file, no token, API error).
+2 cannot run (bad seed file, no token, API error), or (check) no seed row was compared - NOT a pass.
 """
 import argparse
 import csv
@@ -292,6 +292,9 @@ def cmd_check(dv, meta, seed, only, today):
             if d:
                 rows_out.append((t["table"], k, "; ".join(d)))
                 bad += 1
+    if not total:
+        print("seed check: no seed rows to compare%s - this is NOT a pass" % (" (--only matched no table)" if only else ""))
+        return 2
     print("seed check: %d row(s) compared, %d drifted or missing" % (total, bad))
     for table, k, what in rows_out:
         print("  DRIFT %-20s %-24s %s" % (table, k, what))
@@ -590,6 +593,12 @@ def selftest():
             r0 = json.load(f)
         check("a check records its time and result for the Stop gate", r1["clean"] is False and r0["clean"] is True
               and r0["at"].endswith("Z") and len(r0["at"]) == 24)
+
+        t, db = _fake()
+        rc, out = go(t, "check", "--seed", write({"org": "https://example.crm.dynamics.com", "tables": []}))
+        check("check with no seed rows examined nothing: exit 2, not a pass", rc == 2 and "NOT a pass" in out)
+        rc, out = go(t, "check", "--seed", write(seed), "--only", "app_nothing")
+        check("check whose --only matches no table: exit 2", rc == 2 and "--only matched no table" in out)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

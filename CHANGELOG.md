@@ -11,6 +11,60 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-05
+
+Power Pages becomes a measured area, the speed lessons from the last canvas build are enforced, and
+the 0.9 stabilise work starts. The backlog to 1.0 is now one table kept in step across the roadmap,
+the README and the documentation front page.
+
+### Added
+
+- **`site-walk.mjs`**: walks a live Power Pages site as a signed-in person at 1440 and 390 px. It
+  performs the steps, checks for sideways scroll on every page and captures page-only screenshots. It
+  proves refusals from inside the signed-in page with the site's anti-forgery token (a hidden row by id
+  or filter, another person's row, PATCH, DELETE, a forbidden create) and checks that nothing shows
+  signed out. The self-test has a logic half and a browser half against a local fixture site; CI runs
+  both. `validate-skills` passes `--logic-only` to any script that offers it.
+- **Power Pages reference, sections 10 to 16** (`power-pages.md`):
+  - classic site or code site, and how each deploys;
+  - rows only some people may see: table permissions cannot filter by a column value, and any table
+    with the Web API on and Global read exposes every row through `/_api`; the options are Custom
+    access, server logic with the Web API off, or Liquid with a re-check on the detail page;
+  - "my records" through a lookup to contact, with the requester filled on the server;
+  - Web API site settings, the token and the refusal codes;
+  - Private-site access lists and the trial;
+  - creating, activating, changing visibility and deleting a site through the Power Platform API with
+    an Az.Accounts token (no Azure CLI);
+  - teardown order.
+
+  Statements not yet tried in a tenant are marked "confirm in your tenant".
+- **`audit-pages-permissions.py`**: `WEBAPI-GLOBAL-READ` (Web API on and a role reads the table with
+  Global scope) and `WEBAPI-WILDCARD-WRITE` (a `*` allow-list on a table a role may write).
+- **`fabric.py teardown-plan`**: a read-only deletion order for a folder: Dataflows before their
+  lakehouse, SQL endpoints with their lakehouse (a separate delete returns 404), and the portal as the
+  fallback when the API refuses a Dataflow. `reporting.md` makes teardown an owner step in that order.
+- **`references/interfaces.md`**: every script's options, exit codes and finding codes in one table,
+  with upgrade notes (the 0.9 interface freeze candidate).
+- **Self-tests for `check-standards`, `preflight`, `lib.mjs` and `inspect-artifact.py`**: CI now runs a
+  self-test for every bundled script.
+- **The backlog to 1.0** in `ROADMAP.md`, copied into the README and `docs/index.html` (now a front
+  page rather than a redirect) by `scripts/sync-backlog.mjs`; CI fails when the copies differ.
+
+### Changed
+
+- **`canvas-browser.mjs create` proves its tables**: it reopens the saved app, reads the Data pane,
+  re-adds a dropped table once, and fails (exit 4) naming it. A build lost 14 minutes to an app whose
+  tables had silently dropped. `--no-verify-sources` skips the check.
+- **No single-issue publishes after the fix batch**: once a publish has shipped with the design
+  critique and the reviewer's findings present, `publish` refuses (exit 10) until a new batch is
+  declared with `--batch "<what>"`, or `--unreviewed "<reason>"` overrides.
+- **The design helper has a 20-minute cap** (`orchestration.md`); `plugin-gate.mjs` reports once when
+  the prototype is still missing past it. It ran 42 minutes in the last build.
+- **A check that examined nothing is never a pass**: `seed-data.py check` with no rows,
+  `reconcile-report.py` with no checks, and `inspect-artifact.py` on an empty solution now exit 2.
+- `preflight.mjs` names the branch in a repository with no commits; `tested-versions.json` records the
+  versions this release was checked with.
+
 ## [0.20.2] - 2026-10-05
 
 Test G (0.20.1) fixed the Studio churn (5 publishes against 21, no blank tabs, no stalled dialog) but

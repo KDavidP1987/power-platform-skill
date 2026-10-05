@@ -55,7 +55,8 @@ Options:
     --json                one JSON object per check
     --selftest            offline tests against simulated APIs
 
-Exit: 0 every check matches; 1 at least one DIFF; 2 cannot run (bad file, no token, API error).
+Exit: 0 every check matches; 1 at least one DIFF; 2 cannot run (bad file, no token, API error) or the
+file lists no checks (nothing compared is NOT a pass).
 """
 import argparse
 import datetime
@@ -201,6 +202,9 @@ def run(argv, transport=None, today=None):
     if not (org and ws and ds):
         print("org, workspace and dataset are required (file or flags)")
         return 2
+    if not spec.get("checks"):
+        print("the checks file lists no checks - nothing was compared; this is NOT a pass")
+        return 2
     tol = float(spec.get("tolerance", 0.0001))
     try:
         dtok = "fixture" if transport else get_token(org, a.token_cmd, a.token_env, org)[0]
@@ -327,6 +331,10 @@ def selftest():
         rc, out = go("--json")
         rows = [json.loads(x) for x in out.splitlines()]
         check("--json prints one object per check", len(rows) == 6 and rows[1]["ok"] is False)
+        with open(p, "w") as f:
+            json.dump(dict(spec, checks=[]), f)
+        rc, out = go()
+        check("a file with no checks compared nothing: exit 2, not a pass", rc == 2 and "NOT a pass" in out)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

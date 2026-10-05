@@ -17,6 +17,8 @@ Options:
     --stamp REGEX           build-stamp pattern, one capture group (default: Set(gbl*Build*, "..."))
     --allow-roles           do not fail on security roles in the solution
     --json                  machine-readable report
+    --selftest              build known-good and known-bad fixtures in a temp folder, check the
+                            verdicts, and exit
 
 What it checks:
   solution zip  root components vs elements actually built into customizations.xml; security
@@ -26,7 +28,7 @@ What it checks:
   canvas app    LoadFromYaml (which half runs), build stamp, Dataverse table count, option-set
                 caches, marker search in the authoritative half, with both halves' counts shown.
 
-Exit: 0 ok, 1 findings, 2 could not read the artifact (NOT a pass).
+Exit: 0 ok, 1 findings, 2 could not read the artifact, or it holds nothing to inspect (NOT a pass).
 """
 import argparse
 import io
@@ -202,9 +204,121 @@ def inspect_solution(zf, opts, findings, report):
             if p and b.get("set") and p.get("entitySetName") and p["entitySetName"] != b["set"]:
                 findings.append(f"{norm(n)}: '{disp}' entity set differs - app {b['set']!r} vs player {p['entitySetName']!r}")
         app["player_initialises"] = len(player)
+    if not roots and not apps:
+        raise ValueError("the solution declares no root components and carries no canvas app - nothing to inspect")
 
 
-def main():
+# --------------------------------------------------------------------------- selftest
+def _zip_bytes(files):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def _fixture_msapp(stamp=True, marker_half="Src", tables=("Assets", "Loans")):
+    screen = 'Screens:\n  List:\n    Children:\n      - btnSave:\n          Control: Button\n'
+    if stamp:
+        screen += '# OnStart: =Set(gblBuildStamp, "2026-10-05.1")\n'
+    ds = {"DataSources": [{"Type": "NativeCDSDataSourceInfo", "Name": t, "LogicalName": "pfx_" + t.lower()[:-1],
+                           "EntitySetName": "pfx_" + t.lower()} for t in tables]
+          + [{"Type": "OptionSetInfo", "Name": "Status"}]}
+    files = {"References/DataSources.json": json.dumps(ds),
+             "Header.json": "{}",
+             "Controls/1.json": json.dumps({"TopParent": {"Name": "List"}})}
+    files["packed.json"] = json.dumps({"LoadConfiguration": {"LoadFromYaml": True}})
+    if marker_half == "Src":
+        files["Src/List.pa.yaml"] = screen
+    else:
+        files["Src/List.pa.yaml"] = screen.replace("btnSave", "btnOther")
+        files["Controls/2.json"] = json.dumps({"Name": "btnSave"})
+    return _zip_bytes(files)
+
+
+def _fixture_solution(entity_built=True, role=False, workflow_json=True, refs=("Assets", "Loans"), app=None):
+    roots = '<RootComponent type="1" schemaName="pfx_asset" />'
+    if role:
+        roots += '<RootComponent type="20" id="{11111111-1111-1111-1111-111111111111}" />'
+    roots += '<RootComponent type="29" id="{22222222-2222-2222-2222-222222222222}" />'
+    sx = ('<ImportExportXml><SolutionManifest><UniqueName>PfxSolution</UniqueName><Version>1.0.0.1</Version>'
+          '<Managed>0</Managed><RootComponents>' + roots + '</RootComponents></SolutionManifest></ImportExportXml>')
+    dbref = json.dumps({"default.cds": {"dataSources": {t: {"entitySetName": "pfx_" + t.lower()} for t in refs}}})
+    dbref = dbref.replace("&", "&amp;").replace('"', "&quot;")
+    cx = ('<ImportExportXml><Entities>'
+          + ('<Entity><Name LocalizedName="Asset">pfx_asset</Name></Entity>' if entity_built else '')
+          + '</Entities>'
+          + ('<Roles><Role id="{11111111-1111-1111-1111-111111111111}" name="Pfx Lender"/></Roles>' if role else '')
+          + '<Workflows><Workflow WorkflowId="{22222222-2222-2222-2222-222222222222}" Name="Notify"/></Workflows>'
+          + '<CanvasApps><CanvasApp><Name>pfx_app</Name><DatabaseReferences>' + dbref + '</DatabaseReferences></CanvasApp></CanvasApps>'
+          + '</ImportExportXml>')
+    files = {"solution.xml": sx, "customizations.xml": cx, "[Content_Types].xml": "<Types/>",
+             "CanvasApps/pfx_app_DocumentUri.msapp": app if app is not None else _fixture_msapp()}
+    if workflow_json:
+        files["Workflows/Notify-22222222-2222-2222-2222-222222222222.json"] = "{}"
+    return _zip_bytes(files)
+
+
+def selftest():
+    import contextlib
+    import os
+    import shutil
+    import tempfile
+    failures, ran = [], 0
+    tmp = tempfile.mkdtemp(prefix="inspect-artifact-selftest-")
+
+    def case(name, files_or_bytes, argv, want_rc, want_text=()):
+        nonlocal ran
+        ext = ".msapp" if name.startswith("msapp") else ".zip"
+        p = os.path.join(tmp, name.replace(" ", "_") + ext)
+        with open(p, "wb") as f:
+            f.write(files_or_bytes)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main([p] + argv)
+        out = buf.getvalue()
+        ran += 1
+        missing = [t for t in want_text if t not in out]
+        ok = rc == want_rc and not missing
+        print("  %s  %s (exit %s%s)" % ("ok  " if ok else "FAIL", name, rc, "; missing " + repr(missing) if missing else ""))
+        if not ok:
+            failures.append(name)
+
+    try:
+        print("inspect-artifact selftest")
+        case("msapp good", _fixture_msapp(), ["--expect", "btnSave", "--min-datasources", "2"], 0,
+             ["LoadFromYaml=True", "build stamp: 2026-10-05.1", "Dataverse tables bound: 2", "no findings"])
+        case("msapp marker only in the half that does not run", _fixture_msapp(marker_half="Controls"), ["--expect", "btnSave"], 1,
+             ["missing from Src/", "present in the other half"])
+        case("msapp no stamp and a dropped source", _fixture_msapp(stamp=False, tables=("Assets",)), ["--min-datasources", "2"], 1,
+             ["no build stamp", "fewer than the live app's 2"])
+        case("msapp absent marker present", _fixture_msapp(), ["--absent", "btnSave"], 1, ["should be absent"])
+        case("solution good", _fixture_solution(), [], 0,
+             ["solution  PfxSolution 1.0.0.1 (unmanaged)", "player initialises: 2", "no findings"])
+        case("solution entity not built", _fixture_solution(entity_built=False), [], 1,
+             ["SELF-CHECK"])
+        case("solution carries a role", _fixture_solution(role=True), [], 1, ["RESETS live access"])
+        case("solution role allowed", _fixture_solution(role=True), ["--allow-roles"], 0, ["no findings"])
+        case("solution workflow without its json", _fixture_solution(workflow_json=False), [], 1, ["no Workflows/*"])
+        case("solution app binds a source the player skips", _fixture_solution(refs=("Assets",)), [], 1,
+             ["BINDS but the player will NOT initialise", "Loans"])
+        case("not a zip", b"this is not a zip file", [], 2, ["NOT a pass"])
+        case("zip that is not a solution", _zip_bytes({"readme.txt": "x"}), [], 2, ["not a solution zip"])
+        empty = _zip_bytes({"solution.xml": "<ImportExportXml><SolutionManifest><UniqueName>E</UniqueName></SolutionManifest></ImportExportXml>",
+                            "customizations.xml": "<ImportExportXml/>"})
+        case("empty solution examined nothing", empty, [], 2, ["nothing to inspect"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if not ran:
+        print("selftest examined nothing - NOT a pass")
+        return 2
+    print("selftest: %s" % ("PASSED (%d cases)" % ran if not failures else "FAILED %d: %s" % (len(failures), ", ".join(failures))))
+    return 1 if failures else 0
+
+
+def main(argv=None):
+    if argv is None and "--selftest" in sys.argv[1:]:
+        return selftest()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("artifact")
     ap.add_argument("--expect", default="")
@@ -213,7 +327,7 @@ def main():
     ap.add_argument("--stamp", default=r'Set\(\s*gbl\w*Build\w*\s*,\s*"([^"]+)"')
     ap.add_argument("--allow-roles", action="store_true")
     ap.add_argument("--json", action="store_true")
-    opts = ap.parse_args()
+    opts = ap.parse_args(argv)
     opts.expect = [x for x in opts.expect.split(",") if x]
     opts.absent = [x for x in opts.absent.split(",") if x]
 

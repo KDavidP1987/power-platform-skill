@@ -10,6 +10,10 @@ Usage:
     python fabric.py run     --manifest fabric.json TYPE NAME [--apply]
     python fabric.py prove-refresh --manifest fabric.json --checks report-checks.json --check NAME
                              --touch TABLE/KEYCOL=KEY/COLUMN=VALUE [--pipeline NAME] [--apply]
+    python fabric.py teardown-plan --workspace WS --folder NAME
+                             read-only: the folder's items in the order the owner deletes them
+                             (reports and models first, Dataflows BEFORE lakehouses, SQL endpoints
+                             with their lakehouse, the folder last)
 
 prove-refresh answers one question: does a refresh run from Fabric ALONE reach Dataverse? A build
 that landed Dataverse rows as files from a script on the builder's machine had a pipeline that
@@ -500,10 +504,56 @@ def cmd_items(fab, kind):
     return 0
 
 
+# Teardown order, consumers first. A Dataflow Gen2 whose destination lakehouse is already gone could
+# not be deleted at all in a measured close-out (UnknownError, 400, on both the dataflows and items
+# endpoints); deleted before its lakehouse it goes cleanly. A lakehouse's SQL endpoint is deleted WITH
+# the lakehouse: deleting it on its own returns 404, which is expected, not a failure.
+TEARDOWN_ORDER = ["Report", "Dashboard", "PaginatedReport", "SemanticModel", "DataPipeline", "Dataflow",
+                  "Notebook", "SparkJobDefinition", "Environment"]
+TEARDOWN_LAST = ["Warehouse", "Lakehouse"]
+TEARDOWN_WITH_PARENT = {"SQLEndpoint": "Lakehouse"}
+
+
+def teardown_order(items):
+    """(ordered, skipped): the items in the order to delete them, and the ones that go with a parent.
+    Types not named above sit after the known consumers and before warehouses and lakehouses."""
+    def rank(t):
+        if t in TEARDOWN_ORDER:
+            return TEARDOWN_ORDER.index(t)
+        if t in TEARDOWN_LAST:
+            return 100 + TEARDOWN_LAST.index(t)
+        return 50
+    keep = [i for i in items if i.get("type") not in TEARDOWN_WITH_PARENT]
+    skipped = [i for i in items if i.get("type") in TEARDOWN_WITH_PARENT]
+    keep.sort(key=lambda i: (rank(i.get("type", "")), i.get("displayName", "")))
+    return keep, skipped
+
+
+def cmd_teardown_plan(fab):
+    """Read-only: the order in which the owner's cleanup (a script or the portal) deletes this folder."""
+    if not fab.folder_name:
+        print("teardown-plan needs --folder (it never plans a whole workspace)")
+        return 2
+    if not fab.folder_id:
+        print("folder %r does not exist: nothing to remove" % fab.folder_name)
+        return 0
+    rows = [i for i in fab.items() if i.get("folderId") == fab.folder_id]
+    order, skipped = teardown_order(rows)
+    print("folder %r: %d item(s). Delete in this order (consumers first, Dataflows before lakehouses):" % (fab.folder_name, len(rows)))
+    for n, i in enumerate(order, 1):
+        print("  %2d. %-16s %-40s %s" % (n, i.get("type"), i.get("displayName"), i.get("id")))
+    for i in skipped:
+        print("      %-16s %-40s goes with its %s (a separate delete returns 404; expected)" % (i.get("type"), i.get("displayName"), TEARDOWN_WITH_PARENT[i["type"]]))
+    print("  %2d. the folder itself, once it is empty" % (len(order) + 1))
+    print("If the API refuses a Dataflow (UnknownError) after its lakehouse is gone, delete it in the Fabric portal.")
+    print("This command deletes nothing: removing Fabric items is an owner step.")
+    return 0
+
+
 def run(argv, transport=None, sleep=None):
     ap = argparse.ArgumentParser(prog="fabric.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
-    ap.add_argument("command", nargs="?", choices=["items", "deploy", "run", "prove-refresh"])
+    ap.add_argument("command", nargs="?", choices=["items", "deploy", "run", "prove-refresh", "teardown-plan"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--manifest")
     ap.add_argument("--workspace")
@@ -557,6 +607,8 @@ def run(argv, transport=None, sleep=None):
         fab = Fabric(Client(BASE, token, read_only=not writes, transport=transport, sleep=sleep), ws, folder)
         if a.command == "items":
             return cmd_items(fab, a.type)
+        if a.command == "teardown-plan":
+            return cmd_teardown_plan(fab)
         if a.command == "prove-refresh":
             return cmd_prove_refresh(fab, man, a, transport, sleep)
         if a.command == "deploy":
@@ -737,6 +789,23 @@ def selftest():
         check("items lists the folder only", rc == 0 and "APP_Silver" in out and "Loose report" not in out)
         rc, out = go(t, "items", "--workspace", "No Such Workspace")
         check("unknown workspace exits 2", rc == 2)
+
+        # teardown-plan: consumers first, Dataflows before lakehouses, SQL endpoints with their lakehouse.
+        order, skipped = teardown_order([{"type": "Lakehouse", "displayName": "B"}, {"type": "SQLEndpoint", "displayName": "B"},
+                                         {"type": "Dataflow", "displayName": "DF"}, {"type": "Report", "displayName": "R"},
+                                         {"type": "Notebook", "displayName": "N"}, {"type": "Mystery", "displayName": "M"},
+                                         {"type": "SemanticModel", "displayName": "S"}])
+        types = [i["type"] for i in order]
+        check("teardown: Dataflow before Lakehouse", types.index("Dataflow") < types.index("Lakehouse"))
+        check("teardown: report and model first, lakehouse last", types[:2] == ["Report", "SemanticModel"] and types[-1] == "Lakehouse")
+        check("teardown: an unknown type sits before the lakehouse", types.index("Mystery") < types.index("Lakehouse"))
+        check("teardown: SQL endpoint goes with its lakehouse", [i["type"] for i in skipped] == ["SQLEndpoint"] and "SQLEndpoint" not in types)
+        w0 = len(t.writes())
+        rc, out = go(t, "teardown-plan", "--workspace", "Team Workspace", "--folder", "Equipment Lane")
+        check("teardown-plan lists the folder in order, reads only", rc == 0 and "APP_Silver" in out and "Loose report" not in out
+              and out.index("APP Report") < out.index("APP_Bronze") and len(t.writes()) == w0 and "deletes nothing" in out)
+        rc, out = go(t, "teardown-plan", "--workspace", "Team Workspace")
+        check("teardown-plan refuses without a folder", rc == 2 and "never plans a whole workspace" in out)
 
         # prove-refresh: a refresh that reaches Dataverse, one that does not, and the prefix guard.
         with open(mpath, "w") as f:

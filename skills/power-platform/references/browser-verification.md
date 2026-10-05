@@ -20,6 +20,7 @@
 16. Screenshots for documentation
 17. What browser verification does not prove
 18. From the request to the walk: the acceptance contract
+19. Walking a Power Pages site
 
 ---
 
@@ -672,3 +673,38 @@ a Confirms row) and let the walks be the runtime half. Neither half replaces the
 
 **Keep it light.** Five tables, short ids, the requester's words. If the contract takes longer to
 write than the first screen, it has become a specification; cut it back to what a walk can check.
+
+## 19. Walking a Power Pages site
+
+A site has no iframe and no Studio, but the rule is the same: perform the task on the live site, then
+try what the site must refuse. `scripts/site-walk.mjs` does both from one JSON scenario
+(`assets/scenarios/site-walk.example.json`).
+
+1. **Sign in once.** `node site-walk.mjs signin --url https://<site>.powerappsportals.com` opens a
+   headed browser on its own persistent profile (`~/.site-walk-profile`); the person signs in with
+   their organisation account, MFA included. Pass `--marker <selector>` when the site shows a
+   signed-in element (the profile menu), so the driver waits for the site, not just the redirect.
+   Later walks reuse the profile headless; a walk that lands on a sign-in host reports `SW-NAV`.
+2. **The scenario.** `pages` are visited at every width (default 1440 and 390) with the text or
+   selectors each must show, and a screenshot when named. `steps` perform the task once (fill, click,
+   select, press, then `expectText`, `expectNoText`, `expectUrl`). A scenario that posts or saves
+   declares `"writes": true` and runs only with `--allow-writes`; mark the rows it creates (a `[TEST]`
+   prefix) so the owner can remove them.
+3. **The refusals.** Each `api` probe is sent from inside the signed-in page with `fetch`, carrying the
+   anti-forgery token the site serves at `/_layout/tokenhtml`, so it is exactly the call an attacker
+   with a signed-in session could make. Prove, at least: a hidden row by id (`expectStatus: [403, 404]`)
+   and by `$filter` (`expectNoRows`); another person's row; a PATCH and a DELETE that must fail; a
+   create bound to a row the person may not use. A refusal that returns 2xx is `SW-API-ALLOWED`; a row
+   that should not exist is `SW-API-ROWS`. Hiding a button proves nothing; only these calls do.
+4. **Signed out.** `signedOut` paths open in a fresh context with no cookies. A page must go to sign-in
+   or show none of `mustNotShow`; an `/_api` path must return no rows. Anything else is
+   `SW-SIGNEDOUT-LEAK`.
+5. **The scroll check** runs after every width change and on every page: `scrollWidth` wider than
+   `clientWidth` is `SW-SCROLL`, the single most common phone defect on a themed site.
+6. **Screenshots** are of the page only, never the browser frame: full-page captures of the document,
+   or of `screenshotSelector`'s element when the site wraps its content. Named `<name>-<width>.png`,
+   so two builds' captures line up file for file.
+
+Exit 0 is clean, 1 is findings, 2 is nothing examined (no browser, empty or refused scenario) and is
+never a pass. On a managed machine where Chrome refuses automated launches, the driver moves to Edge by
+itself; `--channel` overrides.

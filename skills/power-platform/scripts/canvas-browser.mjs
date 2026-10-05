@@ -60,7 +60,10 @@
 //        --allow-writes   required to walk a scenario that declares "writes": true
 //        --skip-writes    skip those scenarios instead (a read-only pass, e.g. the reviewer's)
 //   publish: refused when the source is unchanged (--again), and from the third publish until
-//        docs/design-critique.md and docs/review/findings.json exist (--unreviewed "<reason>")
+//        docs/design-critique.md and docs/review/findings.json exist (--unreviewed "<reason>"; exit 8),
+//        and after the fix batch has shipped until a new batch is declared (--batch "<what>"; exit 10)
+//   create: reopens the saved app and reads its Data pane; re-adds a missing table once, then fails
+//        (exit 4) naming it. --no-verify-sources skips the check.
 //        --keep-browser   close-studio: release the edit lock but leave the browser running
 //        --expect a,b     second-tab: control names to wait for
 //        --selectors <path>  UI anchor table (default: the skill's assets/selectors.json)
@@ -162,6 +165,9 @@ const SELECTOR_DEFAULTS = {
   'studio.dataSearch':        { surface: 'studio', kind: 'role', role: 'searchbox', name: '^search$', flags: 'i', check: 'conditional' },
   'studio.dataItemDescription': { surface: 'studio', kind: 'template', value: 'Table {logical}', check: 'conditional' },
   'studio.dataSourceAdded':   { surface: 'studio', kind: 'regex', pattern: 'data source was successfully added|was added to your app', flags: 'i', check: 'conditional' },
+  'studio.dataPane':          { surface: 'studio', kind: 'anyOf', check: 'conditional', anyOf: [
+    { kind: 'role', role: 'tab', name: '^data$', flags: 'i' },
+    { kind: 'role', role: 'button', name: '^data$', flags: 'i' }] },
   'studio.canvasRoute':       { surface: 'studio', kind: 'regex', pattern: '/canvas/', flags: '', check: 'required' },
   'studio.editUrl':           { surface: 'studio', kind: 'regex', pattern: '[?&]action=edit', flags: '', check: 'conditional' },
   'studio.formulaBar':        { surface: 'studio', kind: 'role', role: 'textbox', name: 'formula', flags: 'i', check: 'conditional' },
@@ -1118,10 +1124,19 @@ function selftest() {
     ['third publish with both passes', reviewMissing(2, REVIEW_FILES, '').length === 0],
     ['third publish names the one missing', reviewMissing(3, ['docs/design-critique.md'], '').join() === 'docs/review/findings.json'],
     ['--unreviewed overrides', reviewMissing(5, [], 'Studio-only fix').length === 0],
+    ['before the fix batch publishes', !afterBatchRefused([{ hash: 'a' }, { hash: 'b' }], '', '')],
+    ['after the fix batch refused', afterBatchRefused([{ hash: 'a' }, { hash: 'b', fixBatch: true }], '', '')],
+    ['a declared batch publishes once', !afterBatchRefused([{ hash: 'a', fixBatch: true }], '', 'owner change: status names')],
+    ['after a declared batch refused', afterBatchRefused([{ hash: 'a', fixBatch: true }, { hash: 'b', batch: 'x' }], '', '')],
+    ['--unreviewed overrides after the batch', !afterBatchRefused([{ hash: 'a', fixBatch: true }], 'Studio-only label', '')],
+    ['sources all present', missingSources([{ display: 'Loan Assets', logical: 'x_asset' }, { display: 'Loans', logical: 'x_loan' }], 'Data\nLoan Assets\nLoans\nOffice 365').length === 0],
+    ['source dropped on save named', missingSources([{ display: 'Loan Assets', logical: 'x_asset' }, { display: 'Equipment Loans', logical: 'x_loan' }], 'Data\nLoan Assets\nOffice 365').map((t) => t.logical).join() === 'x_loan'],
+    ['empty pane misses all', missingSources([{ display: 'A', logical: 'x_a' }], '').length === 1],
+    ['blank display falls back to logical', missingSources([{ display: '', logical: 'x_a' }], 'nothing here').length === 1],
   ].filter(([, okc]) => !okc).map(([k]) => 'publish/tabs: ' + k);
   tabs.push(...P);
   const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0 && tabs.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 14 publish-guard, review-gate, profile-copy, terms-dialog and auto-tidy cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 23 publish-guard, review-gate, fix-batch, data-source, profile-copy, terms-dialog and auto-tidy cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
          : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}], tabs -> [${tabs.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }
@@ -1645,6 +1660,22 @@ export function reviewMissing(count, present, override) {
   if (count < 2 || override) return [];
   return REVIEW_FILES.filter((f) => !present.includes(f));
 }
+// After the fix batch. The publish that ships with both review files present is THE fix batch; a
+// later publish is another single-issue polish (two measured builds each spent their last publishes
+// on one phone banner). Refused until a new batch is declared with --batch "<what it fixes>" (the
+// owner's change request, a defect found after hand-back), or --unreviewed "<reason>". A declared
+// batch publishes once; the next publish needs its own declaration.
+export function afterBatchRefused(plog, override, batch) {
+  if (override || batch) return false;
+  return plog.some((e) => e && (e.fixBatch || e.batch));
+}
+// The Data pane of a reopened app lists each data source by its display name; a table counts as
+// present when its display name (or logical name) appears there.
+export function missingSources(want, text) {
+  const t = String(text || '').toLowerCase();
+  const seen = (s) => !!s && t.includes(String(s).toLowerCase());
+  return want.filter((w) => !seen(w.display) && !seen(w.logical));
+}
 function publishLog() { try { return JSON.parse(readFileSync(PUBLISH_LOG(), 'utf8')); } catch { return []; } }
 
 async function cmdPublish() {
@@ -1665,6 +1696,17 @@ async function cmdPublish() {
     log('  --unreviewed "<reason>" publishes anyway; the reason is recorded in the publish log.');
     process.exitCode = 8; return;
   }
+  const batch = typeof flag('batch', '') === 'string' ? flag('batch', '') : '';
+  if (afterBatchRefused(plog, override, batch)) {
+    const fb = [...plog].reverse().find((e) => e && (e.fixBatch || e.batch));
+    log('  REFUSED: the fix batch already shipped (publish ' + (plog.indexOf(fb) + 1) + ', ' + fb.at + '). Another publish now is a');
+    log('  single-issue polish: the walks, critique and review it needs were already paid for once.');
+    log('  Hand back, listing what is left as a finding. If a new batch is genuinely due (the owner asked for a change,');
+    log('  or a defect was found after hand-back), gather ALL of it, then --batch "<what this batch fixes>".');
+    log('  --unreviewed "<reason>" publishes anyway; either reason is recorded in the publish log.');
+    process.exitCode = 10; return;
+  }
+  const isFixBatch = plog.length >= 1 && REVIEW_FILES.every((f) => existsSync(join(REPO, f))) && !plog.some((e) => e && e.fixBatch);
   const { browser, ctx } = await attach();
   const studio = studioPage(ctx);
   await studio.bringToFront();
@@ -1700,7 +1742,7 @@ async function cmdPublish() {
   log('  Publish ships what was SAVED when it started; the player can lag the publish by ten minutes.');
   try {
     mkdirSync(dirname(PUBLISH_LOG()), { recursive: true });
-    plog.push({ at: new Date().toISOString(), hash, ...(override ? { unreviewed: override } : {}) });
+    plog.push({ at: new Date().toISOString(), hash, ...(override ? { unreviewed: override } : {}), ...(batch ? { batch } : {}), ...(isFixBatch && !override && !batch ? { fixBatch: true } : {}) });
     writeFileSync(PUBLISH_LOG(), JSON.stringify(plog.slice(-50), null, 1));
     log('  publish ' + plog.length + ' of this build' + (plog.length > 4 ? ' - more than four publishes means fixes are being shipped one at a time; batch them.' : '.'));
   } catch { /* unwritable work folder */ }
@@ -1967,37 +2009,78 @@ async function cmdCreate() {
   }
 
   // Data sources, each chosen by its logical name.
-  if (want.length) log('3. Data sources');
-  for (const t of want) {
-    const add = await inEditor(page, 'studio.addData', { wait: 30000 });
-    if (!add) { log('  !! Add data not found'); process.exitCode = 4; break; }
-    await add.ctl.click();
-    const box = await inEditor(page, 'studio.dataSearch', { wait: 15000, visible: true });
-    if (!box) { log('  !! Add data search box not found'); process.exitCode = 4; break; }
-    await box.ctl.fill(t.display);
-    await page.waitForTimeout(4000);
-    const desc = new RegExp('\\b' + tpl('studio.dataItemDescription', { logical: t.logical }).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
-    const item = box.frame.getByRole('listitem', { description: desc }).first();
-    if (await item.count() === 0) {
-      log(`  !! no result for "${t.display}" whose table is ${t.logical}. Nothing added; check the display name.`);
-      await capture(page, 'create-no-table-' + t.logical); await page.keyboard.press('Escape').catch(() => {}); process.exitCode = 4; continue;
+  const addSources = async (list) => {
+    for (const t of list) {
+      const add = await inEditor(page, 'studio.addData', { wait: 30000 });
+      if (!add) { log('  !! Add data not found'); process.exitCode = 4; break; }
+      await add.ctl.click();
+      const box = await inEditor(page, 'studio.dataSearch', { wait: 15000, visible: true });
+      if (!box) { log('  !! Add data search box not found'); process.exitCode = 4; break; }
+      await box.ctl.fill(t.display);
+      await page.waitForTimeout(4000);
+      const desc = new RegExp('\\b' + tpl('studio.dataItemDescription', { logical: t.logical }).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+      const item = box.frame.getByRole('listitem', { description: desc }).first();
+      if (await item.count() === 0) {
+        log(`  !! no result for "${t.display}" whose table is ${t.logical}. Nothing added; check the display name.`);
+        await capture(page, 'create-no-table-' + t.logical); await page.keyboard.press('Escape').catch(() => {}); process.exitCode = 4; continue;
+      }
+      await item.click();
+      let ok = false;
+      for (let i = 0; i < 30 && !ok; i++) { await page.waitForTimeout(1000); ok = rx('studio.dataSourceAdded').test(await box.frame.evaluate(() => document.body.innerText || '').catch(() => '')); }
+      log(ok ? `   added ${t.display} (${t.logical})` : `   !! ${t.display} (${t.logical}): no "added" confirmation seen - check the Data pane`);
+      if (!ok) process.exitCode = 4;
     }
-    await item.click();
-    let ok = false;
-    for (let i = 0; i < 30 && !ok; i++) { await page.waitForTimeout(1000); ok = rx('studio.dataSourceAdded').test(await box.frame.evaluate(() => document.body.innerText || '').catch(() => '')); }
-    log(ok ? `   added ${t.display} (${t.logical})` : `   !! ${t.display} (${t.logical}): no "added" confirmation seen - check the Data pane`);
-    if (!ok) process.exitCode = 4;
-  }
-
-  // Save, and prove it.
-  log('4. Save');
-  const s2 = await inEditor(page, 'studio.saveButton', { wait: 15000, visible: true });
-  if (s2) {
+  };
+  const saveNow = async (label) => {
+    const s2 = await inEditor(page, 'studio.saveButton', { wait: 15000, visible: true });
+    if (!s2) { log('   !! Save button not found - treat the save as unproven'); return false; }
     await dismissBubbles(s2.frame);
     await s2.ctl.click({ timeout: 20000 }).catch(() => {});
     await page.waitForTimeout(Number(flag('after', 15000)));
     const stamp = await readSaveStamp(page, s2.frame);
-    log(stamp ? '   saved: "Saved: ' + stamp + '"' : '   !! could not read "Saved: <time>" - treat the save as unproven');
+    log(stamp ? '   ' + label + ': "Saved: ' + stamp + '"' : '   !! could not read "Saved: <time>" - treat the save as unproven');
+    return !!stamp;
+  };
+  // The "added" toast proves Studio's memory, not the saved app: a measured build's tables were
+  // confirmed added, saved, and gone when the app was reopened (14 minutes before anyone noticed).
+  // So reopen the SAVED app from the server, read its Data pane, and re-add what is missing once.
+  const savedSources = async () => {
+    await leaveEditor(page).catch(() => {});
+    await page.goto(tpl('portal.studioUrl', { environmentId: APP.environmentId, appId }), { waitUntil: 'domcontentloaded' });
+    if (!(await waitForEditing(page, 'reopening to check the data sources'))) return null;
+    const pane = await inEditor(page, 'studio.dataPane', { wait: 30000, visible: true });
+    if (!pane) return null;
+    await pane.ctl.click().catch(() => {});
+    await page.waitForTimeout(3000);
+    return framesText(page);
+  };
+  if (want.length) log('3. Data sources');
+  await addSources(want);
+
+  // Save, and prove it.
+  log('4. Save');
+  await saveNow('saved');
+  if (want.length && !has('no-verify-sources')) {
+    log('5. Data sources in the SAVED app (reopened from the server)');
+    let text = await savedSources();
+    let gone = text === null ? null : missingSources(want, text);
+    if (gone && gone.length) {
+      log('   !! not in the saved app: ' + gone.map((t) => t.display + ' (' + t.logical + ')').join(', ') + ' - adding them again and saving');
+      await addSources(gone);
+      await saveNow('saved again');
+      text = await savedSources();
+      gone = text === null ? null : missingSources(want, text);
+    }
+    if (gone === null) {
+      log('   !! could not open the Data pane of the reopened app - the data sources are UNPROVEN.');
+      log('      Check by hand: Studio > Data (left rail) lists ' + want.map((t) => t.display).join(', ') + '.');
+      await capture(page, 'create-sources-unproven'); process.exitCode = 4;
+    } else if (gone.length) {
+      log('   !! STILL MISSING after a second add and save: ' + gone.map((t) => t.display + ' (' + t.logical + ')').join(', '));
+      log('      Fix before any screen work: in Studio, Data > Add data > the table, Save, then reopen the app and');
+      log('      confirm the Data pane lists it (or `studio-has "' + gone[0].display + '"` with the Data pane open).');
+      await capture(page, 'create-sources-missing'); process.exitCode = 4;
+    } else log('   all ' + want.length + ' data source(s) present after reopening: ' + want.map((t) => t.display).join(', '));
   }
   if (has('publish')) {
     const pub = await inEditor(page, 'studio.publishButton', { wait: 15000, visible: true });

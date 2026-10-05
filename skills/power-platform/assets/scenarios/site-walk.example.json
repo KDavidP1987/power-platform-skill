@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "Example for scripts/site-walk.mjs: a work requests portal where signed-in people browse shared items,",
+    "comment on them, ask for new work and see their own requests. Replace the paths, the table set name",
+    "(contoso_workitems here), the ids and the expected text with your site's. Ids come from a read of the",
+    "table before the walk: HIDDEN_ID is a row the site must never show; MINE_ID is a request of the",
+    "signed-in person; OTHER_ID is another person's request. Comment rows start with [TEST] so the",
+    "owner can find and remove them. Walk with --allow-writes, because the steps post a comment."
+  ],
+  "baseUrl": "https://<your-site>.powerappsportals.com",
+  "widths": [1440, 390],
+  "writes": true,
+  "pages": [
+    { "path": "/", "name": "home", "expectText": ["Work items"] },
+    { "path": "/items", "name": "list", "expectText": ["DEMO-"] },
+    { "path": "/items/detail?id=<VISIBLE_ID>", "name": "detail", "expectText": ["Comments"] },
+    { "path": "/request", "name": "request", "expectSelector": ["form"] },
+    { "path": "/my-requests", "name": "mine", "expectText": ["My requests"] }
+  ],
+  "steps": [
+    { "goto": "/items/detail?id=<VISIBLE_ID>" },
+    { "click": "button:has-text('Post')" },
+    { "expectText": "Write a comment before posting" },
+    { "fill": "textarea[name='comment']", "value": "[TEST] Checked by the site walk" },
+    { "click": "button:has-text('Post')" },
+    { "expectText": "[TEST] Checked by the site walk" },
+    { "goto": "/request" },
+    { "click": "button[type='submit']" },
+    { "expectText": "Title is required" },
+    { "screenshot": "request-error" },
+    { "goto": "/items/detail?id=<HIDDEN_ID>" },
+    { "expectNoText": "<HIDDEN_TITLE>" }
+  ],
+  "api": [
+    { "name": "hidden item by id", "path": "/_api/contoso_workitems(<HIDDEN_ID>)", "expectStatus": [403, 404] },
+    { "name": "hidden item by filter", "path": "/_api/contoso_workitems?$filter=contoso_number eq '<HIDDEN_NUMBER>'", "expectStatus": [200, 403], "expectNoRows": true },
+    { "name": "another person's request", "path": "/_api/contoso_workitems(<OTHER_ID>)", "expectStatus": [403, 404] },
+    { "name": "change an item", "method": "PATCH", "path": "/_api/contoso_workitems(<MINE_ID>)", "body": { "contoso_name": "[TEST] changed" }, "expectStatus": "4xx" },
+    { "name": "delete an item", "method": "DELETE", "path": "/_api/contoso_workitems(<MINE_ID>)", "expectStatus": "4xx" },
+    { "name": "comment on a hidden item", "method": "POST", "path": "/_api/contoso_comments", "body": { "contoso_body": "[TEST] must be refused", "contoso_WorkItem@odata.bind": "/contoso_workitems(<HIDDEN_ID>)" }, "expectStatus": "4xx" }
+  ],
+  "signedOut": [
+    { "path": "/items", "mustNotShow": ["DEMO-"] },
+    { "path": "/my-requests" },
+    { "path": "/_api/contoso_workitems" }
+  ]
+}

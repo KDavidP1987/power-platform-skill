@@ -1,14 +1,33 @@
 {
   "_comment": [
-    "The versions of the moving parts this skill was last checked against. The monthly upkeep workflow",
-    "(.github/workflows/upkeep.yml) compares them with the npm registry and opens an issue when they move.",
-    "After re-verifying (selftests green AND canvas-browser.mjs doctor exit 0 against a real tenant),",
-    "update the versions here and set checkedWith to the skill version that was released."
+    "The versions of the moving parts this skill was last checked against: every script's selftest green,",
+    "and the browser drivers run against a real tenant (canvas-browser.mjs walk and publish on a published",
+    "canvas app; site-walk.mjs selftest, both halves, on Chrome). The monthly upkeep workflow",
+    "(.github/workflows/upkeep.yml) compares the npm entries with the registry and opens an issue when",
+    "they move. After re-verifying, update the versions here and set checkedWith to the released version.",
+    "npm: packages the scripts load. runtimes and tools: what the machine ran. Earlier versions may work",
+    "but are not checked; the engines floor in package.json (Node 20) still applies."
   ],
-  "checkedWith": "0.1.0",
+  "checkedWith": "0.21.0",
+  "checkedOn": "2026-10-05",
   "npm": {
     "playwright": "1.63.0",
     "@playwright/mcp": "0.0.83"
   },
-  "node": "22"
+  "node": "24.17.0",
+  "runtimes": {
+    "node": "24.17.0",
+    "python": "3.13.14",
+    "dotnet": "10.0.11"
+  },
+  "tools": {
+    "pac": "2.8.1",
+    "claude-code": "2.1.289",
+    "browser": "Chrome (channel chrome) on Windows 11; Chromium in CI"
+  },
+  "ci": {
+    "node": "22",
+    "python": "3.12",
+    "os": "ubuntu-latest"
+  }
 }

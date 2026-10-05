@@ -31,6 +31,10 @@ It reads files only (and, with --url, one anonymous GET). It never signs in, nev
 never changes the site. It cannot see column permissions, the "Power Pages Web API Columns" view,
 or anything configured only in the studio since the last download - download first.
 
+Row exposure: Web API enabled on a table that any role reads with Global scope is reported as
+WEBAPI-GLOBAL-READ (every row is reachable through /_api whatever the pages show), and a wildcard
+allow-list on a table the roles may create in or write to as WEBAPI-WILDCARD-WRITE.
+
 Privilege rule used: a lookup the code binds through the Web API needs Append AND Append To on
 both tables (measured on a real site; the documented one-sided rule returned 403), so the audit
 expects both on every table in a bind and flags them only on tables in no bind.
@@ -326,8 +330,20 @@ def audit(root, set_map=None, sensitive=DEFAULT_SENSITIVE, live=None):
         fields = [x.strip() for x in (fields_raw or "").split(",") if x.strip()]
         if not enabled:
             continue
+        tperms = perms_by_table.get(t, [])
+        global_read = [p for p in tperms if SCOPES.get(str(p.get("adx_scope", ""))) == "Global"
+                       and truthy(p.get("adx_read")) and roles_of(p)]
+        if global_read:
+            f("warning", "WEBAPI-GLOBAL-READ", "Webapi/%s/enabled is true and %s grants Global read: every %s row is reachable through /_api "
+              "and $filter, whatever the pages show. Scope it (Contact, Account, Parent, a Custom FetchXML filter) or turn the Web API off "
+              "for %s and read it in Liquid or server logic" % (t, ", ".join(p.get("adx_entityname", p.get("_file")) for p in global_read), t, t))
         if "*" in fields:
             f("critical", "WEBAPI-WILDCARD", "Webapi/%s/fields is *: the wildcard is deprecated and requests now fail; list the columns" % t)
+            writers = [p for p in tperms if truthy(p.get("adx_create")) or truthy(p.get("adx_write"))]
+            if writers:
+                f("critical", "WEBAPI-WILDCARD-WRITE", "Webapi/%s/fields is * and %s grants create or write: every column, process columns "
+                  "included, is client-writable wherever the wildcard is still honoured; list only the columns the person owns"
+                  % (t, ", ".join(p.get("adx_entityname", p.get("_file")) for p in writers)))
         elif not fields and not from_view:
             f("critical", "WEBAPI-NO-FIELDS", "Webapi/%s/enabled is true with no fields and no UseFieldsFromView; every request is refused" % t)
         if t not in perms_by_table:
@@ -466,6 +482,10 @@ ROLES = """- adx_anonymoususersrole: false
   adx_authenticatedusersrole: false
   adx_name: Anonymous Users
   adx_webroleid: 11111111-0000-0000-0000-000000000002
+- adx_anonymoususersrole: false
+  adx_authenticatedusersrole: false
+  adx_name: Staff
+  adx_webroleid: 11111111-0000-0000-0000-000000000003
 """
 
 PAGE_JS = """var body = {
@@ -499,6 +519,7 @@ def _perm(name, table, scope, privs, roles=None, parent=None, pid="22222222-0000
 
 AUTH = "11111111-0000-0000-0000-000000000001"
 ANON = "11111111-0000-0000-0000-000000000002"
+STAFF = "11111111-0000-0000-0000-000000000003"
 
 
 def _site(base, fixed):
@@ -514,6 +535,9 @@ def _site(base, fixed):
                      pid="22222222-0000-0000-0000-000000000003"))
         _write(base, "table-permissions/Contact-Self.tablepermission.yml",
                _perm("Contact - self", "contact", "756150004", ["read", "append", "appendto"], [AUTH], pid="22222222-0000-0000-0000-000000000002"))
+        # Global read for a custom role on a table whose Web API is OFF (read in Liquid only): not a finding.
+        _write(base, "table-permissions/Line-All-Staff.tablepermission.yml",
+               _perm("Line - all for staff", "app_orderline", "756150000", ["read"], [STAFF], pid="22222222-0000-0000-0000-000000000004"))
         _write(base, "sitesetting.yml", """- adx_name: Webapi/app_order/enabled
   adx_value: true
 - adx_name: Webapi/app_order/fields
@@ -528,6 +552,10 @@ def _site(base, fixed):
         # wildcard fields on one table, missing column on the other; inner errors on.
         _write(base, "table-permissions/Order-All.tablepermission.yml",
                _perm("Order - all", "app_order", "756150000", ["read", "write", "create", "delete"], [ANON]))
+        # a writable table whose Web API allow-list is the wildcard
+        _write(base, "table-permissions/Vendor-Mine.tablepermission.yml",
+               _perm("Vendor - mine", "app_vendor", "756150001", ["read", "create"], [AUTH], pid="22222222-0000-0000-0000-000000000005",
+                     rel="app_vendor_contact"))
         _write(base, "sitesetting.yml", """- adx_name: Webapi/app_order/enabled
   adx_value: true
 - adx_name: Webapi/app_order/fields
@@ -536,6 +564,10 @@ def _site(base, fixed):
   adx_value: true
 - adx_name: Webapi/app_vendor/fields
   adx_value: '*'
+- adx_name: Webapi/app_region/enabled
+  adx_value: true
+- adx_name: Webapi/app_region/fields
+  adx_value: app_name
 - adx_name: Webapi/error/innererror
   adx_value: true
 - adx_name: HTTP/Content-Security-Policy
@@ -552,7 +584,8 @@ def selftest():
         _, _, fb, nb = audit(bad)
         codes = {x["code"] for x in fb}
         expect = {"GLOBAL-ANON", "PRIV-MISSING", "PRIV-UNUSED", "NO-PERMISSION", "WEBAPI-WILDCARD", "FIELD-NOT-ALLOWED",
-                  "FIELD-SENSITIVE", "WEBAPI-UNUSED", "WEBAPI-NO-PERMISSION", "WEBAPI-INNERERROR", "CSP-UNSAFE-INLINE"}
+                  "FIELD-SENSITIVE", "WEBAPI-UNUSED", "WEBAPI-NO-PERMISSION", "WEBAPI-INNERERROR", "CSP-UNSAFE-INLINE",
+                  "WEBAPI-GLOBAL-READ", "WEBAPI-WILDCARD-WRITE"}
         for c in sorted(expect - codes):
             failures.append("bad site: expected %s" % c)
         _, _, fg, ng = audit(good)
