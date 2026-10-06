@@ -65,7 +65,7 @@ matters.
 |---|---|---|---|
 | Design (DESIGN.md, `design/prototype.html`) before the first screens of a new app | hook (before tools) | `plugin-gate.mjs` rule A | a build never ran the design step though it was "required" |
 | Design record, critique and review before hand-back | hook (Stop) | `plugin-gate.mjs` evaluate, and the harness's `audit-stop.mjs` (same function) | as above |
-| Compile-killers in `.pa.yaml` | hook (each write) | `check-pa-yaml.mjs` | each pattern broke a real compile |
+| Compile-killers in `.pa.yaml` | hook (each write): the harness copy, or the plugin's own where the session's folder has no harness copy | `check-pa-yaml.mjs` (`--plugin` from the plugin) | each pattern broke a real compile; a session opened at a parent folder ran no harness and missed one |
 | Text fit, theme tokens, contrast, visible build stamp, accessible names | hook (each write) | `check-canvas-format.mjs` | measured clipping and a stamp shown to users |
 | Controls drawn over controls | hook (each write) | `check-canvas-overlap.mjs` | measured |
 | Screen-file ceiling | hook (Stop) | `audit-stop.mjs` | a compile refused at 50 files |

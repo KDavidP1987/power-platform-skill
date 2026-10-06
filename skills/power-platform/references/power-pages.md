@@ -184,6 +184,9 @@ Show the server's error message on failure: the 403 text names the missing privi
   `{% if list.size == 0 %}` before the loop.
 - Validate a GUID parameter before putting it in FetchXML (`{% if id.size != 36 %}`), and escape it.
 - Render every page after every upload; a single parse error is a blank page, not a warning.
+- **An outer `link-entity` with no related row adds no aliased attribute at all.** A key built as
+  `r['pj.app_key'] | append: '-' | append: r.app_number` rendered "-1015" for an item with no
+  project. Test the alias before joining (`{% if r['pj.app_key'] %}`) and choose the fallback.
 - **`replace` treats its first argument as a regular expression** (observed). `| replace: '[', ''`
   is an invalid pattern, and the filter it fed silently dropped: a search box matched everything.
   Escape the characters a regular expression gives meaning to (`'\['`, `'\.'`), and test a search
@@ -214,8 +217,14 @@ server-side caching works"):
   2.5 minutes to show on a measured site.
 - Clearing by hand: **Clear cache** at `/_services/about` (needs a web role with all website access
   permissions) or Preview in the studio; it clears every table and slows a busy site, so it is a
-  test step, never a design. Whether server logic reads go through the same cache is not documented
-  (confirm in your tenant).
+  test step, never a design.
+- **Server logic reads are cached too** (measured). A share or a role changed in the back-office app
+  reached a `Server.Connector.Dataverse.RetrieveMultipleRecords` read more than two minutes late, in
+  both directions: a revoked share still let a comment through. A read that **decides access or gates a
+  write** must not be served from the cache: add a condition that is always true but changes every
+  second, so each query is new, for example
+  `" and createdon le " + new Date(Date.now() + 86400000).toISOString().substring(0, 19) + "Z"`.
+  Reads that only display can stay cached.
 
 So: say in the hand-back that changes made outside the site appear within minutes, word any
 "last updated" text on the page to match, and measure it rather than assume it -
@@ -407,7 +416,10 @@ The rules below are what that pairing found the platform needs, in order:
 4. **A CSS web file under Home is linked into every page automatically**, with a version stamp;
    adding your own `<link>` loads it twice. The stamp changes only when the site cache is cleared,
    so after an upload the browser keeps the old stylesheet: clear the browser cache (CDP
-   `Network.clearBrowserCache` in Playwright) before judging a CSS change.
+   `Network.clearBrowserCache` in Playwright) before judging a CSS change. To tell "not uploaded"
+   from "cached", read what the site serves, bypassing the cache, and look for a rule you just
+   added: `await (await fetch('/site.css', { cache: 'reload' })).text()` in the page. If the served
+   file has it, the upload landed and only the browser is stale.
 5. **Brand artwork the owner keeps out of git** needs a prepare script that writes each web file
    and its record with fixed ids before every upload, a `.gitignore` for both, and a designed
    fallback (`onerror` to a text wordmark; a solid brand colour behind a photo). Screenshots of the
@@ -557,6 +569,25 @@ Options, strongest first. Each needs a refusal probe in the running site (sectio
 4. **A relationship you can scope by** (a lookup to an audience or parent row that Account or Parent
    scope can follow). Strong, but a schema change.
 
+**When several relationships decide** ("I see an item when it is assigned to me, I requested it, I
+own or sponsor its project, or someone shared it with me"), no single table permission scope expresses
+the union. What held on a measured site, with option 3:
+
+- **One scope web template, included by every page that reads the table.** It resolves the signed-in
+  person once (from the directory: the contact's Entra object id to the system user, never a field the
+  visitor can edit), then captures two FetchXML fragments: the outer `link-entity` elements (the
+  project and this person's participant row on it, and this person's share row, each with its
+  "active" condition inside the link) and a `<filter type="or">` that names them by alias
+  (`<condition entityname="sh" attribute="app_itemshareid" operator="not-null" />`). List and detail
+  pages put both inside their own `fetch`, so the rule lives in one place.
+- **No person found means the narrowest view** (only the visitor's own requests), never everything:
+  fill the person id with an empty GUID so every condition on it is false.
+- **Writes re-check the same rule in server logic**, with cache-busted reads (section 6), and the two
+  copies change together; a comment through the Web API would otherwise bypass it.
+- **Probe each path and each revocation**: one person per relationship sees the item, a person with
+  none gets the page's not-found answer by id, and turning a share or role inactive removes access
+  within the measured cache window.
+
 Not options: hiding rows in page code, a client-side `$filter`, a view. **Writes that depend on
 visibility need the same check**: a child row (a comment) created through the Web API can be bound
 to any parent the role can read. If the parent permission is Global Read, a crafted POST comments on
@@ -669,6 +700,16 @@ Az.Accounts the token is a SecureString). `pac` has no token command, but `pac p
 `{id}` is the website id from the list, which differs from the Dataverse site record id; match on
 the record id the list returns (confirm the property name in your tenant). Provisioning takes
 minutes and holds the org-wide customization lock (section 2), so deploy schema first.
+
+**Changing the site address.** The admin centre's site details change the subdomain in place:
+the old host answers 404 at once, Microsoft Entra sign-in keeps working on the new one, and
+`pac pages upload` is unaffected because it targets the site record, not the host (the local folder
+name does not matter either). Update every link and document that names the old address in the same
+change.
+
+**Renaming a site.** A rename in the Power Pages studio changes the hosting record only; the site
+record keeps its old name, which is what `pac pages list`, the Portal Management app and a download
+show. Rename the record too: set `adx_name` in `website.yml` and upload.
 
 **Two data models.** The enhanced data model (`--modelVersion 2`) keeps a site as one
 `powerpagesite` row plus `powerpagecomponent` rows typed by `powerpagecomponenttype` (pages,

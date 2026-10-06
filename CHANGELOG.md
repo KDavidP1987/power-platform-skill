@@ -11,6 +11,49 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-06
+
+Lessons from building a per-person visibility model across a canvas app and a Power Pages site,
+analysed before release: each entry was checked against what the skill already said, and only the
+proved, general ones are folded in. Three were already covered, one could not be made a reliable
+check, and one cause is not yet proved and stays out.
+
+### Added
+
+- **The plugin runs the `.pa.yaml` compile-killer check itself** (`check-pa-yaml.mjs --plugin`,
+  PostToolUse on file writes) wherever the session's folder has no project harness copy. A session
+  opened at a parent of several projects loaded no project hooks, so a colon-space fault the check
+  knows went to a compile. Where the harness copy exists, the plugin's copy stands down. Self-test
+  covers both.
+- **Power Pages: several relationships decide visibility** (`power-pages.md` section 11). One scope
+  web template with outer link-entities and an OR filter by alias, included by every page; no person
+  found means the narrowest view; writes re-check the same rule in server logic; probe every path and
+  every revocation.
+- **Power Pages: server logic reads are cached** (section 6, measured, replacing "not documented"): a
+  share revoked in the back-office app still passed a server-side check for over two minutes. Reads
+  that decide access or gate a write carry an always-true condition that changes every second.
+- **Power Pages: outer link-entity aliases are absent when there is no related row** (section 5): a
+  key joined from one rendered "-1015".
+- **Power Pages: tell "not uploaded" from "cached"** for a CSS web file by fetching it with
+  `cache: 'reload'` (section 9).
+- **Power Pages: changing the site address and renaming the site record** (section 15).
+- **Canvas: a clean compile can still crash Studio on push** (`canvas-shipping.md` section 4): check
+  the editor is alive after each push, and bisect from the committed source to the file to the
+  control, reloading after each crash.
+- **Canvas: a data source added in Studio is kept without a Save; renaming an app needs real
+  keystrokes** (section 1).
+- **Dataverse Web API: the lookup form of the missing `@odata.type` error** ("Invalid property
+  'Targets'", `dataverse-web-api.md` section 7).
+
+### Not folded in
+
+- A button-caption fit check in `check-canvas-format.mjs` was built and withdrawn: across five apps,
+  a caption that wrapped needed 1.35 times the room and captions that render on one line needed up to
+  1.30, so no threshold separates them without false findings. Measuring in the player stays the
+  test.
+
+## [0.25.1] - 2026-10-06
+
 ## [0.25.1] - 2026-10-06
 
 ### Fixed

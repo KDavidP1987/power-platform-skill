@@ -64,7 +64,9 @@ characters, and a synced documents folder adds length (`tooling-and-auth.md` sec
 ## 3. The project folder and the agent's permissions
 
 1. **Open the project folder itself** in Claude Code, not a parent: project hooks and `CLAUDE.md`
-   load only from the opened folder.
+   load only from the opened folder. A session opened at a parent of several projects still gets
+   the plugin's own hooks, which since 0.26 include the `.pa.yaml` compile-killer check on every
+   write, but not the project's harness: text fit, overlap and the end-of-turn audit stay silent.
 2. **Install the skill** (plugin, or `.claude/skills/power-platform/`).
 3. **Offer the harness, and install it when the person agrees**: `node <skill>/scripts/setup-harness.mjs
    <project>` prints the plan, `--apply` installs the hooks (pre-flight, compile-killers, text fit,

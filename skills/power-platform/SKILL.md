@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.25.1"
+  version: "0.26.0"
 ---
 
 # Power Platform development

@@ -205,7 +205,9 @@ not idempotent. Do not stack further operations on top of one that has not settl
 3. `PUT` it back to the **type-cast** URL:
    `.../EntityDefinitions(LogicalName='app_order')/Attributes(LogicalName='app_total')/Microsoft.Dynamics.CRM.MoneyAttributeMetadata`.
    Without the cast segment, Money columns gave a bare 404 while Integer and DateTime worked.
-4. Re-attach `@odata.type` to the body (dropping it failed "Invalid property ImeMode").
+4. Re-attach `@odata.type` to the body (dropping it failed "Invalid property ImeMode"; on a lookup,
+   "Invalid property 'Targets'": without the derived type the server reads the base type, which has no
+   Targets).
 5. Send `MSCRM.MergeLabels: true`, or every other language's label is wiped.
 6. Publish, then read back. Until the publish, a display-name change reads back old, which looks like
    a failed write.

@@ -96,6 +96,14 @@ The settings it applies, and why they matter when done by hand:
    no Power Fx is ever compiled. It is not visible in the package, so no script can check it -
    re-check it after toggling other settings, which is when it tends to get lost.
 
+**A data source added in Studio is kept without a Save** (measured: after a reload with nothing
+saved, both newly added tables were still in the app). Removing a source added by mistake is a
+deliberate step of its own; a discarded session does not undo it.
+
+**Renaming an app in Studio** (Settings > General > Name): typing the name with real keystrokes
+enables Save; setting the field's value directly (a Playwright `fill`) leaves Save disabled. An old
+"Publish successful" toast can sit over the dialog and swallow clicks; close it first.
+
 Several app settings take effect only after **Save, close and reopen**. Studio settings are also
 "saved but not published" like everything else: a raised data row limit and newly added sources
 were invisible to the player and to `pac canvas download` until a Publish.
@@ -348,6 +356,15 @@ preconditions change.
   through: **replace in one push, keep the removed controls hidden, save, and delete them in a later
   push.** Attach `pageerror` listeners to the Studio page before pushing so the crash is visible
   rather than inferred from a blank screen.
+- **A push of source that compiles clean can still crash Studio's editor**, and nothing saves.
+  Detect it, do not infer it: after each push, check the editor is alive (the File menu's Save item is
+  present; zero menu items is the crash) before any Save. Then bisect, saving between clean steps:
+  push the last committed source (clean means the session is fine and the change is the cause), then
+  the change one file at a time, then within the file control by control; reload Studio after every
+  crash, since a crashed session does not recover. One case took four pushes to name a gallery that
+  read `ThisItem.Person.Person` through a lookup whose display name equalled its target table's;
+  renaming the lookup's display name ended the crash. Whether that name pattern always crashes is not
+  established: the same app read `Person.Person` in a `Filter` elsewhere without trouble.
 - **Never import a solution while a push is held.** An import republishes every customisation and
   kills the session holding the push.
 - **The hold has a timer, and expiry discards the push.** A 60-minute default expired while waiting

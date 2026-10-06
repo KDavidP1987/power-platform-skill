@@ -1,5 +1,5 @@
 {
-  "description": "power-platform plugin gates, each scoped to the surfaces it names (references/rules-and-scope.md). Before tools: design before canvas screens, plan before a table deploy, flow lint before a solution import. At stop: a canvas, Power Pages or Power BI build needs its design record, critique and review (the 30/40 floor and the review topics for Power Pages only); no access token written to storage (any build, Fabric most often); in any Power Platform project, no background work still running, no question with no person present, and test writes proven back. After shell calls: the call count and elapsed time. Silent in folders that are not Power Platform projects.",
+  "description": "power-platform plugin gates, each scoped to the surfaces it names (references/rules-and-scope.md). Before tools: design before canvas screens, plan before a table deploy, flow lint before a solution import. At stop: a canvas, Power Pages or Power BI build needs its design record, critique and review (the 30/40 floor and the review topics for Power Pages only); no access token written to storage (any build, Fabric most often); in any Power Platform project, no background work still running, no question with no person present, and test writes proven back. After shell calls: the call count and elapsed time. After a .pa.yaml write: the compile-killer check, unless the project's own harness runs it. Silent in folders that are not Power Platform projects.",
   "hooks": {
     "PreToolUse": [
       {
@@ -32,6 +32,16 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/power-platform/scripts/hooks/plugin-gate.mjs\" --post",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/power-platform/scripts/hooks/check-pa-yaml.mjs\" --plugin",
+            "timeout": 15
           }
         ]
       }

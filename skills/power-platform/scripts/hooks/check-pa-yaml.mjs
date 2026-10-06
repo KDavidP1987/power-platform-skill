@@ -8,12 +8,16 @@
 // Deliberately narrow: only things KNOWN to break, never style. A hook that fires on style
 // gets ignored, and then it is not there when it matters.
 //
-// Hook:       PostToolUse, file path from the stdin JSON (exit 2 with findings on stderr).
+// Hook:       PostToolUse, file path from the stdin JSON (exit 2 with findings on stderr). The plugin
+//             runs it with --plugin, which stands down where the project's harness copy runs it.
 // Direct:     node check-pa-yaml.mjs <file.pa.yaml | Src folder>...   - for a project without the
 //             hooks wired: exit 0 clean, 1 findings, 2 no .pa.yaml found (not a pass).
 // Self-test:  node check-pa-yaml.mjs --selftest
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { readStdinJson, readFileSafe, hookFilePath, loadConfig } from './lib.mjs';
 
 export function checkPaYaml(text, { fileCount = null, ceiling = 50, warnAt = 45 } = {}) {
@@ -128,9 +132,23 @@ function selftest() {
   const pg = checkPaYaml(good, { fileCount: 12 });
   const want = ['colon-space', 'comment', 'Tooltip', 'indented', 'ceiling'];
   const missing = want.filter((w) => !pb.some((p) => p.includes(w)));
-  const ok = missing.length === 0 && pg.length === 0;
-  console.log(ok ? `selftest ok: bad fixture -> ${pb.length} findings, good fixture -> 0`
-                 : `selftest FAILED: missing [${missing.join(', ')}] on bad; ${pg.length} false finding(s) on good:\n  ${pg.join('\n  ')}`);
+  // Plugin mode: runs where the session's folder has no harness copy, stands down where it has one.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-yaml-plugin-'));
+  fs.mkdirSync(path.join(tmp, 'Src'));
+  const f = path.join(tmp, 'Src', 'Screen1.pa.yaml');
+  fs.writeFileSync(f, bad);
+  const run = () => spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--plugin'],
+    { input: JSON.stringify({ cwd: tmp, tool_input: { file_path: f } }), encoding: 'utf8' }).status;
+  const bare = run();
+  fs.mkdirSync(path.join(tmp, '.claude', 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, '.claude', 'hooks', 'check-pa-yaml.mjs'), '');
+  const withHarness = run();
+  fs.rmSync(tmp, { recursive: true, force: true });
+  const pluginOk = bare === 2 && withHarness === 0;
+  const ok = missing.length === 0 && pg.length === 0 && pluginOk;
+  console.log(ok ? `selftest ok: bad fixture -> ${pb.length} findings, good fixture -> 0, plugin mode runs without a harness and stands down with one`
+                 : `selftest FAILED: missing [${missing.join(', ')}] on bad; ${pg.length} false finding(s) on good:\n  ${pg.join('\n  ')}` +
+                   (pluginOk ? '' : `\n  plugin mode: exit ${bare} without a harness (want 2), ${withHarness} with one (want 0)`));
   process.exit(ok ? 0 : 1);
 }
 
@@ -155,12 +173,20 @@ function direct(paths) {
   process.exit(bad ? 1 : 0);
 }
 
+export function harnessRuns(cwd) {
+  return fs.existsSync(path.join(cwd, '.claude', 'hooks', 'check-pa-yaml.mjs'));
+}
+
 const pathArgs = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 if (process.argv.includes('--selftest')) selftest();
 else if (pathArgs.length) direct(pathArgs);
 else {
-  const file = hookFilePath(readStdinJson());
+  const input = readStdinJson();
+  const file = hookFilePath(input);
   if (!file || !file.endsWith('.pa.yaml')) process.exit(0);
+  // From the plugin (--plugin): stand down where the session's folder has the harness copy, which runs
+  // the same check; otherwise run it, so a session opened at a parent folder is still covered.
+  if (process.argv.includes('--plugin') && harnessRuns(input.cwd || process.cwd())) process.exit(0);
   const text = readFileSafe(file);
   if (!text) process.exit(0);
   const cfg = loadConfig();
