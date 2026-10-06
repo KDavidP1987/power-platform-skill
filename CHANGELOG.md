@@ -11,6 +11,37 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-05
+
+The second measured Power Pages build (0.22) matched the first: 30 of 30 blind checks, design 23 of
+25, no person needed, and all 65 of its checks run through the bundled walker. It lost 30 of its 96
+minutes waiting for a person to accept the site's own sign-in consent, the seed gate asked it to
+re-seed data it never had, and it wrote its own phone-overflow probe. The design critique of both
+builds found the same small faults. This release closes each.
+
+### Added
+
+- **`site-walk.mjs signin --accept-site-consent "<site name>"`**: when nobody is present and the
+  person agreed up front, accepts the site's own sign-in consent: only the `Portals-<site>` app, only
+  sign-in and profile, never on behalf of the organisation. Another app, wider permissions or an
+  administrator approval stays for a person. Self-tested on consent-page text.
+- **Spill and cover checks on every page at every width**: `SW-OVERFLOW` (text that spills out of its
+  box past the viewport or into the next element; scrollers, clips and ellipsis are skipped) and
+  `SW-COVERED` (a fixed or sticky bar over a control scrolled into view the way the keyboard does it;
+  a styled radio is checked by its label). `layoutChecks: false` and `layoutIgnore` per scenario. Run
+  against both measured sites: it found the second site's sticky bar over the request options, the
+  blind evaluator's medium defect, and nothing on the first.
+
+### Changed
+
+- **Seed gate (R3) for builds with no seed**: a build with no seed file (a Power Pages site over
+  existing tables) is asked for `docs/test-rows.md` written after the last write walk, not for a
+  re-seed.
+- **The unattended stop check** names the site consent among the no-person paths.
+- **`power-pages.md`**: the consent step for unattended runs (section 4); spill and cover in the phone
+  checks (section 7); a sticky submit bar needs `scroll-padding-bottom` (section 9 rule 6); filter
+  chips on a phone must show there are more, and one press makes one write (rule 11).
+
 ## [0.22.0] - 2026-10-05
 
 The first measured Power Pages build with this skill passed 30 of 30 blind checks with a design score

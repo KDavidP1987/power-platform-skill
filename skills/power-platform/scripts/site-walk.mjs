@@ -17,6 +17,11 @@
 //                         (Entra ID, MFA included); later walks reuse the profile headless. Done when
 //                         the browser is back on the site (not on a sign-in host) and, when given,
 //                         the site's own signed-in marker is visible. Waits up to 10 minutes.
+//                         [--accept-site-consent [<site name>]] when the account is already signed in
+//                         to Entra and only the site's own consent page remains, accept it: only the
+//                         "Portals-<site>" app, only sign-in and profile, never for the organisation.
+//                         For a run with no person present, with the person's say-so recorded up front
+//                         (a measured build lost 30 minutes waiting on this page).
 //   node site-walk.mjs walk --scenario <file.json> [--out <dir>] [--json <file>] [--allow-writes]
 //                         [--token-cmd "<command>"] [--work-dir <dir>]
 //                         walk the scenario; table on stdout, full report with --json
@@ -84,6 +89,10 @@
 //   SW-SIGNEDOUT-LEAK signed out, a page or the Web API showed data
 //   SW-CONFIRM        a Dataverse read-back did not hold (no row, wrong value, an old row, or no token)
 //   SW-STALE          an expectWithin expectation still failed when its time ran out
+//   SW-OVERFLOW       text spills out of its box, past the viewport or into the next element
+//   SW-COVERED        a fixed or sticky bar covers a control when it is scrolled into view
+//                     (both run on every page at every width; "layoutChecks": false turns them off,
+//                     "layoutIgnore": [selectors] skips a subtree meant to bleed)
 //
 // A walk with "writes": true appends {at, scenario, tool} to <work-dir>/writes.json, the log the
 // plugin gate's seed check reads (the same file canvas-browser.mjs walk writes).
@@ -271,6 +280,22 @@ export function signedOutVerdict(entry, finalUrl, text, signInPattern = DEFAULT_
   return shown.length ? { code: 'SW-SIGNEDOUT-LEAK', msg: `${entry.path}: signed out, shows ${shown.map((x) => JSON.stringify(x)).join(', ')}` } : null;
 }
 
+// signin --accept-site-consent: accept only the site's own sign-in app ("Portals-<site name>"), for the
+// signed-in account only, asking for sign-in and profile only. Anything else stays for a person: a
+// different app, wider permissions, or a request for an administrator.
+export function consentVerdict(text, siteName = null) {
+  if (!/Permissions requested/i.test(text)) return { accept: false, reason: null };
+  const m = /Portals-([^\n]+)/.exec(text);
+  if (!m) return { accept: false, reason: 'the app asking is not a Power Pages site app (Portals-<site>)' };
+  const app = 'Portals-' + m[1].trim();
+  if (siteName && !app.toLowerCase().includes(siteName.toLowerCase())) return { accept: false, reason: `${app} is not the site named ${siteName}` };
+  if (/Need admin approval|admin approval required/i.test(text)) return { accept: false, reason: 'the tenant asks for an administrator' };
+  const asks = text.split('\n').map((l) => l.trim()).filter((l) => /^(Read|Write|Send|Access|Maintain|Have full|Sign you in|View)/i.test(l));
+  const wider = asks.filter((l) => !/^(Sign you in and read your profile|View your basic profile|Maintain access to data you have given it access to)$/i.test(l));
+  if (wider.length) return { accept: false, reason: `${app} asks for more than sign-in and profile: ${wider.join('; ')}` };
+  return { accept: true, app };
+}
+
 export function exitCode(report) {
   if (!report.examined) return 2;
   return report.rows.some((r) => r.code) ? 1 : 0;
@@ -336,6 +361,69 @@ const abs = (base, p) => new URL(p, base.endsWith('/') ? base : base + '/').href
 async function scrollCheck(page) {
   const d = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, c: document.documentElement.clientWidth }));
   return scrollVerdict(d.s, d.c);
+}
+
+// Two layout faults a sideways-scroll check cannot see (both shipped in a measured build at 390 px):
+//  SW-OVERFLOW  text that spills out of its box, past the viewport or into the next element (a chip
+//               row, a long title in a fixed-width cell). Scrollers, deliberate clips and ellipsis
+//               are intended and skipped; only the innermost spilling element is reported.
+//  SW-COVERED   a fixed or sticky bar sits over a control once that control is scrolled into view the
+//               way the keyboard does it (nearest edge). The fix is usually scroll-padding-bottom on
+//               html equal to the bar's height, which scrollIntoView honours, so the fix passes here.
+// ignore: selectors whose subtree is skipped (a carousel that is meant to bleed).
+async function layoutCheck(page, ignore = []) {
+  const found = await page.evaluate((ignore) => {
+    const out = [];
+    const skip = (el) => ignore.some((s) => { try { return !!el.closest(s); } catch { return false; } });
+    const desc = (el) => el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + [...el.classList].slice(0, 2).map((c) => '.' + c).join('');
+    const said = (el) => (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    const vw = document.documentElement.clientWidth;
+    const scroller = (el) => { for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) if (/auto|scroll/.test(getComputedStyle(a).overflowX)) return true; return false; };
+    const spilled = [];
+    for (const el of document.body.querySelectorAll('*')) {
+      if (!el.getClientRects().length || skip(el) || el.closest('[aria-hidden="true"]')) continue;
+      if (/^(script|style|svg|path|img|video|canvas|iframe|input|textarea|select|option|br)$/i.test(el.tagName)) continue;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'inline' || cs.visibility === 'hidden' || /auto|scroll|hidden|clip/.test(cs.overflowX)) continue;
+      if (el.clientWidth === 0 || el.scrollWidth <= el.clientWidth + 1 || scroller(el)) continue;
+      const r = el.getBoundingClientRect(), spill = r.left + el.scrollWidth;
+      const hits = [...(el.parentElement ? el.parentElement.children : [])].some((sib) => {
+        if (sib === el) return false;
+        const q = sib.getBoundingClientRect();
+        return q.width > 0 && q.left < spill && q.left >= r.right - 1 && q.top < r.bottom && q.bottom > r.top;
+      });
+      if (spill > vw + 1 || hits) spilled.push({ el, hits });
+    }
+    for (const { el, hits } of spilled) {
+      if (spilled.some((o) => o.el !== el && el.contains(o.el))) continue;   // keep the innermost
+      if (out.length < 8) out.push({ code: 'SW-OVERFLOW', msg: `${desc(el)} "${said(el)}": content ${el.scrollWidth}px in a ${el.clientWidth}px box ${hits ? 'runs into the next element' : 'leaves the viewport'}` });
+    }
+    const bars = [...document.body.querySelectorAll('*')].filter((e) => /fixed|sticky/.test(getComputedStyle(e).position) && e.getClientRects().length && !skip(e));
+    if (bars.length) {
+      const controls = [...document.querySelectorAll('input:not([type=hidden]), textarea, select, button, a[href]')]
+        .filter((c) => c.getClientRects().length && !skip(c) && !bars.some((b) => b.contains(c))).slice(0, 80);
+      const seen = new Set();
+      for (const raw of controls) {
+        // A styled radio or checkbox hides its 1 px input; the person sees and taps its label.
+        const small = (e) => { const q = e.getBoundingClientRect(); return q.width < 2 || q.height < 2; };
+        const c = small(raw) && raw.labels && raw.labels[0] ? raw.labels[0] : raw;
+        if (c !== raw && bars.some((b) => b.contains(c))) continue;
+        window.scrollTo(0, 0);
+        c.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        const r = c.getBoundingClientRect();
+        if (small(c)) continue;
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        if (!hit || c.contains(hit) || hit.contains(c)) continue;
+        const bar = bars.find((b) => b.contains(hit));
+        if (!bar || seen.has(c)) continue;
+        seen.add(c);
+        if (out.filter((o) => o.code === 'SW-COVERED').length < 4) out.push({ code: 'SW-COVERED', msg: `${desc(c)} "${said(c)}" is under the ${getComputedStyle(bar).position} ${desc(bar)} when scrolled to (add scroll-padding-bottom or move the bar)` });
+      }
+      window.scrollTo(0, 0);
+    }
+    return out;
+  }, ignore).catch((e) => [{ code: 'SW-STEP', msg: 'layout check could not run: ' + e.message.split('\n')[0] }]);
+  return found;
 }
 
 async function shot(page, out, name, width, selector) {
@@ -419,6 +507,11 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
       }
       add(label, width, f, note);
       add(label + ': sideways scroll', width, await scrollCheck(page));
+      if (s.layoutChecks !== false) {
+        const found = await layoutCheck(page, s.layoutIgnore || []);
+        if (!found.length) add(label + ': spill and cover', width, null);
+        for (const lf of found) add(label + ': ' + (lf.code === 'SW-COVERED' ? 'cover' : 'spill'), width, lf);
+      }
       await shot(page, out, p.name, width, p.screenshotSelector);
     }
     if (wi === 0) {
@@ -585,9 +678,22 @@ async function cmdSignin() {
   const signIn = new RegExp(DEFAULT_SIGNIN, 'i');
   const end = Date.now() + 10 * 60 * 1000;
   let done = false;
+  const accept = flag('accept-site-consent');
+  let accepted = false;
   while (Date.now() < end && !done) {
     await page.waitForTimeout(2000);
     const u = page.url();
+    if (accept && !accepted && signIn.test(u)) {
+      const text = await page.locator('body').innerText().catch(() => '');
+      const verdict = consentVerdict(text, accept === true ? null : String(accept));
+      if (verdict.accept) {
+        const org = page.getByRole('checkbox', { name: /on behalf of your organi[sz]ation/i });
+        if (await org.count() && await org.first().isChecked()) await org.first().uncheck().catch(() => {});
+        await page.getByRole('button', { name: /^Accept$/ }).click().catch(() => {});
+        accepted = true;
+        log(`Accepted the site's own sign-in consent (${verdict.app}) for this account only. Record it in docs/decisions.md.`);
+      } else if (verdict.reason) { log('Consent page left for a person: ' + verdict.reason); }
+    }
     if (new URL(u).host === host && !signIn.test(u)) done = marker && marker !== true ? (await page.locator(String(marker)).count()) > 0 : true;
   }
   await ctx.close();
@@ -657,6 +763,12 @@ function fixtureServer() {
     if (p === '/eventual') { eventualHits++; return send(200, 'text/html', html('eventual', `<p>Status: ${eventualHits >= 3 ? 'To Do' : 'Backlog'}</p>`)); }
     if (p === '/never') return send(200, 'text/html', html('never', '<p>Status: Backlog</p>'));
     if (p === '/wide') return send(200, 'text/html', html('wide', '<div style="width:600px;height:40px;background:#0066B3">fixed 600px</div>'));
+    const chips = '<div style="display:flex;gap:8px"><span style="display:block;width:70px;white-space:nowrap">Waiting for review</span><span style="display:block;width:70px">Done</span></div>';
+    if (p === '/spill') return send(200, 'text/html', html('spill', chips));
+    if (p === '/spill-ok') return send(200, 'text/html', html('spill ok', `<div style="overflow-x:auto">${chips}</div><p style="width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">A long title cut with an ellipsis</p>`));
+    const form = (pad) => `<style>html{scroll-padding-bottom:${pad}px}.r input{position:absolute;width:1px;height:1px;opacity:0}</style><form>${Array.from({ length: 30 }, (_, i) => `<p class="r"><input type="radio" name="k" id="r${i}"><label for="r${i}">Option ${i}</label></p>`).join('')}</form><div style="position:fixed;bottom:0;left:0;right:0;height:80px;background:#0066B3"><button type="button">Send</button></div><div style="height:90px"></div>`;
+    if (p === '/covered') return send(200, 'text/html', html('covered', form(0)));
+    if (p === '/covered-ok') return send(200, 'text/html', html('covered ok', form(96)));
     if (p === '/SignIn') return send(200, 'text/html', html('sign in', '<p>Please sign in</p>'));
     if (p === '/secret') return signedIn(req) ? send(200, 'text/html', html('secret', '<p>SECRET-ITEM</p>')) : send(302, 'text/plain', '', { Location: '/SignIn' });
     if (p === '/leaky') return send(200, 'text/html', html('leaky', '<p>SECRET-ITEM</p>'));
@@ -739,6 +851,15 @@ async function selftest() {
   check('writes.json appended in the shape the seed gate reads', logged.length === 2 && logged[1].scenario === 'two' && !!Date.parse(logged[1].at));
   rmSync(wd, { recursive: true, force: true });
 
+  // The site's own consent: accepted only when it is the site app asking for sign-in and profile.
+  const consent = (app, lines) => `Microsoft\nuser@example.com\nPermissions requested\n${app}\nunverified\nThis app would like to:\n${lines.join('\n')}\nAccept\nCancel`;
+  check('consent: site app, profile only -> accept', consentVerdict(consent('Portals-Work Portal', ['Sign you in and read your profile']), 'Work Portal').accept === true);
+  check('consent: not a consent page -> nothing', consentVerdict('Pick an account').accept === false && consentVerdict('Pick an account').reason === null);
+  check('consent: another app -> left for a person', /not a Power Pages/.test(consentVerdict(consent('Contoso Mail Helper', ['Sign you in and read your profile'])).reason || ''));
+  check('consent: another site -> left for a person', /is not the site/.test(consentVerdict(consent('Portals-Other Site', ['Sign you in and read your profile']), 'Work Portal').reason || ''));
+  check('consent: wider permissions -> left for a person', /more than sign-in/.test(consentVerdict(consent('Portals-Work Portal', ['Sign you in and read your profile', 'Read and write all users\' full profiles'])).reason || ''));
+  check('consent: admin approval -> left for a person', /administrator/.test(consentVerdict(consent('Portals-Work Portal', ['Need admin approval'])).reason || ''));
+
   if (has('logic-only')) {
     log(fails.length ? `\n${fails.length} FAILED` : '\nlogic half passed. Browser half NOT run (--logic-only): run --selftest without it where Playwright is installed.');
     process.exit(fails.length ? 1 : 0);
@@ -818,6 +939,17 @@ async function selftest() {
   const stale = await run({ baseUrl: base, widths: [1440], steps: [{ goto: '/never' }, { expectText: 'Status: To Do', expectWithin: 3, every: 1, timeout: 500 }],
     pages: [{ path: '/never', expectText: ['Status: Done'], expectWithin: 2, every: 1 }] });
   check('expectWithin: never settles -> SW-STALE (step and page)', stale.rows.filter((r) => r.code === 'SW-STALE').length === 2);
+  // Layout: spill and cover, and their fixes.
+  const lay = async (path) => run({ baseUrl: base, widths: [390], pages: [{ path }] });
+  const spill = await lay('/spill'), spillOk = await lay('/spill-ok'), covered = await lay('/covered'), coveredOk = await lay('/covered-ok');
+  check('spill into the next chip -> SW-OVERFLOW, once (innermost)', spill.rows.filter((r) => r.code === 'SW-OVERFLOW').length === 1 && !codes(spill).has('SW-SCROLL'));
+  check('spill inside a scroller or behind an ellipsis passes', codes(spillOk).size === 0);
+  check('fixed bar over a field -> SW-COVERED', codes(covered).has('SW-COVERED'));
+  check('scroll-padding-bottom fixes SW-COVERED', codes(coveredOk).size === 0);
+  if (codes(coveredOk).size) log(table(coveredOk.rows.filter((r) => r.code)));
+  check('layoutChecks false turns both off', codes(await run({ baseUrl: base, widths: [390], layoutChecks: false, pages: [{ path: '/spill' }, { path: '/covered' }] })).size === 0);
+  check('layoutIgnore skips a subtree', !codes(await run({ baseUrl: base, widths: [390], layoutIgnore: ['div'], pages: [{ path: '/spill' }] })).has('SW-OVERFLOW'));
+
   const empty = await run({ baseUrl: base });
   check('empty scenario: nothing examined (exit 2)', exitCode(empty) === 2);
 

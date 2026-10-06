@@ -111,8 +111,14 @@ conversion is their licensing decision, not a build step.
   `user` is empty and the header still offers Sign in. Every page that needs the contact must handle
   `user == nil` with a link to `/SignIn?returnUrl=...`.
 - **The first sign-in asks each person for consent** to the site's own app registration
-  ("Portals-<site name>": sign in and read your profile). Plan it as a human step in a verification
-  run; if the consent page waits too long the sign-in times out - start again from the site URL.
+  ("Portals-<site name>": sign in and read your profile). With a person present, they accept it in
+  the opened browser. With nobody present, and the person's say-so taken in the first decision
+  batch, `site-walk.mjs signin --url <site> --accept-site-consent "<site name>"` accepts it: only the
+  site's own app, only sign-in and profile, never on behalf of the organisation; any other request
+  (another app, wider permissions, an administrator approval) stays for a person. Record it in
+  `docs/decisions.md`. A measured unattended build spent 30 of its 96 minutes waiting on this page
+  before it accepted it itself. If the consent page waits too long the sign-in times out - start
+  again from the site URL.
 - **The built-in Entra provider creates the contact with no name or email**, so every page and
   every back-office view that shows "who" shows a blank. Observed: claims mappings set as site
   settings (`Authentication/OpenIdConnect/AzureAD/RegistrationClaimsMapping` and
@@ -229,12 +235,14 @@ platform; raise it as a decision, do not promise it.
    each. A site that only hides a button is not secured. Say which refusals could not be tested
    (for example, no second contact exists yet).
 5. **Phone width**: at 390 px, `document.documentElement.scrollWidth` must equal `clientWidth` on
-   every page, and the forms must stack.
+   every page, and the forms must stack. No sideways scroll is not enough: text can still spill out
+   of its box into the next element, and a sticky bar can sit over the field the keyboard just
+   moved to. The walk checks both on every page at every width (`SW-OVERFLOW`, `SW-COVERED`).
 
 **Drive it with `scripts/site-walk.mjs`**, the site counterpart of the canvas walk: `signin` once
 (the person completes the Entra sign-in and consent in the opened browser; the profile is kept),
-then `walk --scenario <file>` for the task steps, the signed-out check, the 390 px scroll check on
-every page, and the refusal probes - `/_api` calls sent from inside the signed-in page with the
+then `walk --scenario <file>` for the task steps, the signed-out check, the 390 px scroll, spill and
+cover checks on every page, and the refusal probes - `/_api` calls sent from inside the signed-in page with the
 anti-forgery token, each expected to fail with a stated status. A probe that succeeds is a
 security finding, not a flaky test. The refusals to prove on every site:
 
@@ -374,7 +382,9 @@ The rules below are what that pairing found the platform needs, in order:
 6. **Forms that work on phones and desktops.** Required fields first and few; optional sections
    as one `<details>` each with an "Added" badge and a running count; radio groups drawn as 44 px
    pill buttons instead of selects; money as number inputs with a currency prefix and
-   `inputmode="decimal"`; the submit bar sticky at the bottom on phones. On a phone the first field
+   `inputmode="decimal"`; the submit bar sticky at the bottom on phones, with
+   `html { scroll-padding-bottom: <bar height + 16px> }` so a field the keyboard moves to is never
+   under it (a measured build shipped without it; the walk's `SW-COVERED` finds it). On a phone the first field
    must be on the first screen - move or drop side panels that push it down.
 7. **Echo the person's own words.** Dataverse choice labels are the back office's vocabulary
    ("Enhancement"); the form may say "Improve something we have". Show answers back in the form's
@@ -418,6 +428,12 @@ The rules below are what that pairing found the platform needs, in order:
       the site is Private (observed). Style around it: drop your own signed-in name from the header
       at phone width so the person's name is not shown twice, and pick a header colour that sits with
       the strip's dark ground rather than against it.
+    - **Filter chips on a phone show that there are more.** A chip row that scrolls sideways and
+      cuts the last chip at the edge, with no fade or arrow, hides most statuses (both measured
+      builds). Wrap the chips onto two lines, or switch to a select at phone width, or keep the
+      scroller with a fade on the cut edge and the selected chip scrolled into view.
+    - **One press, one write.** Disable the send button while the request is in flight and re-enable
+      it on the answer; a double press produced a stray "comment is empty" error after a good post.
     - **Make finding work fast once there are more than a screenful**: search as you type or on
       Enter, a visible "filtered by" state with a clear control, and a sort that matches the list's
       purpose (newest first for "my requests", priority then due date for shared work).
