@@ -11,6 +11,43 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-06
+
+Three measured Power Pages builds (0.21, 0.22, 0.23.1) each passed 30 of 30 blind checks with the same
+design score, 23 of 25. What separated them was what the checklist does not catch: a menu marking the
+wrong page, a focus ring at 1.2:1, double writes, columns left empty, Global read one setting away from
+exposure, and design critiques of 30, 29 and 25 out of 40. All three hit the same go-live blocker
+(naming people without a licence), and tool calls rose from 220 to 295 while quality stayed level. The
+third build's own reviewer found the one serious defect (a name retyped on the profile page was stamped
+on comments), but its critique was never scored and the stop gate did not cover sites.
+
+### Added
+
+- **`site-walk.mjs` checks what blind reviews kept finding**, on every page at every width:
+  `SW-NAV-CURRENT` (the menu marks another page as current, or marks some pages and not others) and
+  `SW-FOCUS` (no focus indicator of 2 px or more at 3:1; read after the ring's transition). Steps
+  `pressTwice` (a double press) and api `repeat` (the same request N times at once) prove one press makes
+  one write with a `confirm` count; `confirm` `filled` fails `SW-FILLED` on columns the site must set.
+  Run against the three measured sites, the focus check agreed with the evaluators (1.2:1 on one) and
+  raised nothing on the others once transitions were awaited.
+- **`site-walk.mjs ship --site <folder> --scenario <file>`**: permission audit, `pac pages upload`,
+  Clear config and Clear cache, then the walk, in one call.
+- **`audit-pages-permissions.py` `GLOBAL-READ-UNGUARDED`**: Global read on a table whose Web API is off
+  only by default. All three measured sites had it; set `Webapi/<table>/enabled` = false explicitly.
+- **The reviewer's list for sites** (`power-pages.md` section 8, `reviewer-prompt.md`): identity and the
+  profile page, permission scope, the Web API per table, refusals and double writes, audit warnings.
+- **Steps for the administrator** in `pages-decisions.md`: the Entra app registration and OpenID Connect
+  provider, so identity is settled before the build.
+
+### Changed
+
+- **The plugin's stop gate covers Power Pages builds** (a folder with `website.yml`): DESIGN.md, a design
+  critique naming its screenshots with a score of 30/40 or more (or "Below 30 accepted:" and a reason),
+  and a review covering the five topics. Measured: the third build would have been held for both.
+- **Design rules** (`power-pages.md` section 9): the current-page marker computed per page because the
+  header template is cached; one colour for the main action; long lists paged or filtered; the critique
+  floor. Section 11 and 19: the explicit Web API guard on Global-read tables. Section 17: identity first.
+
 ## [0.23.1] - 2026-10-05
 
 ### Changed

@@ -33,7 +33,9 @@ or anything configured only in the studio since the last download - download fir
 
 Row exposure: Web API enabled on a table that any role reads with Global scope is reported as
 WEBAPI-GLOBAL-READ (every row is reachable through /_api whatever the pages show), and a wildcard
-allow-list on a table the roles may create in or write to as WEBAPI-WILDCARD-WRITE.
+allow-list on a table the roles may create in or write to as WEBAPI-WILDCARD-WRITE. Global read with
+the Web API off only by default is GLOBAL-READ-UNGUARDED (one setting away from exposure); with
+Webapi/<table>/enabled = false set explicitly it is GLOBAL-READ-GUARDED (info).
 
 Privilege rule used: a lookup the code binds through the Web API needs Append AND Append To on
 both tables (measured on a real site; the documented one-sided rule returned 403), so the audit
@@ -360,6 +362,23 @@ def audit(root, set_map=None, sensitive=DEFAULT_SENSITIVE, live=None):
                 f("info", "FIELD-UNUSED", "%s: %s is allow-listed but the code neither writes nor selects it - narrow the list" % (t, c))
             for c in sorted(c for c in fields if sens.search(c)):
                 f("warning", "FIELD-SENSITIVE", "%s: %s is allow-listed; a process column the client can set (stage, owner, decision...) belongs to the back office" % (t, c))
+    # Global read with the Web API off only because nobody switched it on: every row is one setting away
+    # from /_api. A measured site read through Liquid with Global read for every signed-in person; safe
+    # that day, exposed the day someone enables the Web API for a list. Make the guard explicit
+    # (Webapi/<table>/enabled = false, with a description naming the risk) or scope the read.
+    for t, ps in sorted(perms_by_table.items()):
+        greads = [p for p in ps if SCOPES.get(str(p.get("adx_scope", ""))) == "Global" and truthy(p.get("adx_read")) and roles_of(p)]
+        key = "Webapi/%s/enabled" % t
+        if not greads or truthy(s.get(key, "false")):
+            continue   # enabled: WEBAPI-GLOBAL-READ above already covers it
+        names = ", ".join(p.get("adx_entityname", p.get("_file")) for p in greads)
+        if key in s:
+            f("info", "GLOBAL-READ-GUARDED", "%s: Global read (%s) with %s = false set explicitly; keep it off and list it in the hand-back" % (t, names, key))
+        else:
+            f("warning", "GLOBAL-READ-UNGUARDED", "%s: Global read (%s) and the Web API is off only because %s is not set; one setting exposes every row "
+              "through /_api. Add %s = false with a description naming the risk, list it in the hand-back, or scope the read "
+              "(Contact, Parent, Custom access)" % (t, names, key, key))
+
     for t, uu in sorted(use.items()):
         if uu["methods"] and t not in webapi_tables:
             f("critical", "WEBAPI-OFF", "%s: the code calls /_api for %s but Webapi/%s/enabled is not set" % (t, t, t))
@@ -542,6 +561,9 @@ def _site(base, fixed):
   adx_value: true
 - adx_name: Webapi/app_order/fields
   adx_value: app_name,app_notes,app_amount,app_customer
+- adx_name: Webapi/app_orderline/enabled
+  adx_description: Off on purpose - staff read every line with Global read in Liquid
+  adx_value: false
 - adx_name: HTTP/Content-Security-Policy
   adx_value: script-src 'self' 'nonce'; style-src 'unsafe-inline' https:;
 - adx_name: HTTP/X-Frame-Options
@@ -552,6 +574,9 @@ def _site(base, fixed):
         # wildcard fields on one table, missing column on the other; inner errors on.
         _write(base, "table-permissions/Order-All.tablepermission.yml",
                _perm("Order - all", "app_order", "756150000", ["read", "write", "create", "delete"], [ANON]))
+        # Global read for a custom role, Web API off only by default
+        _write(base, "table-permissions/Note-All.tablepermission.yml",
+               _perm("Note - all", "app_note", "756150000", ["read"], [STAFF], pid="22222222-0000-0000-0000-000000000006"))
         # a writable table whose Web API allow-list is the wildcard
         _write(base, "table-permissions/Vendor-Mine.tablepermission.yml",
                _perm("Vendor - mine", "app_vendor", "756150001", ["read", "create"], [AUTH], pid="22222222-0000-0000-0000-000000000005",
@@ -585,7 +610,7 @@ def selftest():
         codes = {x["code"] for x in fb}
         expect = {"GLOBAL-ANON", "PRIV-MISSING", "PRIV-UNUSED", "NO-PERMISSION", "WEBAPI-WILDCARD", "FIELD-NOT-ALLOWED",
                   "FIELD-SENSITIVE", "WEBAPI-UNUSED", "WEBAPI-NO-PERMISSION", "WEBAPI-INNERERROR", "CSP-UNSAFE-INLINE",
-                  "WEBAPI-GLOBAL-READ", "WEBAPI-WILDCARD-WRITE"}
+                  "WEBAPI-GLOBAL-READ", "WEBAPI-WILDCARD-WRITE", "GLOBAL-READ-UNGUARDED"}
         for c in sorted(expect - codes):
             failures.append("bad site: expected %s" % c)
         _, _, fg, ng = audit(good)

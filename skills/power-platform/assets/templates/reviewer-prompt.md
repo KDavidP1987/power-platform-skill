@@ -47,6 +47,23 @@ minutes and held up the whole build.
   pane only, never the mailbox. Capture a report as its canvas only, never the Power BI header (a
   person's photo, the organisation's logo) or the workspace rail.
 
+## A Power Pages site
+
+For a site, the build is the site address and its folder in git instead of a canvas app. Work through
+`references/power-pages.md` section 8, "The reviewer's list", on the live site, signed in, and say what
+you tried for each item:
+
+1. **Identity**: can you make the site record another name or email as the author or requester (the
+   profile page, a name or email in the request body, a hidden field)?
+2. **Table permission scope**: every permission, its scope and roles; any Global read whose table's
+   Web API is not explicitly off (`python scripts/audit-pages-permissions.py <site folder>`).
+3. **The Web API per table**: `/_api/<entity set>` answers 404 or only allowed rows and columns.
+4. **The refusals** of section 7 step 4 and a double write (`site-walk.mjs` `pressTwice`, `repeat`).
+5. **Audit warnings**: each one resolved or carried into the hand-back with its reason.
+
+Return the findings under those five headings; the lead records them, and what it fixed, in
+`docs/review.md` (the stop gate checks the topics).
+
 ## Output
 
 Write `docs/review/findings.json`:

@@ -238,6 +238,21 @@ platform; raise it as a decision, do not promise it.
    every page, and the forms must stack. No sideways scroll is not enough: text can still spill out
    of its box into the next element, and a sticky bar can sit over the field the keyboard just
    moved to. The walk checks both on every page at every width (`SW-OVERFLOW`, `SW-COVERED`).
+6. **The defects blind reviews kept finding** (three measured builds passed every functional check
+   and still shipped these). The walk checks each one:
+   - the menu marks the page being shown, on every page (`SW-NAV-CURRENT`; section 9 rule 12);
+   - every control shows focus with an indicator of 2 px or more at 3:1 against what is behind it
+     (`SW-FOCUS`; a pale halo measured 1.2:1, and a 1 px colour change does not count);
+   - one press makes one write: `{"pressTwice": "<button>"}` then a `confirm` with `"count": 1`, and an
+     `api` probe with `"repeat": 3` on the write endpoint (a retry loop) with the same confirm;
+   - the columns the site must set are set: `confirm` with `"filled": ["<source column>", ...]`
+     (`SW-FILLED`; two builds left the comment's source empty);
+   - no value the person never chose: a `confirm` `expect` on the optional fields left blank.
+
+**Ship in one call**: `site-walk.mjs ship --site <folder> --scenario <file>` runs the permission
+audit, `pac pages upload`, Clear config and Clear cache at `/_services/about`, then the walk, and
+prints one report. Measured site builds made 220 to 295 tool calls, most of them this loop taken a
+step at a time.
 
 **Drive it with `scripts/site-walk.mjs`**, the site counterpart of the canvas walk: `signin` once
 (the person completes the Entra sign-in and consent in the opened browser; the profile is kept),
@@ -328,6 +343,24 @@ those in your tenant.
    nothing else).
 8. **Prove the refusals** in the running site as in section 7, step 4. The audit says what the
    configuration allows; only a refused call from a signed-in browser proves it.
+
+**The reviewer's list.** Every site build ends with an independent review (a fresh helper with no
+build context, `assets/templates/reviewer-prompt.md`) that works through this list on the live site and
+records what it tried and what happened in `docs/review.md`; the plugin's stop gate checks the topics.
+A third measured build's reviewer found the one serious defect its own walks had passed.
+
+1. **Identity**: can a person make the site record someone else as the author or requester - by
+   editing the platform's **profile page** (the measured defect: a retyped name was stamped on every
+   comment), by sending a name or email in a request body, or by changing a hidden field? The name and
+   email must come from the sign-in or a back-office record, never from anything the person can edit.
+2. **Table permission scope**: list every permission with its scope and roles. Global read is
+   acceptable only on a table whose Web API is explicitly off (`Webapi/<table>/enabled` = false, with a
+   description naming the risk) and whose every read filters; `audit-pages-permissions.py` reports
+   `GLOBAL-READ-UNGUARDED` otherwise. All three measured builds left this to the default.
+3. **The Web API per table**: `/_api/<entity set>` for each table answers 404 (off) or returns only
+   allowed rows and columns.
+4. **The refusals** of section 7 step 4, sent from the signed-in browser, and the double write.
+5. **Every audit warning** resolved, or listed in the hand-back with the reason it stays.
 
 **Code sites (single-page React, Angular, Vue or Astro sites) are a different build model**
 (section 10). Every security rule here applies to them unchanged - the Web API and its table
@@ -438,6 +471,26 @@ The rules below are what that pairing found the platform needs, in order:
       Enter, a visible "filtered by" state with a clear control, and a sort that matches the list's
       purpose (newest first for "my requests", priority then due date for shared work).
 
+12. **The menu marks the page being shown, computed per request.** The platform caches the Header and
+    Footer web templates across pages and visitors, so a current-page marker worked out inside the
+    header (from `page.url` or a variable set there) can stick to whichever page rendered it first: a
+    measured build underlined "My requests" on every desktop page. Set `aria-current="page"` from the
+    page's own template (a block the page fills, or a small script that compares `location.pathname`
+    with each menu link), and mark detail pages under their section. The walk's `SW-NAV-CURRENT`
+    checks it on every page.
+13. **One colour for the main action, everywhere.** If the brand reserves a colour for "go" (green for
+    submit), every primary submit uses it - "Send request" and "Post comment" alike. A critique marked
+    a blue Post button beside a green Send button as an inconsistency.
+14. **Long lists page or filter.** A person's own list grows (a measured "My requests" reached 25 rows,
+    over 5,000 px on a phone); page it (10 to 20 rows) or give it the same search and status filter as
+    the shared list, newest first. Comment threads show the newest first or put the comment box at the
+    top once there are more than a few.
+15. **The design critique has a floor.** Run impeccable `critique` on the live pages at 1440 and 390 px
+    (screenshots), fix every P0 and P1 in one batch, critique once more, and record the score in
+    `docs/design-critique.md` with the screenshot names. Thirty out of forty or more; under that, write
+    "Below 30 accepted:" and the reason. Three measured builds scored 30, 29 and 25 on the same brief;
+    the plugin's stop gate holds the hand-back below the floor.
+
 ## 10. Classic site or code site
 
 Two build models share one security model (web roles, table permissions, the Web API). Pick before
@@ -496,7 +549,10 @@ Options, strongest first. Each needs a refusal probe in the running site (sectio
    `setTimeout(`, `require(`, `delete`, `prototype` and similar are rejected (the DELETE handler is
    named `del`); 120 s timeout by default, up to 240 (`ServerLogic/TimeoutInSeconds`).
 3. **Classic Liquid with the Web API off**: list and detail both read with `fetchxml` carrying the
-   condition. **The detail page must re-check the condition with the id it was given** - a detail
+   condition. Liquid reads need Read in a table permission, and a column-based visibility cannot be a
+   scope, so this means Global read: set `Webapi/<table>/enabled` to `false` explicitly, with a
+   description saying why, so the next maker who wants a list cannot switch it on by accident
+   (`GLOBAL-READ-UNGUARDED` in the audit until then). **The detail page must re-check the condition with the id it was given** - a detail
    page that loads by id alone shows a hidden row to anyone who changes the id.
 4. **A relationship you can scope by** (a lookup to an audience or parent row that Account or Parent
    scope can follow). Strong, but a schema change.
@@ -650,8 +706,8 @@ recommendation, build to it, and list it in the hand-back. Template:
 
 | Decision | Why it matters | Recommendation when no person answers |
 |---|---|---|
+| **Identity source** for people who are not Dataverse users - **settle it first** | All three measured builds passed every check and hit the same go-live blocker: staff without a licence could not be named on what they post (section 18). | Hand the person `assets/templates/pages-decisions.md`'s "Steps for the administrator" before the build; with the app registration in place, build option 1 of section 18 and prove it. Without it, ship the fallback and record the blocker. |
 | **Audience and visibility.** How many people, inside the organisation only? | A Private site admits its makers, environment System Administrators and up to 50 people granted by name (section 14). Past that, the site must be Public, with every page and the Web API restricted to signed-in people through web roles, and the organisation's Entra ID as the only identity provider (local sign-up and other providers off). | Build Private for the pilot; say in the hand-back that going organisation-wide means Public plus page-level restrictions, and that changing visibility is an administrator action. Write every page so it does not depend on Private: check the web role in Liquid or server logic on every page and endpoint. |
-| **Identity source** for people who are not Dataverse users | The built-in Entra provider can leave the contact's name and email blank; the `systemuser` fallback finds only licensed users (section 18). | Configure the Entra ID OpenID Connect provider with `openid email profile` and claims mapping if the owner can create an app registration; otherwise ship the fallback in section 18 and record the go-live blocker. |
 | **Licence** | A new site is a 90-day trial (30 in a trial environment); production needs capacity for the site's monthly authenticated users. | Stay on trial; never convert as a build step. |
 | **Letting people in** | Granting access is a list the owner keeps; whether a grant notifies the person is not documented. | Grant nobody during the build. At go-live, the owner grants named people (Private) or opens the site to the organisation (Public). Staff signing in with Entra ID need no invitation. |
 | **The site's own sign-in consent** when nobody is present | Every first sign-in asks for consent to the site's own app (section 4); an unattended build that waits for a person loses the time (a measured build lost 30 minutes). | The agent accepts it for the builder's own account with `site-walk.mjs signin --accept-site-consent`; anything wider stays for a person. |
@@ -698,8 +754,9 @@ One measured classic site passed every refusal a blind evaluator tried (hidden r
 and `/_api`; another person's rows; PATCH and DELETE; a comment bound to a hidden item; a request
 that sent its own author, status, project and visibility). Its shape:
 
-- **The Web API off on every table** (no `Webapi/<table>/enabled`): every `/_api/<entity set>`
-  answers 404 to a signed-in person and redirects a signed-out one to sign-in.
+- **The Web API off on every table**: every `/_api/<entity set>` answers 404 to a signed-in person and
+  redirects a signed-out one to sign-in. The measured builds left the setting absent; set
+  `Webapi/<table>/enabled` = false explicitly on each Global-read table (section 11, option 3).
 - **Reads in Liquid `fetchxml`** with the visibility condition on every query (list, counts, search,
   status filter), and on the detail page the condition **and** the id from the address: visible, or
   the signed-in person's own request (`<requester lookup> eq user.id`). An id that fails either shows

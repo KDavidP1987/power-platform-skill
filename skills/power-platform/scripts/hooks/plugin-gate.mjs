@@ -27,6 +27,9 @@
 //   2. design/prototype.html (canvas source)       - the HTML design pass
 //   3. docs/design-critique.md, once shipped        - impeccable critique of the published screens
 //   4. docs/review.md, once shipped                 - the independent reviewer
+// A Power Pages site in git (a folder with website.yml) counts as a build and as shipped: it needs
+// DESIGN.md, the critique at 30/40 or more (or a stated reason), and a review (docs/review.md or
+// docs/review/*.md) covering identity, the profile page, permission scope, the Web API and refusals.
 //   5. no access token written to a file or to shared storage (lakehouse, OneLake), including a
 //      token file placed there over REST
 // The plan is the acceptance contract, or a DOD plan when the person chose DOD; neither is demanded
@@ -82,6 +85,42 @@ function hasReport(dir, depth = 0) {
   return false;
 }
 const exists = (root, ...rels) => rels.some((r) => fs.existsSync(path.join(root, r)));
+// A Power Pages site in git: a folder holding website.yml (pac pages download --modelVersion 2),
+// up to three levels down, skipping dot folders and node_modules (scratch copies live there).
+export function pagesSites(root, depth = 0) {
+  if (depth > 3) return [];
+  let entries = [];
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
+  if (depth > 0 && entries.some((e) => e.isFile() && e.name.toLowerCase() === 'website.yml')) return [root];
+  return entries.filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
+    .flatMap((e) => pagesSites(path.join(root, e.name), depth + 1));
+}
+// The design critique must reach the score the measured builds were judged by (impeccable's Nielsen
+// total, /40). Three measured site builds scored 30, 29 and 25 while all passing every functional
+// check; the difference was polish a fix batch could have closed. A lower score passes only with a
+// stated reason ("Below 30 accepted: ...").
+export const CRITIQUE_FLOOR = 30;
+export function critiqueState(text) {
+  if (!(/\.png\b/i.test(text) && /score/i.test(text))) return text ? 'does not name the screenshots (.png) and a score' : 'is missing';
+  const scores = [...text.matchAll(/\b(\d{1,2})\s*\/\s*40\b/g)].map((m) => Number(m[1]));
+  if (!scores.length) return null;
+  const last = scores[scores.length - 1];
+  if (last < CRITIQUE_FLOOR && !/below 30 accepted\s*:/i.test(text)) return `scores ${last}/40, under ${CRITIQUE_FLOOR}`;
+  return null;
+}
+// What the independent review of a Power Pages site must cover (the measured gaps): who a person can
+// claim to be (a third build's reviewer found the profile page let anyone rename the author of what
+// they wrote), how wide each table permission reads, the Web API per table, and the refusals.
+export const PAGES_REVIEW_TOPICS = [['identity', /identity|impersonat|spoof/i], ['profile page', /profile/i],
+  ['table permission scope', /scope|global read|table permission/i], ['Web API', /web ?api|\/_api/i], ['refusals', /refus|403|404|denied/i]];
+export function reviewText(root) {
+  const one = readFileSafe(path.join(root, 'docs', 'review.md'));
+  if (one) return one;
+  try {
+    return fs.readdirSync(path.join(root, 'docs', 'review')).filter((f) => /\.(md|json)$/i.test(f))
+      .map((f) => readFileSafe(path.join(root, 'docs', 'review', f))).join('\n');
+  } catch { return ''; }
+}
 
 // DOD counts as installed when the plugin list or a skill folder names it.
 export function dodInstalled(env = process.env) {
@@ -136,10 +175,12 @@ export function evaluate(root, input = {}, env = process.env) {
   if (cfg.pluginGate === false || app.pluginGate === false) return null;
   const hasCanvas = canvasSrcDirs(root, cfg.canvasSrcGlob || 'canvas').length > 0 || (app.canvasSrc && fs.existsSync(path.join(root, app.canvasSrc)));
   const hasBi = hasReport(path.join(root, 'fabric'));
-  if (!hasCanvas && !hasBi) return null;
+  const hasPages = pagesSites(root).length > 0;
+  if (!hasCanvas && !hasBi && !hasPages) return null;
 
   let shipped = false;
   try { shipped = fs.readdirSync(path.join(root, app.outDir || 'out')).some((f) => /\.(zip|msapp)$/i.test(f)); } catch { /* nothing packed */ }
+  if (hasPages) shipped = true;   // a site in git is uploaded as it is built; its hand-back is a release
   const missing = [];
   if (!exists(root, 'DESIGN.md', 'docs/DESIGN.md')) {
     missing.push('DESIGN.md is missing. Invoke the impeccable skill (Skill tool: impeccable) init now: PRODUCT.md, DESIGN.md (create the theme if none was given), ' +
@@ -151,13 +192,22 @@ export function evaluate(root, input = {}, env = process.env) {
   }
   if (shipped) {
     const critique = readFileSafe(path.join(root, 'docs', 'design-critique.md'));
-    if (!(/\.png\b/i.test(critique) && /score/i.test(critique))) {
-      missing.push(`docs/design-critique.md ${critique ? 'does not name the screenshots (.png) and a score' : 'is missing'}. Run impeccable critique on the published ` +
-        `screens at 1440 and 390 px${hasBi ? ' and the report' : ''}, fix what it raises in one batch, and record the screenshots and the score.`);
+    const why = critiqueState(critique);
+    if (why) {
+      missing.push(`docs/design-critique.md ${why}. Run impeccable critique on the ${hasPages ? 'live pages' : 'published screens'} at 1440 and 390 px` +
+        `${hasBi ? ' and the report' : ''}, fix every P0 and P1 it raises in one batch, critique once more, and record the screenshots and the score (/40; ` +
+        `${CRITIQUE_FLOOR} or more, or "Below 30 accepted: <reason>").`);
     }
   }
-  if (shipped && !exists(root, 'docs/review.md')) {
+  const review = reviewText(root);
+  if (shipped && !review) {
     missing.push('docs/review.md is missing. Run the independent reviewer (assets/templates/reviewer-prompt.md, orchestration.md section 7) and record its findings and what was fixed.');
+  } else if (shipped && hasPages) {
+    const gaps = PAGES_REVIEW_TOPICS.filter(([, re]) => !re.test(review)).map(([t]) => t);
+    if (gaps.length) {
+      missing.push(`docs/review.md does not cover ${gaps.join(', ')}. A site review works through power-pages.md section 8, "The reviewer's list", ` +
+        'and records what it tried and what happened.');
+    }
   }
   const leaks = tokenWrites(root);
   if (leaks.length) {
@@ -296,9 +346,10 @@ export function decideStop(root, input = {}, env = process.env, stateDir = os.tm
 // ---- PostToolUse budget ------------------------------------------------------------------------
 export const SHELL_NUDGE_EVERY = 40;
 export const TIME_MARKS = [45, 60, 90, 120];
-function isBuildFolder(root) {
+export function isBuildFolder(root) {
   const app = appConfig(root);
-  return !!(app.appId || app.canvasSrc) || canvasSrcDirs(root, loadConfig(root).canvasSrcGlob || 'canvas').length > 0 || hasReport(path.join(root, 'fabric'));
+  return !!(app.appId || app.canvasSrc) || canvasSrcDirs(root, loadConfig(root).canvasSrcGlob || 'canvas').length > 0 || hasReport(path.join(root, 'fabric'))
+    || pagesSites(root).length > 0;
 }
 export function budgetNote(state, now = Date.now()) {
   const notes = [];
@@ -570,6 +621,24 @@ function selftest() {
     check('post: prototype written, no design note', dpost('d2', 40), silent);
     check('post: silent outside a build folder', (put('scripts/canvas-app.json', '{}'), rm('canvas'), decidePost(tmp, { tool_name: 'Bash', session_id: 'b9' }, st3, t0)), silent);
     fs.rmSync(st3, { recursive: true, force: true });
+    // Power Pages builds, in a folder of their own: found by website.yml; critique floor; review topics
+    const pg = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-gate-pages-'));
+    const pput = (rel, text = 'x') => put(rel, text, pg);
+    pput('.work/rt/x/website.yml', 'adx_name: scratch');
+    check('pages: website.yml only in a dot folder is not a build', evaluate(pg, {}, env), silent);
+    pput('site/portal---p/website.yml', 'adx_name: Portal');
+    check('pages: a bare site asks for design, critique and review', evaluate(pg, {}, env), blocks('DESIGN.md is missing', 'design-critique.md is missing', 'docs/review.md is missing'));
+    pput('DESIGN.md', '# d'); pput('docs/design-critique.md', 'Score 25/40. home-1440.png home-390.png');
+    pput('docs/review/round-1.md', 'Tried impersonation on the profile page; Web API 404; refusals held.');
+    check('pages: critique under 30 and a review without scope block', evaluate(pg, {}, env), blocks('scores 25/40, under 30', 'table permission scope'));
+    pput('docs/design-critique.md', 'Score 25/40, then 32/40 after the fix batch. home-1440.png');
+    pput('docs/review/round-1.md', 'Identity: profile page edits refused. Table permission scope: Global read only with the Web API off. /_api 404. Refusals held.');
+    check('pages: last score 32 and a full review pass', evaluate(pg, {}, env), silent);
+    pput('docs/design-critique.md', 'Score 27/40. home-1440.png. Below 30 accepted: the owner chose the list layout.');
+    check('pages: under 30 with a stated reason passes', evaluate(pg, {}, env), silent);
+    check('critiqueState: no /40 number is not judged', critiqueState('score good. a.png'), silent);
+    check('pages: the post budget counts a site folder', isBuildFolder(pg), (g) => g === true);
+    fs.rmSync(pg, { recursive: true, force: true });
     // R3 seed state
     const sw = (rel, obj) => put('.ship-work/' + rel, JSON.stringify(obj));
     rm('.ship-work');
@@ -611,7 +680,7 @@ function selftest() {
   if (fails.length) { console.log('selftest FAILED:\n  ' + fails.join('\n  ')); process.exit(1); }
   console.log(`selftest ok: ${CASES} plugin-gate cases (Stop: unrelated silent, design missing, three blocks per session then a note, per-session count, ` +
     'no-id fallback, harness present, two opt-outs, designed, shipped without critique/review, complete, dod opt-in, background shell pending and done, unattended question, attended question, unattended hand-back, unattended flag, sidechain, run-check cap, run checks with harness, token to ' +
-    'lakehouse, token file over REST, non-token write, report-only; R3: silent, write without check, stale check, clean after write, drift, as a run check, seed found, no seed asks for test rows, no seed listed; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, design cap silent, design cap once, design note once only, design cap stops at the prototype, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
+    'lakehouse, token file over REST, non-token write, report-only; Pages: dot folder ignored, bare site, critique floor and review topics, full pass, stated reason, unjudged score, budget folder; R3: silent, write without check, stale check, clean after write, drift, as a run check, seed found, no seed asks for test rows, no seed listed; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, design cap silent, design cap once, design note once only, design cap stops at the prototype, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
     'App.pa.yaml, _EditorState, shell read, other tools, prototype missing, designed, deploy-tables with and without --plan, bare template, ' +
     'filled contract, dod plan, opt-out, unrelated write)');
   process.exit(0);

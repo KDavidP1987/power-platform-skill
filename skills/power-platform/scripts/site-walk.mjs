@@ -25,6 +25,12 @@
 //   node site-walk.mjs walk --scenario <file.json> [--out <dir>] [--json <file>] [--allow-writes]
 //                         [--token-cmd "<command>"] [--work-dir <dir>]
 //                         walk the scenario; table on stdout, full report with --json
+//   node site-walk.mjs ship --site <site folder> --scenario <file.json> [--model-version 2] [--no-clear]
+//                         [--allow-writes] [walk flags]
+//                         one call for the loop a site build repeats: audit-pages-permissions.py on the
+//                         folder (summary line), pac pages upload, Clear config and Clear cache at
+//                         /_services/about in the signed-in profile, then the walk. Measured builds made
+//                         220 to 295 tool calls, most of them this loop one step at a time.
 //   node site-walk.mjs --selftest [--logic-only]
 //                         prove every finding fires on known-bad fixtures and the good ones pass
 //
@@ -49,14 +55,14 @@
 //   pages          [{path, name?, expectText?: [..], expectSelector?: [..], expectNoText?: [..],
 //                   screenshotSelector?, expectWithin?}]
 //                  visited at every width; a screenshot named <name>-<width>.png when name is set
-//   steps          [{goto}|{fill, value}|{click}|{select, value}|{press, selector?}|{expectText}|
+//   steps          [{goto}|{fill, value}|{click}|{pressTwice}|{select, value}|{press, selector?}|{expectText}|
 //                   {expectNoText}|{expectUrl}|{wait}|{screenshot}|{capture}]  performed once, at the
 //                  first width. Any step may also carry "capture" (taken after the step).
-//   api            [{name?, method?, path, body?, expectStatus?, expectNoRows?, capture?}]  sent from
+//   api            [{name?, method?, path, body?, expectStatus?, expectNoRows?, capture?, repeat?}]  sent from
 //                  inside the signed-in page with fetch, carrying the site's anti-forgery token from
 //                  /_layout/tokenhtml. expectStatus: a number, a list, or "2xx" / "4xx".
 //   confirm        [{table, filter, expect?: {column: value}, count?, absent?, changedDuringRun?,
-//                   within?}]  read back over the Dataverse Web API after the steps and probes. table
+//                   within?, filled?: [columns]}]  read back over the Dataverse Web API after the steps and probes. table
 //                  is the entity set (entitySet is accepted too). A value matches the raw value or its
 //                  formatted label. changedDuringRun (default: true when the scenario writes) needs
 //                  every matched row's modifiedon after the walk started, so a row from an earlier
@@ -70,6 +76,10 @@
 //   JSON response, e.g. "value.0.id") and any later string may use {{key}}. Built in: {{runId}} (one
 //   value per walk, so test rows are unique) and {{today}}, {{today+N}}, {{today-N}} (YYYY-MM-DD).
 //   An unknown {{name}} fails the step that uses it.
+//
+// Double writes: {"pressTwice": "<selector>"} clicks a button twice in the same moment (a person's
+//   double press); an api probe with "repeat": N sends N identical requests at once (a retry loop). Follow
+//   either with a confirm "count": 1, and expectNoText for any error the second press may show.
 //
 // Eventual consistency: "expectWithin": <seconds> on an expectText / expectNoText step or a page
 //   keeps reloading (every "every" seconds, default 10) until the expectation holds. The report
@@ -91,6 +101,12 @@
 //   SW-STALE          an expectWithin expectation still failed when its time ran out
 //   SW-OVERFLOW       text spills out of its box, past the viewport or into the next element
 //   SW-COVERED        a fixed or sticky bar covers a control when it is scrolled into view
+//   SW-NAV-CURRENT    the menu marks a page other than the one shown as current (aria-current or an
+//                     active/current class on a header or nav link)
+//   SW-FOCUS          a control has no focus indicator of 2 px or more at 3:1 against what is behind
+//                     it (outline, box-shadow or a thicker border); a 1 px colour change is not enough
+//                     ("uiChecks": false turns the last two off; "navSelector" overrides the menu links)
+//   SW-FILLED         confirm: a column listed in "filled" is empty on a row the run wrote
 //                     (both run on every page at every width; "layoutChecks": false turns them off,
 //                     "layoutIgnore": [selectors] skips a subtree meant to bleed)
 //
@@ -137,7 +153,7 @@ export function validateScenario(s) {
     if (typeof a.path !== 'string' || !a.path.startsWith('/')) errs.push(`api[${i}].path must start with /`);
     if (a.expectStatus === undefined && !a.expectNoRows) errs.push(`api[${i}] needs expectStatus or expectNoRows (a probe with no expectation proves nothing)`);
   }
-  const verbs = ['goto', 'fill', 'click', 'select', 'press', 'expectText', 'expectNoText', 'expectUrl', 'wait', 'screenshot', 'capture'];
+  const verbs = ['goto', 'fill', 'click', 'pressTwice', 'select', 'press', 'expectText', 'expectNoText', 'expectUrl', 'wait', 'screenshot', 'capture'];
   for (const [i, st] of (s.steps || []).entries()) {
     if (!verbs.some((v) => v in st)) errs.push(`steps[${i}] has none of ${verbs.join(', ')}`);
     if (st.expectWithin !== undefined && !(Number(st.expectWithin) > 0)) errs.push(`steps[${i}].expectWithin must be a number of seconds`);
@@ -149,7 +165,8 @@ export function validateScenario(s) {
   for (const [i, c] of (s.confirm || []).entries()) {
     if (!(c.table || c.entitySet)) errs.push(`confirm[${i}] needs "table" (the entity set, e.g. app_comments)`);
     if (typeof c.filter !== 'string' || !c.filter.trim()) errs.push(`confirm[${i}] needs a "filter" (OData), so it reads only this run's rows`);
-    if (!c.absent && !c.expect && c.count === undefined) errs.push(`confirm[${i}] asserts nothing: give "expect", "count" or "absent"`);
+    if (c.filled && (!Array.isArray(c.filled) || !c.filled.every((x) => typeof x === 'string'))) errs.push(`confirm[${i}].filled must be a list of column names`);
+    if (!c.absent && !c.expect && c.count === undefined && !c.filled) errs.push(`confirm[${i}] asserts nothing: give "expect", "count" or "absent"`);
   }
   if ((s.confirm || []).length && !/^https?:\/\//.test(s.orgUrl || '')) errs.push('confirm needs "orgUrl" (the Dataverse org, e.g. https://<org>.crm.dynamics.com)');
   // As in canvas-browser walk: a screen that says "Saved" proves nothing about the row.
@@ -218,6 +235,10 @@ export function judgeRows(rows, c, runStartMs, writes) {
         || (label !== undefined && String(label) === String(want));
       if (!same) why.push(`row ${k + 1}: ${col} is ${JSON.stringify(got)}${label !== undefined ? ' ("' + label + '")' : ''}, expected ${JSON.stringify(want)}`);
     }
+    for (const col of c.filled || []) {
+      const v = r[col];
+      if (v === null || v === undefined || (typeof v === 'string' && !v.trim())) why.push(`row ${k + 1}: ${col} is empty (SW-FILLED: the site must set it)`);
+    }
     if (fresh && runStartMs) {
       const m = Date.parse(r.modifiedon || r.createdon || '');
       if (!m) why.push(`row ${k + 1}: no modifiedon returned, so this run's write cannot be told from an old row`);
@@ -228,7 +249,7 @@ export function judgeRows(rows, c, runStartMs, writes) {
 }
 
 export function confirmUrl(orgUrl, c) {
-  const cols = new Set([...Object.keys(c.expect || {}), 'modifiedon', 'createdon'].map((x) => x.trim()).filter(Boolean));
+  const cols = new Set([...Object.keys(c.expect || {}), ...(c.filled || []), 'modifiedon', 'createdon'].map((x) => x.trim()).filter(Boolean));
   return String(orgUrl).replace(/\/+$/, '') + '/api/data/v9.2/' + (c.table || c.entitySet) + '?$filter=' + encodeURIComponent(c.filter) + '&$select=' + [...cols].join(',') + '&$top=50';
 }
 
@@ -426,6 +447,87 @@ async function layoutCheck(page, ignore = []) {
   return found;
 }
 
+// Contrast of two CSS colours (rgb()/rgba(), alpha blended on the background).
+export function contrast(fg, bg) {
+  const parse = (c) => { const m = /rgba?\(([^)]+)\)/.exec(c || ''); if (!m) return null; const v = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return { r: v[0], g: v[1], b: v[2], a: v.length > 3 ? v[3] : 1 }; };
+  const b = parse(bg) || { r: 255, g: 255, b: 255, a: 1 }, f = parse(fg);
+  if (!f) return 1;
+  const mix = (x, y) => x * f.a + y * (1 - f.a);
+  const lum = (r, g, bl) => { const ch = [r, g, bl].map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]; };
+  const L1 = lum(mix(f.r, b.r), mix(f.g, b.g), mix(f.b, b.b)), L2 = lum(b.r, b.g, b.b);
+  return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+}
+
+// Is the current-page marker on the right menu link? marked: hrefs of links carrying aria-current or an
+// active/current class; links: every menu href; here: the page's path. Pure, for the selftest.
+export function navVerdict(here, links, marked) {
+  if (!marked.length) return null;   // no marker in use: nothing to judge
+  const norm = (p) => { const x = (p || '/').split(/[?#]/)[0]; return x.length > 1 ? x.replace(/\/+$/, '') : '/'; };
+  const h = norm(here);
+  const matches = (l) => { const q = norm(l); return q === h || (q !== '/' && h.startsWith(q + '/')); };
+  const wrong = marked.filter((m) => !matches(m));
+  if (wrong.length) return { code: 'SW-NAV-CURRENT', msg: `the menu marks ${wrong.map(norm).join(', ')} as current on ${h}` };
+  const exact = links.find((l) => norm(l) === h);
+  if (exact && !marked.some((m) => norm(m) === h)) return { code: 'SW-NAV-CURRENT', msg: `${h} is in the menu but not marked as current` };
+  return null;
+}
+
+// Across pages: once any page marks its menu link as current, every page that is itself in the menu
+// must be marked too. seen: [{here, links, marked}]. Pure, for the selftest.
+export function navConsistency(seen) {
+  if (!seen.some((n) => n.marked.length)) return [];
+  const norm = (p) => { const x = (p || '/').split(/[?#]/)[0]; return x.length > 1 ? x.replace(/\/+$/, '') : '/'; };
+  const bad = [...new Set(seen.filter((n) => !n.marked.length && n.links.some((l) => norm(l) === norm(n.here))).map((n) => norm(n.here)))];
+  return bad.length ? [{ code: 'SW-NAV-CURRENT', msg: `other pages mark their menu link as current, but ${bad.join(', ')} ${bad.length > 1 ? 'are' : 'is'} not marked` }] : [];
+}
+
+// SW-NAV-CURRENT and SW-FOCUS on the page as shown. A measured site's cached header marked the wrong page
+// on every desktop page; another's text fields showed focus only as a pale 1.2:1 halo.
+async function uiCheck(page, navSelector, seen = null) {
+  const out = [];
+  const nav = await page.evaluate((sel) => {
+    const links = [...document.querySelectorAll(sel || 'header nav a[href], nav a[href], header a[href]')].filter((a) => a.getClientRects().length);
+    const on = (a) => a.getAttribute('aria-current') === 'page' || [a, a.parentElement].some((e) => e && /(^|\s)(active|current|is-active|is-current|selected)(\s|$)/i.test(e.className || ''));
+    const path = (a) => { try { const u = new URL(a.href, location.href); return u.origin === location.origin ? u.pathname : null; } catch { return null; } };
+    const own = links.filter((a) => path(a));
+    return { here: location.pathname, links: own.map(path), marked: own.filter(on).map(path) };
+  }, navSelector).catch(() => null);
+  if (nav) { const v = navVerdict(nav.here, nav.links, [...new Set(nav.marked)]); if (v) out.push(v); if (seen) seen.push(nav); }
+  await page.keyboard.press('Shift').catch(() => {});   // keyboard modality, so :focus-visible applies
+  const weak = await page.evaluate(async () => {
+    const bgOf = (el) => { for (let a = el.parentElement; a; a = a.parentElement) { const c = getComputedStyle(a).backgroundColor; if (c && !/rgba\([^)]*,\s*0\)|transparent/.test(c)) return c; } return 'rgb(255, 255, 255)'; };
+    const px = (v) => parseFloat(v) || 0;
+    const shadows = (v) => (v && v !== 'none' ? v.split(/,(?![^(]*\))/).map((x) => { const color = (/rgba?\([^)]+\)/.exec(x) || [''])[0]; const n = x.replace(color, '').trim().split(/\s+/).map(px); return { color, blur: n[2] || 0, spread: n[3] || 0, inset: /inset/.test(x) }; }) : []);
+    const seen = new Set(), res = [];
+    const els = [...document.querySelectorAll('input:not([type=hidden]):not([type=radio]):not([type=checkbox]), textarea, select, button, a[href]')].filter((e) => e.getClientRects().length && !e.disabled);
+    for (const el of els) {
+      const kind = el.tagName.toLowerCase() + (el.type && el.tagName === 'INPUT' ? '[' + el.type + ']' : '');
+      if (seen.has(kind)) continue;
+      seen.add(kind);
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      const before = getComputedStyle(el);
+      const b0 = { bw: px(before.borderTopWidth), bc: before.borderTopColor, sh: before.boxShadow };
+      el.focus({ preventScroll: true });
+      await new Promise((ok) => setTimeout(ok, 450));   // a focus ring that fades in is read at its end state
+      const cs = getComputedStyle(el), bg = bgOf(el);
+      const cands = [];
+      if (cs.outlineStyle === 'auto') cands.push({ how: 'the browser focus ring', color: 'auto' });   // the default ring is drawn to be visible
+      else if (cs.outlineStyle !== 'none' && px(cs.outlineWidth) >= 2) cands.push({ how: `outline ${cs.outlineWidth}`, color: cs.outlineColor });
+      if (cs.boxShadow !== b0.sh) for (const sh of shadows(cs.boxShadow)) if (sh.spread >= 2 || sh.blur >= 4) cands.push({ how: `box-shadow ${sh.spread || sh.blur}px`, color: sh.color });
+      if (px(cs.borderTopWidth) >= 2 && cs.borderTopColor !== b0.bc) cands.push({ how: `border ${cs.borderTopWidth}`, color: cs.borderTopColor });
+      res.push({ kind, said: (el.innerText || el.getAttribute('aria-label') || el.name || el.id || '').trim().slice(0, 30), bg, cands });
+      el.blur();
+    }
+    return res;
+  }).catch(() => []);
+  for (const w of weak) {
+    const best = w.cands.map((c) => ({ ...c, ratio: c.color === 'auto' ? 21 : contrast(c.color, w.bg) })).sort((a, b) => b.ratio - a.ratio)[0];
+    if (!best) out.push({ code: 'SW-FOCUS', msg: `${w.kind} "${w.said}": no focus indicator of 2 px or more (a 1 px colour change does not count)` });
+    else if (best.ratio < 3) out.push({ code: 'SW-FOCUS', msg: `${w.kind} "${w.said}": focus ${best.how} at ${best.ratio.toFixed(1)}:1 against its background (needs 3:1)` });
+  }
+  return out;
+}
+
 async function shot(page, out, name, width, selector) {
   if (!out || !name) return;
   mkdirSync(out, { recursive: true });
@@ -446,6 +548,7 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
   const widths = s.widths?.length ? s.widths : [1440, 390];
   const vars = { runId: s.runId || new Date(runStart).toISOString().replace(/[-:TZ.]/g, '').slice(0, 14) };
   const timings = [];
+  const navSeen = [];
   let examined = 0;
   const page = ctx.pages()[0] || await ctx.newPage();
 
@@ -512,6 +615,11 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
         if (!found.length) add(label + ': spill and cover', width, null);
         for (const lf of found) add(label + ': ' + (lf.code === 'SW-COVERED' ? 'cover' : 'spill'), width, lf);
       }
+      if (s.uiChecks !== false) {
+        const found = await uiCheck(page, s.navSelector || null, navSeen);
+        if (!found.length) add(label + ': menu marker and focus', width, null);
+        for (const uf of found) add(label + ': ' + (uf.code === 'SW-NAV-CURRENT' ? 'menu marker' : 'focus'), width, uf);
+      }
       await shot(page, out, p.name, width, p.screenshotSelector);
     }
     if (wi === 0) {
@@ -526,6 +634,12 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
           if ('goto' in st) { if (!(await visit(st.goto, label, width))) continue; f = await scrollCheck(page); }
           else if ('fill' in st) await page.locator(st.fill).first().fill(String(st.value ?? ''), { timeout: to });
           else if ('select' in st) await page.locator(st.select).first().selectOption(String(st.value), { timeout: to });
+          else if ('pressTwice' in st) {
+            await page.locator(st.pressTwice).first().waitFor({ timeout: to });
+            await page.evaluate((sel) => { const b = document.querySelector(sel); b.click(); b.click(); }, st.pressTwice);
+            await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+            await page.waitForTimeout(1500);
+          }
           else if ('click' in st) { await page.locator(st.click).first().click({ timeout: to }); await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); }
           else if ('press' in st) { if (st.selector) await page.locator(st.selector).first().press(st.press); else await page.keyboard.press(st.press); await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); }
           else if ('wait' in st) await page.waitForTimeout(Number(st.wait));
@@ -560,6 +674,10 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
     }
   }
 
+  // A menu that marks the current page on some pages and not on others (a cached header) is wrong
+  // on the unmarked ones.
+  for (const v of navConsistency(navSeen)) add('menu marker across pages', null, v);
+
   if ((s.api || []).length) {
     const from = s.apiFrom || s.pages?.[0]?.path || '/';
     await visit(subst(from, vars), 'api: open ' + from, widths[0]);
@@ -567,16 +685,18 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
       const label = 'api ' + (rawProbe.name || `${rawProbe.method || 'GET'} ${rawProbe.path}`);
       let a;
       try { a = subst(rawProbe, vars); } catch (e) { add(label, null, { code: 'SW-STEP', msg: e.message }); continue; }
-      const r = await page.evaluate(async ({ path, method, body }) => {
+      const n = Math.max(1, Math.min(10, Number(a.repeat) || 1));
+      const all = await page.evaluate(async ({ path, method, body, n }) => {
         let token = '';
         try { const t = await (await fetch('/_layout/tokenhtml', { credentials: 'include' })).text(); token = (t.match(/value="([^"]+)"/) || [])[1] || ''; } catch { /* no token endpoint */ }
         const headers = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', __RequestVerificationToken: token };
         if (body !== undefined) headers['Content-Type'] = 'application/json';
-        const res = await fetch(path, { method, headers, credentials: 'include', body: body === undefined ? undefined : JSON.stringify(body) });
-        return { status: res.status, text: (await res.text()).slice(0, 20000), token: !!token };
-      }, { path: a.path, method: (a.method || 'GET').toUpperCase(), body: a.body }).catch((e) => ({ status: 0, text: '', err: e.message }));
+        const one = async () => { const res = await fetch(path, { method, headers, credentials: 'include', body: body === undefined ? undefined : JSON.stringify(body) }); return { status: res.status, text: (await res.text()).slice(0, 20000), token: !!token }; };
+        return Promise.all(Array.from({ length: n }, one));   // repeat: the same request n times at once
+      }, { path: a.path, method: (a.method || 'GET').toUpperCase(), body: a.body, n }).catch((e) => [{ status: 0, text: '', err: e.message }]);
+      const r = all[0];
       examined++;
-      let f = r.err ? { code: 'SW-STEP', msg: r.err.split('\n')[0] } : apiVerdict(a, r.status, r.text), note = '';
+      let f = r.err ? { code: 'SW-STEP', msg: r.err.split('\n')[0] } : apiVerdict(a, r.status, r.text), note = n > 1 ? `${n} at once: ${all.map((x) => x.status).join(', ')}` : '';
       if (!f && a.capture) {
         try { note = `${a.capture.name} = ${(await capture(a.capture, r.text)).slice(0, 40)}`; }
         catch (e) { f = { code: 'SW-STEP', msg: e.message }; }
@@ -613,7 +733,7 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
         timings.push({ step: label, width: null, seconds: secs, ok: !why.length });
         if (!why.length) note = `after ${secs} s`;
       }
-      add(label, null, why.length ? { code: 'SW-CONFIRM', msg: why.join('; ').slice(0, 300) } : null, note);
+      add(label, null, why.length ? { code: why.every((w) => /SW-FILLED/.test(w)) ? 'SW-FILLED' : 'SW-CONFIRM', msg: why.join('; ').slice(0, 300) } : null, note);
     }
   }
 
@@ -701,6 +821,52 @@ async function cmdSignin() {
   log('Signed in; profile saved at ' + PROFILE + '. Walks reuse it headless.');
 }
 
+// ship: audit, upload, clear the site cache, walk - one command, one report.
+export function shipPlan(site, modelVersion = '2', clear = true) {
+  return [
+    { step: 'audit', cmd: `python "${join(dirname(fileURLToPath(import.meta.url)), 'audit-pages-permissions.py')}" "${site}"`, fatal: false },
+    { step: 'upload', cmd: `pac pages upload --path "${site}" --modelVersion ${modelVersion}`, fatal: true },
+    ...(clear ? [{ step: 'clear', cmd: null, fatal: false }] : []),
+    { step: 'walk', cmd: null, fatal: true },
+  ];
+}
+async function cmdShip() {
+  const site = flag('site'), file = flag('scenario');
+  if (!site || site === true || !existsSync(String(site))) { console.error('ship: --site <folder from pac pages download> is required'); process.exit(2); }
+  if (!file || file === true || !existsSync(String(file))) { console.error('ship: --scenario <file.json> is required'); process.exit(2); }
+  const s = JSON.parse(readFileSync(String(file), 'utf8'));
+  for (const st of shipPlan(String(site), String(flag('model-version', '2')), !has('no-clear'))) {
+    if (st.step === 'audit' || st.step === 'upload') {
+      let out = '', ok = true;
+      try { out = execSync(st.cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 }); }
+      catch (e) { ok = false; out = String(e.stdout || '') + String(e.stderr || ''); }
+      const lines = out.split(/\r?\n/).filter((l) => l.trim());
+      if (st.step === 'audit') {
+        const serious = lines.filter((l) => /^\s*(CRITICAL|WARNING)\b/.test(l));
+        log(`ship audit: ${serious.length ? serious.length + ' critical/warning finding(s) - resolve or list each in the hand-back' : 'no critical or warning finding'}`);
+        serious.slice(0, 12).forEach((l) => log('  ' + l.trim().slice(0, 200)));
+      } else {
+        log(`ship upload: ${ok ? 'done' : 'FAILED'}`);
+        if (!ok) { lines.slice(-12).forEach((l) => log('  ' + l)); process.exit(2); }
+      }
+    } else if (st.step === 'clear') {
+      const chromium = await loadPlaywright(); if (!chromium) noBrowser('ship');
+      const ctx = await persistent(chromium, true);
+      const page = ctx.pages()[0] || await ctx.newPage();
+      const done = [];
+      await page.goto(abs(s.baseUrl, '/_services/about'), { waitUntil: 'load', timeout: 45000 }).catch(() => {});
+      for (const name of [/clear config/i, /clear cache/i]) {
+        const b = page.getByRole('button', { name });
+        if (await b.count().catch(() => 0)) { await b.first().click().catch(() => {}); await page.waitForTimeout(3000); done.push(String(name).replace(/[/i]/g, '')); }
+      }
+      await ctx.close();
+      log(done.length ? `ship clear: ${done.join(' and ')} pressed at /_services/about` : 'ship clear: no Clear buttons at /_services/about (the signed-in contact needs a web role with all website access); permission and setting changes may take minutes to apply');
+    } else {
+      await cmdWalk();   // exits with the walk's code
+    }
+  }
+}
+
 async function cmdWalk() {
   const file = flag('scenario') || argv[1];
   if (!file || file === true || !existsSync(String(file))) { console.error('walk: --scenario <file.json> is required'); process.exit(2); }
@@ -769,6 +935,16 @@ function fixtureServer() {
     const form = (pad) => `<style>html{scroll-padding-bottom:${pad}px}.r input{position:absolute;width:1px;height:1px;opacity:0}</style><form>${Array.from({ length: 30 }, (_, i) => `<p class="r"><input type="radio" name="k" id="r${i}"><label for="r${i}">Option ${i}</label></p>`).join('')}</form><div style="position:fixed;bottom:0;left:0;right:0;height:80px;background:#0066B3"><button type="button">Send</button></div><div style="height:90px"></div>`;
     if (p === '/covered') return send(200, 'text/html', html('covered', form(0)));
     if (p === '/covered-ok') return send(200, 'text/html', html('covered ok', form(96)));
+    const menu = (cur) => `<header><nav><a href="/navok"${cur === 'ok' ? ' aria-current="page"' : ''}>Shared</a> <a href="/navwrong"${cur === 'wrong' ? ' aria-current="page"' : ''}>Mine</a> <a href="/navnone">None</a></nav></header>`;
+    if (p === '/navok') return send(200, 'text/html', html('nav ok', menu('ok') + '<h1>Shared</h1>'));
+    if (p === '/navnone') return send(200, 'text/html', html('nav none', menu('none') + '<h1>None</h1>'));
+    if (p === '/navwrong') return send(200, 'text/html', html('nav wrong', menu('ok') + '<h1>Mine</h1>'));
+    const field = (css) => `<style>input{border:1px solid #8a8a8a}input:focus{outline:none;${css}}</style><label>Name <input id="n"></label>`;
+    if (p === '/focusweak') return send(200, 'text/html', html('focus weak', field('box-shadow:0 0 0 3px #E1EFFA;border-color:#0066B3')));
+    if (p === '/focusok') return send(200, 'text/html', html('focus ok', field('outline:2px solid #0066B3;outline-offset:2px')));
+    const twice = (guard) => `<input id="c" value="hello"><button id="go" type="button" onclick="${guard ? "if(this.dataset.busy)return;this.dataset.busy=1;" : ''}fetch('/post-comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:document.getElementById('c').value})})">Post</button>`;
+    if (p === '/twice') return send(200, 'text/html', html('twice', twice(false)));
+    if (p === '/once') return send(200, 'text/html', html('once', twice(true)));
     if (p === '/SignIn') return send(200, 'text/html', html('sign in', '<p>Please sign in</p>'));
     if (p === '/secret') return signedIn(req) ? send(200, 'text/html', html('secret', '<p>SECRET-ITEM</p>')) : send(302, 'text/plain', '', { Location: '/SignIn' });
     if (p === '/leaky') return send(200, 'text/html', html('leaky', '<p>SECRET-ITEM</p>'));
@@ -850,6 +1026,26 @@ async function selftest() {
   const logged = JSON.parse(readFileSync(join(wd, '.ship-work', 'writes.json'), 'utf8'));
   check('writes.json appended in the shape the seed gate reads', logged.length === 2 && logged[1].scenario === 'two' && !!Date.parse(logged[1].at));
   rmSync(wd, { recursive: true, force: true });
+
+  // Menu marker and focus contrast, pure.
+  check('nav: right page marked passes', navVerdict('/my-requests/', ['/', '/shared/', '/my-requests/'], ['/my-requests/']) === null);
+  check('nav: wrong page marked -> SW-NAV-CURRENT', navVerdict('/shared/', ['/shared/', '/my-requests/'], ['/my-requests/'])?.code === 'SW-NAV-CURRENT');
+  check('nav: a detail page under a section may mark the section', navVerdict('/shared/item/', ['/shared/', '/my-requests/'], ['/shared/']) === null);
+  check('nav: page in the menu but unmarked while markers are used', /not marked/.test(navVerdict('/request/', ['/shared/', '/request/'], ['/shared/x'])?.msg || '') || navVerdict('/request/', ['/shared/', '/request/'], ['/shared/'])?.code === 'SW-NAV-CURRENT');
+  check('nav: no marker anywhere is not judged', navVerdict('/x/', ['/a/'], []) === null);
+  check('nav across pages: marked on one, unmarked on another menu page', navConsistency([{ here: '/a/', links: ['/a/', '/b/'], marked: ['/a/'] }, { here: '/b/', links: ['/a/', '/b/'], marked: [] }]).length === 1);
+  check('nav across pages: never marked is not judged', navConsistency([{ here: '/a/', links: ['/a/'], marked: [] }]).length === 0);
+  check('nav across pages: a page outside the menu may be unmarked', navConsistency([{ here: '/a/', links: ['/a/'], marked: ['/a/'] }, { here: '/item/', links: ['/a/'], marked: [] }]).length === 0);
+  check('nav: home marked only on home', navVerdict('/', ['/', '/a/'], ['/']) === null && navVerdict('/a/', ['/', '/a/'], ['/'])?.code === 'SW-NAV-CURRENT');
+  const plan = shipPlan('site/portal', '2', true);
+  check('ship: audit, upload, clear, walk in that order', plan.map((x) => x.step).join() === 'audit,upload,clear,walk' && /pac pages upload --path "site\/portal" --modelVersion 2/.test(plan[1].cmd) && /audit-pages-permissions\.py" "site\/portal"/.test(plan[0].cmd));
+  check('ship: --no-clear skips the cache step', shipPlan('x', '2', false).every((x) => x.step !== 'clear'));
+  check('contrast: pale halo on white is about 1.2:1', Math.abs(contrast('rgb(225, 239, 250)', 'rgb(255, 255, 255)') - 1.2) < 0.1);
+  check('contrast: brand blue on white passes 3:1', contrast('rgb(0, 102, 179)', 'rgb(255, 255, 255)') > 3);
+  check('confirm: filled column empty -> SW-FILLED reason', judgeRows([{ app_source: null, modifiedon: '2026-10-05T12:01:00Z' }], { filled: ['app_source'], changedDuringRun: false }, start, false).some((w) => /SW-FILLED/.test(w)));
+  check('confirm: filled column set passes', judgeRows([{ app_source: 'Portal' }], { filled: ['app_source'], changedDuringRun: false }, start, false).length === 0);
+  check('confirm url selects filled columns', /\$select=app_source,modifiedon,createdon/.test(confirmUrl('https://o', { table: 't', filter: 'a eq 1', filled: ['app_source'] })));
+  check('confirm with only filled is accepted', validateScenario({ baseUrl: 'https://x', orgUrl: 'https://o', confirm: [{ table: 't', filter: 'a eq 1', filled: ['b'] }] }).length === 0);
 
   // The site's own consent: accepted only when it is the site app asking for sign-in and profile.
   const consent = (app, lines) => `Microsoft\nuser@example.com\nPermissions requested\n${app}\nunverified\nThis app would like to:\n${lines.join('\n')}\nAccept\nCancel`;
@@ -950,6 +1146,24 @@ async function selftest() {
   check('layoutChecks false turns both off', codes(await run({ baseUrl: base, widths: [390], layoutChecks: false, pages: [{ path: '/spill' }, { path: '/covered' }] })).size === 0);
   check('layoutIgnore skips a subtree', !codes(await run({ baseUrl: base, widths: [390], layoutIgnore: ['div'], pages: [{ path: '/spill' }] })).has('SW-OVERFLOW'));
 
+  // Menu marker, focus, double press, repeated request.
+  const one = async (path) => run({ baseUrl: base, widths: [1440], pages: [{ path }] });
+  check('menu marks the wrong page -> SW-NAV-CURRENT', codes(await one('/navwrong')).has('SW-NAV-CURRENT'));
+  check('menu marks the right page passes', !codes(await one('/navok')).has('SW-NAV-CURRENT'));
+  check('marker on one page, missing on another -> SW-NAV-CURRENT', codes(await run({ baseUrl: base, widths: [1440], pages: [{ path: '/navok' }, { path: '/navnone' }] })).has('SW-NAV-CURRENT'));
+  const fw = await one('/focusweak');
+  check('pale 3px halo -> SW-FOCUS', codes(fw).has('SW-FOCUS'));
+  if (!codes(fw).has('SW-FOCUS')) log(table(fw.rows));
+  check('2px brand outline passes', !codes(await one('/focusok')).has('SW-FOCUS'));
+  check('uiChecks false turns both off', codes(await run({ baseUrl: base, widths: [1440], uiChecks: false, pages: [{ path: '/navwrong' }, { path: '/focusweak' }] })).size === 0);
+  const tw = (path, tag) => writer({ steps: [{ goto: path }, { fill: '#c', value: tag }, { pressTwice: '#go' }], confirm: [{ table: 'app_comments', filter: `app_body eq '${tag}'`, count: 1 }] });
+  check('double press without a guard saves twice -> SW-CONFIRM', codes(await run(tw('/twice', 'T-{{runId}}-a'), dv)).has('SW-CONFIRM'));
+  const once = await run(tw('/once', 'T-{{runId}}-b'), dv);
+  check('double press with a guard saves once', codes(once).size === 0);
+  if (codes(once).size) log(table(once.rows.filter((r) => r.code)));
+  const rep3 = await run({ baseUrl: base, widths: [1440], apiFrom: '/ok', api: [{ name: 'repeat', path: '/_api/items(3)', expectStatus: 200, repeat: 3 }] });
+  check('repeat sends the request three times at once', rep3.rows.some((r) => /3 at once: 200, 200, 200/.test(r.note)));
+
   const empty = await run({ baseUrl: base });
   check('empty scenario: nothing examined (exit 2)', exitCode(empty) === 2);
 
@@ -964,4 +1178,5 @@ const HELP = readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').fi
 if (has('selftest')) await selftest();
 else if (cmd === 'signin') await cmdSignin();
 else if (cmd === 'walk') await cmdWalk();
+else if (cmd === 'ship') await cmdShip();
 else { log(HELP); process.exit(cmd && cmd !== '--help' && cmd !== '-h' ? 2 : 0); }
