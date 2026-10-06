@@ -136,7 +136,7 @@ def find_site_root(path):
 
 
 def load_site(root):
-    site = {"permissions": [], "roles": {}, "settings": {}, "code_files": []}
+    site = {"permissions": [], "roles": {}, "settings": {}, "code_files": [], "server_files": []}
     tp = os.path.join(root, "table-permissions")
     if os.path.isdir(tp):
         for fn in sorted(os.listdir(tp)):
@@ -159,6 +159,10 @@ def load_site(root):
             for fn in fns:
                 if fn.lower().endswith(CODE_EXT) and not fn.endswith(".min.js"):
                     site["code_files"].append(os.path.join(dp, fn))
+    for dp, _, fns in os.walk(os.path.join(root, "server-logic")):
+        for fn in fns:
+            if fn.lower().endswith(".js"):
+                site["server_files"].append(os.path.join(dp, fn))
     return site
 
 
@@ -186,6 +190,14 @@ KEY_RES = [
     re.compile(r"\[\s*[\"']([a-z][a-z0-9]*_[a-z0-9_]+)[\"']\s*\]\s*=(?!=)"),     # body['col'] = v
 ]
 SELECT_RE = re.compile(r"\$select=([A-Za-z0-9_,]+)")
+# Server logic reads and writes Dataverse on the server, under the visitor's table permissions, without
+# the Web API: it needs the privileges but no Webapi/<table>/enabled. The page reaches it through
+# /_api/serverlogics/<name>, which is the server logic endpoint, not a table.
+SERVER_RE = re.compile(r"Server\.Connector\.Dataverse\.(CreateRecord|UpdateRecord|DeleteRecord|RetrieveRecord|RetrieveMultipleRecords)"
+                       r"\(\s*[\"']([A-Za-z0-9_]+)[\"']")
+SERVER_METHOD = {"CreateRecord": "POST", "UpdateRecord": "PATCH", "DeleteRecord": "DELETE", "RetrieveRecord": "GET",
+                 "RetrieveMultipleRecords": "GET"}
+API_NOT_TABLES = {"serverlogics"}
 
 
 def scan_code(site, set_map):
@@ -193,7 +205,7 @@ def scan_code(site, set_map):
     use = {}
 
     def u(t):
-        return use.setdefault(t, {"liquid": set(), "methods": set(), "written": set(), "selected": set(),
+        return use.setdefault(t, {"liquid": set(), "methods": set(), "server": set(), "written": set(), "selected": set(),
                                   "bind_from": set(), "bind_to": set(), "files": set()})
 
     known = set(p.get("adx_entitylogicalname", "") for p in site["permissions"])
@@ -220,6 +232,8 @@ def scan_code(site, set_map):
         calls = list(API_RE.finditer(text))
         write_tables = []
         for m in calls:
+            if m.group(1).lower() in API_NOT_TABLES:
+                continue
             t = to_logical(m.group(1))
             window = text[max(0, m.start() - 400): m.end() + 400]
             meths = METHOD_RE.findall(window) or FETCH_METHOD_RE.findall(window)
@@ -243,6 +257,14 @@ def scan_code(site, set_map):
             cols = {c for c in cols if not c.startswith("odata")}
             for t in write_tables:
                 u(t)["written"].update(cols)
+    for path in site["server_files"]:
+        try:
+            text = open(path, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for op, es in SERVER_RE.findall(text):
+            t = to_logical(es)
+            u(t)["server"].add(SERVER_METHOD[op]); u(t)["files"].add(path)
     return use
 
 
@@ -296,13 +318,14 @@ def audit(root, set_map=None, sensitive=DEFAULT_SENSITIVE, live=None):
         uu = use.get(t)
         need = set()
         if uu:
-            if uu["liquid"] or "GET" in uu["methods"]:
+            meths = uu["methods"] | uu["server"]
+            if uu["liquid"] or "GET" in meths:
                 need.add("read")
-            if "POST" in uu["methods"]:
+            if "POST" in meths:
                 need.add("create")
-            if uu["methods"] & {"PATCH", "PUT"}:
+            if meths & {"PATCH", "PUT"}:
                 need.add("write")
-            if "DELETE" in uu["methods"]:
+            if "DELETE" in meths:
                 need.add("delete")
             if uu["bind_from"] or uu["bind_to"]:
                 need |= {"append", "appendto"}
@@ -314,7 +337,7 @@ def audit(root, set_map=None, sensitive=DEFAULT_SENSITIVE, live=None):
         for x in sorted((granted & {"append", "appendto"}) - need):
             f("info", "APPEND-UNUSED", "%s: %s granted but the code binds no lookup to or from %s" % (t, x, t))
         if not uu:
-            f("info", "PERM-NO-CODE", "%s: permission exists but no fetchxml or Web API call in the source uses %s (a form, list or lookup may)" % (t, t))
+            f("info", "PERM-NO-CODE", "%s: permission exists but no fetchxml, Web API or server logic call in the source uses %s (a form, list or lookup may)" % (t, t))
 
     for t, uu in sorted(use.items()):
         if t not in perms_by_table:
@@ -471,8 +494,8 @@ def report(root, site, use, findings, examined, as_json):
                   ",".join(x for x in PRIVS if truthy(p.get("adx_" + x))) or "-", rn))
         print("\nCode use")
         for t, u in sorted(use.items()):
-            print("  %-28s liquid:%d  api:%s  writes:%d  binds:%s" % (t, len(u["liquid"]), ",".join(sorted(u["methods"])) or "-",
-                  len(u["written"]), ",".join(sorted(u["bind_from"] | u["bind_to"])) or "-"))
+            print("  %-28s liquid:%d  api:%s  server:%s  writes:%d  binds:%s" % (t, len(u["liquid"]), ",".join(sorted(u["methods"])) or "-",
+                  ",".join(sorted(u["server"])) or "-", len(u["written"]), ",".join(sorted(u["bind_from"] | u["bind_to"])) or "-"))
         print("\nFindings")
         if not findings:
             print("  none")
@@ -617,6 +640,24 @@ def selftest():
         serious = [x for x in fg if x["severity"] in ("critical", "warning")]
         for x in serious:
             failures.append("fixed site: unexpected %s %s" % (x["code"], x["message"]))
+        # server logic: the /_api/serverlogics endpoint is not a table, and its Dataverse calls need
+        # privileges but no Web API setting
+        sl = os.path.join(tmp, "sl")
+        _site(sl, True)
+        _write(sl, "web-templates/lib/Lib.webtemplate.source.html",
+               "<script>fetch('/_api/serverlogics/orders', { method: 'POST', body: '{}' });</script>\n")
+        _write(sl, "server-logic/orders.js", 'function post() { return Server.Connector.Dataverse.RetrieveMultipleRecords("contacts", "$top=1"); }\n')
+        _, _, fs1, _ = audit(sl)
+        for x in fs1:
+            if x["severity"] in ("critical", "warning"):
+                failures.append("server logic site: unexpected %s %s" % (x["code"], x["message"]))
+        _write(sl, "server-logic/orders.js", 'function post() { return Server.Connector.Dataverse.CreateRecord("app_orderlines", {}); }\n')
+        _, _, fs2, _ = audit(sl)
+        c2 = {x["code"] for x in fs2}
+        if not any(x["code"] == "PRIV-MISSING" and "create on app_orderline" in x["message"] for x in fs2):
+            failures.append("server logic create without the privilege: expected PRIV-MISSING, got %s" % ", ".join(sorted(c2)))
+        if "WEBAPI-OFF" in c2:
+            failures.append("server logic create: WEBAPI-OFF raised, but server logic needs no Web API setting")
         _, _, fe, ne = audit(empty)
         if ne != 0:
             failures.append("empty folder: examined %d, expected 0" % ne)
@@ -628,6 +669,7 @@ def selftest():
         print("audit-pages-permissions selftest")
         print("  bad site:   %d finding(s): %s" % (len(fb), ", ".join(sorted(codes))))
         print("  fixed site: %d critical/warning" % len(serious))
+        print("  server logic: serverlogics endpoint ignored, server calls need privileges, no Web API setting")
         print("  empty:      examined %d" % ne)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

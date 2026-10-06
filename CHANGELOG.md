@@ -11,6 +11,17 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-10-06
+
+### Fixed
+
+- **`audit-pages-permissions.py` reads server logic.** A site that calls its server logic
+  (`/_api/serverlogics/<name>`) was reported as using a table named `serverlogic` with no permission
+  and the Web API off (two false CRITICALs), and the tables the server logic writes were reported as
+  "create granted but unused". The endpoint is no longer read as a table, and the
+  `Server.Connector.Dataverse` calls in `server-logic/*.js` now count as uses that need table privileges
+  but no `Webapi/<table>/enabled`. Self-test cases added for both.
+
 ## [0.25.0] - 2026-10-06
 
 An audit of every rule against the surface it serves. 0.24 added Power Pages rules to a gate that
