@@ -11,6 +11,14 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-10-05
+
+### Changed
+
+- **The site's own sign-in consent is an up-front decision** (`power-pages.md` section 17 and
+  `assets/templates/pages-decisions.md`), so an unattended build has the say-so that
+  `site-walk.mjs signin --accept-site-consent` needs before it reaches the consent page.
+
 ## [0.23.0] - 2026-10-05
 
 The second measured Power Pages build (0.22) matched the first: 30 of 30 blind checks, design 23 of
