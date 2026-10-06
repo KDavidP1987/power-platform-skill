@@ -14,12 +14,20 @@
 //      holds fewer than three screens), so maintenance of an established app is never held up;
 //   B. no table deploy (deploy-tables.py without --plan) until the plan exists: a DOD plan in docs/dod/
 //      when dod is installed, otherwise docs/acceptance-contract.md filled in (not the bare template).
+//   C. no `pac solution import` while the folder holds flows and no clean lint-flows.mjs run over all
+//      of them, newer than the newest flow, is recorded in .ship-work/flow-lint.json (non-negotiable 8;
+//      deploy-flows.py lints itself, a plain import did not).
 // The Stop gate blocks up to three times per session (counted per session_id in the temp folder), so
 // one listed summary does not end the build; after that it lets the stop through and writes the gaps
 // to stderr, so it can never trap a session.
 //
-// It does nothing (exit 0, no output) unless the folder is a Power Platform build: canvas source
-// (canvas/<app>/Src, or "canvasSrc" in scripts/canvas-app.json) or a Power BI report under fabric/.
+// Scope (references/rules-and-scope.md has the full matrix): every message starts with the surfaces it
+// applies to - [Canvas], [Power Pages], [Power BI], [Dataverse], [Power Automate], [Fabric] - and each
+// rule is silent outside them. The project harness's audit-stop.mjs calls evaluate() itself, so a
+// harnessed project gets exactly these rules once (this Stop hook stands aside there).
+// The build gate does nothing (exit 0, no output) unless the folder builds a designed surface (canvas
+// source, a Power Pages site folder, a Power BI report under fabric/) or has a fabric/ folder (the
+// token rule only). A Dataverse-only or model-driven solution gets no build gate.
 // It never loops (stop_hook_active), stands aside when the project harness's own audit-stop hook is
 // installed, and can be turned off with "pluginGate": false in .claude/hooks/standards.config.json or
 // scripts/canvas-app.json. Otherwise it blocks the stop once, with every missing step in one reason:
@@ -36,7 +44,9 @@
 // at the stop (a measured build spent four times the cost of the one before it on an open-ended
 // DOD plan, so DOD is opt-in since 0.20).
 //
-// Two run checks apply to every project, harness or not, read from the session transcript:
+// Three run checks apply in any Power Platform project (any surface above, a solution or table
+// definitions, flows, .ship-work or canvas-app.json), harness or not, read from the session transcript.
+// They are silent in every other folder, so the plugin changes nothing in unrelated projects:
 //   R1. background shell work still running (a command started with run_in_background whose
 //       completion has not arrived): a headless run ends with the turn and kills it; a measured build
 //       lost two legs this way. Wait for it, then end the turn.
@@ -95,17 +105,70 @@ export function pagesSites(root, depth = 0) {
   return entries.filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
     .flatMap((e) => pagesSites(path.join(root, e.name), depth + 1));
 }
+// What a folder builds. Every rule below names the surfaces it applies to (references/rules-and-scope.md)
+// and stays silent elsewhere. canvas: canvas source; pages: a site folder; bi: a Power BI report under
+// fabric/; fabric: a fabric/ folder at all (notebooks, pipelines); dataverse: table definitions or an
+// unpacked solution; flows: flow definitions.
+export function flowFiles(root) {
+  const out = [];
+  (function walk(dir, depth) {
+    if (depth > 6 || out.length > 500) return;
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { if (!e.name.startsWith('.') && e.name !== 'node_modules') walk(full, depth + 1); continue; }
+      const rel = path.relative(root, full).replace(/\\/g, '/');
+      if (/\.json$/i.test(e.name) && (/^flows\//i.test(rel) || /\/workflows\//i.test('/' + rel))) out.push(full);
+    }
+  })(root, 0);
+  return out;
+}
+export function surfaces(root) {
+  const cfg = loadConfig(root);
+  const app = appConfig(root);
+  return {
+    canvas: canvasSrcDirs(root, cfg.canvasSrcGlob || 'canvas').length > 0 || !!(app.canvasSrc && fs.existsSync(path.join(root, app.canvasSrc))),
+    pages: pagesSites(root).length > 0,
+    bi: hasReport(path.join(root, 'fabric')),
+    fabric: fs.existsSync(path.join(root, 'fabric')),
+    dataverse: exists(root, 'solution/src', 'scripts/dataverse', 'dataverse', 'tables.json', 'scripts/tables.json'),
+    flows: flowFiles(root).length > 0,
+  };
+}
+// A Power Platform project at all: any surface, the skill's work folder, or its app config. The run
+// checks (R1, R2) apply only here, so the plugin changes nothing in unrelated projects.
+export function ppProject(root) {
+  const s = surfaces(root);
+  return Object.values(s).some(Boolean) || exists(root, '.ship-work', 'scripts/canvas-app.json', 'canvas-app.json');
+}
+// A clean lint-flows.mjs run over every flow, newer than the newest flow file (lint-flows writes
+// .ship-work/flow-lint.json). null when proven, else what is missing.
+export function flowLintState(root) {
+  const files = flowFiles(root);
+  if (!files.length) return null;
+  const rec = readJson(path.join(root, appConfig(root).workDir || '.ship-work', 'flow-lint.json'));
+  if (!rec) return 'no lint-flows.mjs run is recorded';
+  if (rec.clean !== true) return `the last lint-flows.mjs run (${rec.at}) found errors`;
+  if ((rec.count || 0) < files.length) return `the last lint-flows.mjs run covered ${rec.count || 0} of ${files.length} flows`;
+  const newest = Math.max(...files.map((f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } }));
+  if (Date.parse(rec.at) + 2000 < newest) return `a flow changed after the last lint-flows.mjs run (${rec.at})`;
+  return null;
+}
+
 // The design critique must reach the score the measured builds were judged by (impeccable's Nielsen
 // total, /40). Three measured site builds scored 30, 29 and 25 while all passing every functional
 // check; the difference was polish a fix batch could have closed. A lower score passes only with a
 // stated reason ("Below 30 accepted: ...").
 export const CRITIQUE_FLOOR = 30;
-export function critiqueState(text) {
+// floor: the minimum /40 score, or null for no floor. Applied to Power Pages only: the evidence is three
+// measured site builds; no canvas or report build has been measured against it yet.
+export function critiqueState(text, floor = CRITIQUE_FLOOR) {
   if (!(/\.png\b/i.test(text) && /score/i.test(text))) return text ? 'does not name the screenshots (.png) and a score' : 'is missing';
   const scores = [...text.matchAll(/\b(\d{1,2})\s*\/\s*40\b/g)].map((m) => Number(m[1]));
-  if (!scores.length) return null;
+  if (!scores.length || floor === null) return null;
   const last = scores[scores.length - 1];
-  if (last < CRITIQUE_FLOOR && !/below 30 accepted\s*:/i.test(text)) return `scores ${last}/40, under ${CRITIQUE_FLOOR}`;
+  if (last < floor && !/below 30 accepted\s*:/i.test(text)) return `scores ${last}/40, under ${floor}`;
   return null;
 }
 // What the independent review of a Power Pages site must cover (the measured gaps): who a person can
@@ -168,50 +231,54 @@ export function tokenWrites(root, limit = 5) {
 }
 
 // The whole decision, pure: returns null (stay silent) or the reason to block with.
-export function evaluate(root, input = {}, env = process.env) {
-  if (fs.existsSync(path.join(root, '.claude', 'hooks', 'audit-stop.mjs'))) return null;   // the harness gates this project
+// opts.harness: called by the project harness's audit-stop.mjs, which then owns the stop (the plugin's
+// own Stop hook stands aside in a harnessed project, so the two never block twice for one gap, and the
+// harness enforces exactly the same rules).
+export function evaluate(root, input = {}, env = process.env, opts = {}) {
+  if (!opts.harness && fs.existsSync(path.join(root, '.claude', 'hooks', 'audit-stop.mjs'))) return null;   // the harness gates this project
   const cfg = loadConfig(root);
   const app = appConfig(root);
   if (cfg.pluginGate === false || app.pluginGate === false) return null;
-  const hasCanvas = canvasSrcDirs(root, cfg.canvasSrcGlob || 'canvas').length > 0 || (app.canvasSrc && fs.existsSync(path.join(root, app.canvasSrc)));
-  const hasBi = hasReport(path.join(root, 'fabric'));
-  const hasPages = pagesSites(root).length > 0;
-  if (!hasCanvas && !hasBi && !hasPages) return null;
+  const sf = surfaces(root);
+  const hasCanvas = sf.canvas, hasBi = sf.bi, hasPages = sf.pages;
+  const designed = hasCanvas || hasBi || hasPages;
+  if (!designed && !sf.fabric) return null;
+  const tag = [hasCanvas && 'Canvas', hasPages && 'Power Pages', hasBi && 'Power BI'].filter(Boolean).join(', ');
 
   let shipped = false;
   try { shipped = fs.readdirSync(path.join(root, app.outDir || 'out')).some((f) => /\.(zip|msapp)$/i.test(f)); } catch { /* nothing packed */ }
   if (hasPages) shipped = true;   // a site in git is uploaded as it is built; its hand-back is a release
   const missing = [];
-  if (!exists(root, 'DESIGN.md', 'docs/DESIGN.md')) {
-    missing.push('DESIGN.md is missing. Invoke the impeccable skill (Skill tool: impeccable) init now: PRODUCT.md, DESIGN.md (create the theme if none was given), ' +
-      'then design/prototype.html per references/project-setup.md section 3.');
+  if (designed && !exists(root, 'DESIGN.md', 'docs/DESIGN.md')) {
+    missing.push(`[${tag}] DESIGN.md is missing. Invoke the impeccable skill (Skill tool: impeccable) init now: PRODUCT.md, DESIGN.md (create the theme if none was given)` +
+      `${hasCanvas ? ', then design/prototype.html per references/project-setup.md section 3' : ''}.`);
   }
   if (hasCanvas && !exists(root, 'design/prototype.html')) {
-    missing.push('design/prototype.html is missing. Design every screen at 1440 and 390 px (and the report page) in HTML with impeccable, critique it and fix it, ' +
+    missing.push('[Canvas] design/prototype.html is missing. Design every screen at 1440 and 390 px (and the report page) in HTML with impeccable, critique it and fix it, ' +
       'before more .pa.yaml is written (references/project-setup.md section 3).');
   }
   if (shipped) {
     const critique = readFileSafe(path.join(root, 'docs', 'design-critique.md'));
-    const why = critiqueState(critique);
+    const why = critiqueState(critique, hasPages ? CRITIQUE_FLOOR : null);
     if (why) {
-      missing.push(`docs/design-critique.md ${why}. Run impeccable critique on the ${hasPages ? 'live pages' : 'published screens'} at 1440 and 390 px` +
-        `${hasBi ? ' and the report' : ''}, fix every P0 and P1 it raises in one batch, critique once more, and record the screenshots and the score (/40; ` +
-        `${CRITIQUE_FLOOR} or more, or "Below 30 accepted: <reason>").`);
+      missing.push(`[${tag}] docs/design-critique.md ${why}. Run impeccable critique on the ${hasPages ? 'live pages' : 'published screens'} at 1440 and 390 px` +
+        `${hasBi ? ' and the report' : ''}, fix every P0 and P1 it raises in one batch, critique once more, and record the screenshots and the score (/40` +
+        `${hasPages ? `; ${CRITIQUE_FLOOR} or more for a site, or "Below 30 accepted: <reason>"` : ''}).`);
     }
   }
   const review = reviewText(root);
   if (shipped && !review) {
-    missing.push('docs/review.md is missing. Run the independent reviewer (assets/templates/reviewer-prompt.md, orchestration.md section 7) and record its findings and what was fixed.');
+    missing.push(`[${tag}] docs/review.md is missing. Run the independent reviewer (assets/templates/reviewer-prompt.md, orchestration.md section 7) and record its findings and what was fixed.`);
   } else if (shipped && hasPages) {
     const gaps = PAGES_REVIEW_TOPICS.filter(([, re]) => !re.test(review)).map(([t]) => t);
     if (gaps.length) {
-      missing.push(`docs/review.md does not cover ${gaps.join(', ')}. A site review works through power-pages.md section 8, "The reviewer's list", ` +
+      missing.push(`[Power Pages] docs/review.md does not cover ${gaps.join(', ')}. A site review works through power-pages.md section 8, "The reviewer's list", ` +
         'and records what it tried and what happened.');
     }
   }
   const leaks = tokenWrites(root);
   if (leaks.length) {
-    missing.push(`An access token appears to be written to a file or shared storage (${leaks.join(', ')}). Tokens must never be written to files or to a lakehouse; ` +
+    missing.push(`[All builds; most often Fabric] An access token appears to be written to a file or shared storage (${leaks.join(', ')}). Tokens must never be written to files or to a lakehouse; ` +
       'use a connection or an identity the service holds, or pass the token in memory.');
   }
   if (!missing.length) return null;
@@ -302,13 +369,14 @@ export function runChecks(root, input = {}, env = process.env) {
       'with test edits in them fails its data checks. Run python scripts/seed-data.py seed --seed <seed file> --update --apply ' +
       '(it re-checks and records the result), list any test rows you leave, and only then hand back. Run no write walk after it.');
   }
-  if (facts.pending.length) {
+  const pp = ppProject(root);
+  if (pp && facts.pending.length) {
     out.push(`Background shell work started in this session is still running (${facts.pending.slice(0, 5).join(', ')}). ` +
       'When this turn ends a headless run ends with it and the work is killed. Wait for it now (Monitor with an until-loop on its ' +
       'output, or read the output file once its notification arrives), act on the result, then finish. Run walks and other ' +
       'checks you need the answer to in the foreground (timeout up to 600000 ms) or inside a helper agent.');
   }
-  if (unattended(root, facts, env) && asksPerson(facts.lastText)) {
+  if (pp && unattended(root, facts, env) && asksPerson(facts.lastText)) {
     out.push('No person is present in this run, so a question will not be answered. Do not end the turn on one: take your own ' +
       'recommendation for each question, record it in docs/decisions.md ("taken unattended"), and carry on with the work. A step only ' +
       'the person can do (a licence, a sign-in with no browser path) goes into docs/STATE.md as open, and the build continues around it. ' +
@@ -348,8 +416,8 @@ export const SHELL_NUDGE_EVERY = 40;
 export const TIME_MARKS = [45, 60, 90, 120];
 export function isBuildFolder(root) {
   const app = appConfig(root);
-  return !!(app.appId || app.canvasSrc) || canvasSrcDirs(root, loadConfig(root).canvasSrcGlob || 'canvas').length > 0 || hasReport(path.join(root, 'fabric'))
-    || pagesSites(root).length > 0;
+  const sf = surfaces(root);
+  return !!(app.appId || app.canvasSrc) || sf.canvas || sf.bi || sf.pages;
 }
 export function budgetNote(state, now = Date.now()) {
   const notes = [];
@@ -460,18 +528,28 @@ export function evaluatePre(root, input = {}, env = process.env) {
     const isNewApp = screenCount(path.dirname(target)) <= NEW_APP_MAX_SCREENS;
     if (isNewApp && (!r.design || !r.proto)) {
       const need = [!r.design && 'DESIGN.md', !r.proto && 'design/prototype.html'].filter(Boolean).join(' and ');
-      return `Power Platform order gate (power-platform plugin): design comes before screens. ${need} ${!r.design && !r.proto ? 'do' : 'does'} not exist yet, ` +
+      return `Power Platform order gate (power-platform plugin) [Canvas]: design comes before screens. ${need} ${!r.design && !r.proto ? 'do' : 'does'} not exist yet, ` +
         'so no screen .pa.yaml is written. Invoke the impeccable skill now (Skill tool: impeccable): init for PRODUCT.md and DESIGN.md ' +
         '(create the theme when none was given), then design/prototype.html with every screen at 1440 and 390 px, critiqued and fixed once ' +
         '(references/project-setup.md section 3). Then write the screens from the prototype. ' +
         '(Only with the person\'s agreement, for work that is not a new app: "pluginGate": false in scripts/canvas-app.json.)';
     }
   }
+  // C. no solution import with flows until lint-flows.mjs passed over all of them (SKILL.md non-negotiable 8:
+  //    a looping flow measured 1,203 runs in 45 minutes; deploy-flows.py lints, a plain pac import did not)
+  if (isShell && /\bpac\s+solution\s+import\b/i.test(cmd)) {
+    const why = flowLintState(root);
+    if (why) {
+      return `Power Platform order gate (power-platform plugin) [Power Automate]: no import while ${why}. Run node scripts/lint-flows.mjs ` +
+        'over every flow (flows/ or solution/src/Workflows) and fix every error first; it records the run in .ship-work/flow-lint.json. ' +
+        'No finding is waived (SKILL.md non-negotiable 8).';
+    }
+  }
   // B. plan before schema
   if (isShell && /deploy-tables\.py/i.test(cmd) && !/--plan\b/.test(cmd)) {
     const ok = planReady(root);
     if (ok !== true) {
-      return `Power Platform order gate (power-platform plugin): plan before schema. Tables are deployed only once ${ok} exists; ` +
+      return `Power Platform order gate (power-platform plugin) [Dataverse]: plan before schema. Tables are deployed only once ${ok} exists; ` +
         'the plan is where the schema decisions are made. A dry run (deploy-tables.py --plan) is allowed.';
     }
   }
@@ -621,6 +699,59 @@ function selftest() {
     check('post: prototype written, no design note', dpost('d2', 40), silent);
     check('post: silent outside a build folder', (put('scripts/canvas-app.json', '{}'), rm('canvas'), decidePost(tmp, { tool_name: 'Bash', session_id: 'b9' }, st3, t0)), silent);
     fs.rmSync(st3, { recursive: true, force: true });
+    // Scope: each rule silent outside its surfaces, active inside them (references/rules-and-scope.md)
+    {
+      const sc = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-gate-scope-'));
+      const sput = (rel, text = 'x') => put(rel, text, sc);
+      const scl = (rel) => fs.rmSync(path.join(sc, rel), { recursive: true, force: true });
+      const st3 = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-gate-scope-state-'));
+      const trs = path.join(sc, 't.jsonl');
+      const L = (o) => JSON.stringify(o);
+      const bgPending = [L({ type: 'user', entrypoint: 'cli', message: { content: 'go' } }),
+        L({ type: 'user', message: { content: [{ type: 'tool_result', content: 'Command running in background with ID: z9.' }] } }),
+        L({ type: 'assistant', message: { content: [{ type: 'text', text: 'Waiting.' }] } })];
+      const stopIn = (sid) => { fs.writeFileSync(trs, bgPending.join('\n')); return decideStop(sc, { session_id: sid, transcript_path: trs }, {}, st3); };
+      check('scope: R1 is silent in a folder that is not a Power Platform project', stopIn('s1'), (g) => !g.block);
+      sput('.ship-work/writes.json', '[]');
+      check('scope: R1 applies once the folder is a Power Platform project', stopIn('s2'), (g) => g.block && g.reason.includes('still running (z9)'));
+      scl('.ship-work');
+      sput('solution/src/Other/Solution.xml', '<ImportExportXml/>'); sput('solution/src/AppModules/app/AppModule.xml', '<AppModule/>');
+      check('scope: a Dataverse or model-driven solution gets no build gate (no design rule)', evaluate(sc, {}, env), silent);
+      check('scope: a solution folder counts as a Power Platform project for the run checks', ppProject(sc), (g) => g === true);
+      scl('solution');
+      sput('fabric/notebooks/load.py', 'rows = read()\n');
+      check('scope: a Fabric folder with no report gets no design rule', evaluate(sc, {}, env), silent);
+      sput('fabric/notebooks/load.py', "token = get_token()\nnotebookutils.fs.put('Files/landing/t.txt', token, True)\n");
+      check('scope: the token rule applies in a Fabric folder with no report', evaluate(sc, {}, env), blocks('[All builds; most often Fabric]', 'fabric/notebooks/load.py:2'));
+      scl('fabric');
+      // canvas: no critique floor (no measured canvas evidence yet); pages: floor applies
+      sput('canvas/app/Src/Screen1.pa.yaml', 'Screens: {}'); sput('DESIGN.md', '# d'); sput('design/prototype.html', '<!doctype html>');
+      sput('out/app.msapp', 'x'); sput('docs/review.md', '# findings');
+      sput('docs/design-critique.md', 'Score 24/40. list-1440.png list-390.png');
+      check('scope: a canvas critique of 24/40 passes (the floor is Power Pages only)', evaluate(sc, {}, env), silent);
+      check('critiqueState: no floor passes 24/40', critiqueState('Score 24/40 a.png', null), silent);
+      check('scope: every build-gate message names its surfaces', (scl('DESIGN.md'), evaluate(sc, {}, env)), blocks('[Canvas] DESIGN.md is missing'));
+      // the harness calls the same rules
+      sput('.claude/hooks/audit-stop.mjs', '// harness');
+      check('harness present: the plugin Stop hook stands aside', evaluate(sc, {}, env), silent);
+      check('harness present: audit-stop gets the same rules (opts.harness)', evaluate(sc, {}, env, { harness: true }), blocks('[Canvas] DESIGN.md is missing'));
+      scl('.claude'); scl('canvas'); scl('out'); scl('docs'); scl('design');
+      // C. flow lint before a solution import
+      const imp = { tool_name: 'Bash', tool_input: { command: 'pac solution import --path out/App.zip' } };
+      check('C: an import with no flows passes', evaluatePre(sc, imp, env), silent);
+      sput('solution/src/Workflows/Notify-1.json', '{}'); sput('solution/src/Workflows/Sweep-2.json', '{}');
+      check('C: an import with flows and no lint run is refused', evaluatePre(sc, imp, env), (g) => typeof g === 'string' && g.includes('[Power Automate]') && g.includes('no lint-flows.mjs run'));
+      sput('.ship-work/flow-lint.json', JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), clean: true, count: 1 }));
+      check('C: a lint run over fewer flows than exist is refused', evaluatePre(sc, imp, env), (g) => typeof g === 'string' && g.includes('covered 1 of 2'));
+      sput('.ship-work/flow-lint.json', JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), clean: false, count: 2 }));
+      check('C: a lint run with errors is refused', evaluatePre(sc, imp, env), (g) => typeof g === 'string' && g.includes('found errors'));
+      sput('.ship-work/flow-lint.json', JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), clean: true, count: 2 }));
+      check('C: a clean lint run over every flow passes', evaluatePre(sc, imp, env), silent);
+      sput('.ship-work/flow-lint.json', JSON.stringify({ at: new Date(Date.now() - 60000).toISOString(), clean: true, count: 2 }));
+      check('C: a flow changed after the lint run is refused', evaluatePre(sc, imp, env), (g) => typeof g === 'string' && g.includes('changed after'));
+      check('C: other pac commands are not held', evaluatePre(sc, { tool_name: 'Bash', tool_input: { command: 'pac solution export --name App' } }, env), silent);
+      fs.rmSync(sc, { recursive: true, force: true }); fs.rmSync(st3, { recursive: true, force: true });
+    }
     // Power Pages builds, in a folder of their own: found by website.yml; critique floor; review topics
     const pg = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-gate-pages-'));
     const pput = (rel, text = 'x') => put(rel, text, pg);
@@ -680,7 +811,7 @@ function selftest() {
   if (fails.length) { console.log('selftest FAILED:\n  ' + fails.join('\n  ')); process.exit(1); }
   console.log(`selftest ok: ${CASES} plugin-gate cases (Stop: unrelated silent, design missing, three blocks per session then a note, per-session count, ` +
     'no-id fallback, harness present, two opt-outs, designed, shipped without critique/review, complete, dod opt-in, background shell pending and done, unattended question, attended question, unattended hand-back, unattended flag, sidechain, run-check cap, run checks with harness, token to ' +
-    'lakehouse, token file over REST, non-token write, report-only; Pages: dot folder ignored, bare site, critique floor and review topics, full pass, stated reason, unjudged score, budget folder; R3: silent, write without check, stale check, clean after write, drift, as a run check, seed found, no seed asks for test rows, no seed listed; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, design cap silent, design cap once, design note once only, design cap stops at the prototype, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
+    'lakehouse, token file over REST, non-token write, report-only; Scope: R1 silent outside, R1 inside, Dataverse/model-driven silent, solution is a project, Fabric no design rule, Fabric token rule, canvas no floor, no-floor state, labelled messages, harness stands aside, harness same rules; C: no flows, no lint, partial lint, lint errors, clean lint, stale lint, other pac; Pages: dot folder ignored, bare site, critique floor and review topics, full pass, stated reason, unjudged score, budget folder; R3: silent, write without check, stale check, clean after write, drift, as a run check, seed found, no seed asks for test rows, no seed listed; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, design cap silent, design cap once, design note once only, design cap stops at the prototype, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
     'App.pa.yaml, _EditorState, shell read, other tools, prototype missing, designed, deploy-tables with and without --plan, bare template, ' +
     'filled contract, dod plan, opt-out, unrelated write)');
   process.exit(0);

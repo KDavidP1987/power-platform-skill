@@ -12,6 +12,11 @@
 //                                                        (cols.json: ["app_approvedon", ...])
 //   node lint-flows.mjs --selftest
 //   --json  machine-readable output
+//   --work-dir <dir>  where the run record goes (default .ship-work in the current folder)
+//
+// Every run records itself in <work-dir>/flow-lint.json ({at, clean, count, paths}). The plugin's
+// order gate refuses `pac solution import` while flows exist and that record is missing, has errors,
+// covers fewer flows than the folder holds, or is older than the newest flow (SKILL.md non-negotiable 8).
 //
 // Accepts a solution flow file ({properties:{definition, connectionReferences}}), a bare
 // {definition: ...}, or a bare definition ({triggers, actions}).
@@ -1048,20 +1053,38 @@ function selftest() {
   // The bad fixture fires on Delete, so the unfiltered-Update rule is proven on a guard fixture.
   const unf = lint([guardFixture('unfiltered', { wrap: ifYes({ not: { equals: ["@triggerOutputs()?['body/app_locked']", true] } }) })]).results[0].items.some((i) => i.code === 'update-trigger-unfiltered');
   if (!unf) graphFails.push('update-trigger-unfiltered: not raised on an Update trigger without filteringattributes');
+  {
+    const os = process.env.TEMP || process.env.TMPDIR || '/tmp';
+    const wd = fs.mkdtempSync(path.join(os, 'lint-rec-'));
+    const rec = writeRecord(path.join(wd, '.ship-work'), 2, false, ['flows']);
+    const back = JSON.parse(fs.readFileSync(path.join(wd, '.ship-work', 'flow-lint.json'), 'utf8'));
+    if (!rec || back.count !== 2 || back.clean !== false || !Date.parse(back.at)) graphFails.push('run record: not written as {at, clean, count, paths}');
+    fs.rmSync(wd, { recursive: true, force: true });
+  }
   const ok = missing.length === 0 && good.length === 0 && guardFails.length === 0 && parsed.length === 0 && graphFails.length === 0;
   console.log(ok ? `selftest ok: bad fixture -> ${bad.length} findings (${[...new Set(bad)].join(', ')}), good fixture -> 0, ` +
                    `${GUARD_CASES.length} guard shapes and 2 filteringattributes cases decided as expected, ${GRAPH_CASES.length} loop-graph ` +
-                   `shapes, ${RECIPIENT_CASES.length} recipient shapes and the unfiltered-trigger rule as expected, parser cases ok`
+                   `shapes, ${RECIPIENT_CASES.length} recipient shapes and the unfiltered-trigger rule as expected, parser cases ok, run record ok`
                  : `selftest FAILED: missing [${missing.join(', ')}]; good fixture produced: ${good.map((g) => g.code + ': ' + g.msg).join(' | ')}; ` +
                    `guard shapes: [${guardFails.join(' | ')}]; loop graph / recipients: [${graphFails.join(' | ')}]; parser: [${parsed.join(' | ')}]`);
   process.exit(ok ? 0 : 1);
+}
+
+// ---------- run record (read by hooks/plugin-gate.mjs before a solution import) ----------
+export function writeRecord(workDir, count, clean, paths) {
+  try {
+    fs.mkdirSync(workDir, { recursive: true });
+    const rec = { at: new Date().toISOString(), clean, count, paths };
+    fs.writeFileSync(path.join(workDir, 'flow-lint.json'), JSON.stringify(rec, null, 2) + '\n');
+    return rec;
+  } catch { return null; }
 }
 
 // ---------- main ----------
 const argv = process.argv.slice(2);
 if (argv.includes('--selftest')) selftest();
 else if (argv.length === 0 || argv.includes('--help')) {
-  console.log('usage: node lint-flows.mjs <file-or-folder>... [--entity-sets sets.json] [--date-only cols.json] [--json] [--verbose] | --selftest');
+  console.log('usage: node lint-flows.mjs <file-or-folder>... [--entity-sets sets.json] [--date-only cols.json] [--work-dir dir] [--json] [--verbose] | --selftest');
   process.exit(argv.length === 0 ? 1 : 0);
 } else {
   const listArg = (flag) => {
@@ -1070,7 +1093,7 @@ else if (argv.length === 0 || argv.includes('--help')) {
   };
   const sets = listArg('--entity-sets');
   const dateOnly = listArg('--date-only');
-  const valueIdx = new Set(['--entity-sets', '--date-only'].map((f) => argv.indexOf(f)).filter((k) => k !== -1).map((k) => k + 1));
+  const valueIdx = new Set(['--entity-sets', '--date-only', '--work-dir'].map((f) => argv.indexOf(f)).filter((k) => k !== -1).map((k) => k + 1));
   const paths = argv.filter((a, k) => !a.startsWith('--') && !valueIdx.has(k));
   const flows = loadFlows(paths);
   if (flows.length === 0) { console.error('No flow definitions found under: ' + paths.join(', ') + ' - this is NOT a pass.'); process.exit(2); }
@@ -1087,5 +1110,7 @@ else if (argv.length === 0 || argv.includes('--help')) {
     console.log(`\n${flows.length} flow(s) read. Activation is still the only compile - turn each flow on once before trusting it.`);
   }
   const errors = results.some((r) => r.items.some((x) => x.level === 'error')) || cycles.length > 0;
+  const wk = argv.indexOf('--work-dir');
+  writeRecord(wk === -1 ? '.ship-work' : argv[wk + 1], flows.length, !errors, paths);
   process.exit(errors ? 1 : 0);
 }

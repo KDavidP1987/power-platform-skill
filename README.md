@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.24.0](https://img.shields.io/badge/plugin-0.24.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.25.0](https://img.shields.io/badge/plugin-0.25.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.24.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.25.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -51,7 +51,7 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 <!-- backlog:start -->
 | # | Item | Why it matters | Status |
 |---|---|---|---|
-| 1 | Power Pages: a site walk driver with sign-in, refusal and `/_api` proofs, and a reference covering row visibility, "my records", Private sign-in, deploy and teardown | The thinnest area: written from one real site, and nothing could walk a site or prove a refusal on one | First measured build (0.21): 30 of 30 blind checks, design 23 of 25, 85 minutes, no person needed. 0.22 adds Dataverse confirmation, captures and freshness waits to the walker, and the build's lessons (go-live decisions, identity for people who are not Dataverse users, the 15-minute cache window, feedback patterns). Second measured build (0.22): 30 of 30, design 23 of 25, 96 minutes (30 lost waiting on the site's sign-in consent), no person needed; it used the bundled walker for all 65 checks. 0.23 accepts the site's own consent when nobody is present, adds spill and covered-field checks to the walker, and stops asking a build with no seed to re-seed. Third measured build (0.23.1): 30 of 30, design 23 of 25, 90 minutes, no person needed. 0.24 turns what blind reviews kept finding into checks (current-page marker, focus contrast, double writes, unfilled columns, unguarded Global read), holds a site's hand-back for a critique of 30/40 and a five-topic security review, settles identity first with the administrator's steps, and ships in one call. Microsoft's plugin arm is next |
+| 1 | Power Pages: a site walk driver with sign-in, refusal and `/_api` proofs, and a reference covering row visibility, "my records", Private sign-in, deploy and teardown | The thinnest area: written from one real site, and nothing could walk a site or prove a refusal on one | First measured build (0.21): 30 of 30 blind checks, design 23 of 25, 85 minutes, no person needed. 0.22 adds Dataverse confirmation, captures and freshness waits to the walker, and the build's lessons (go-live decisions, identity for people who are not Dataverse users, the 15-minute cache window, feedback patterns). Second measured build (0.22): 30 of 30, design 23 of 25, 96 minutes (30 lost waiting on the site's sign-in consent), no person needed; it used the bundled walker for all 65 checks. 0.23 accepts the site's own consent when nobody is present, adds spill and covered-field checks to the walker, and stops asking a build with no seed to re-seed. Third measured build (0.23.1): 30 of 30, design 23 of 25, 90 minutes, no person needed. 0.24 turns what blind reviews kept finding into checks (current-page marker, focus contrast, double writes, unfilled columns, unguarded Global read), holds a site's hand-back for a critique of 30/40 and a five-topic security review, settles identity first with the administrator's steps, and ships in one call. 0.25 scopes every rule to the surface it serves (`rules-and-scope.md`): the 30/40 floor is for sites only, and the flow lint gates every import. Microsoft's plugin arm is next |
 | 2 | Speed and cost against Microsoft's plugins | The last four canvas builds beat them on quality but not on time or cost | 0.21: data-source check on `create`, a design-helper time box, no single-issue publishes after the fix batch; to be measured |
 | 3 | A self-test in CI for every script, and a floor that refuses to pass when nothing was examined | A 1.0 criterion; four scripts had none | Done in 0.21 |
 | 4 | Teardown order for Fabric: Dataflows before their lakehouse | Dataflows can refuse deletion once their destination is gone | Done in 0.21 |

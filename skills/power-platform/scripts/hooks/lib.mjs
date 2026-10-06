@@ -29,7 +29,7 @@ export const DEFAULT_CONFIG = {
   canvasFileCeiling: 50,
   canvasFileWarnAt: 45,
   debugMarkers: true,       // TODO/FIXME/console.log in source, at Stop
-  designGate: true,         // at Stop: a UI project needs DESIGN.md, and a critique record once shipped (false turns it off)
+  designGate: true,         // at Stop: the build gate (plugin-gate.mjs evaluate, scoped per surface); false turns it off
   auditIgnore: ['docs/dod/README.md'],   // generated files the audit never reads (the dod index writes its own symbols)
   bookkeeping: {
     solutionDir: 'solution/',
@@ -150,53 +150,6 @@ export function canvasSrcDirs(root, canvasRoot) {
   } catch { return []; }
 }
 
-// ---- design gate (Stop) ----
-// Guidance alone did not get a design step run: a measured build had the design skill installed and
-// "required", and shipped with no DESIGN.md and no critique. So a project with a UI surface (canvas
-// source, or a Power BI report under fabric/) must carry:
-//   - DESIGN.md (repo root or docs/): blocks the stop when missing;
-//   - docs/design-critique.md, naming the screenshots it judged (.png) and a score: blocks only once
-//     the app has shipped (a packed .zip or .msapp in the ship output folder), a reminder before that.
-// Turn it off with "designGate": false in .claude/hooks/standards.config.json.
-function hasReport(dir, depth = 0) {
-  if (depth > 4) return false;
-  let entries = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
-  for (const e of entries) {
-    if (e.isFile() && e.name.toLowerCase() === 'definition.pbir') return true;
-    if (e.isDirectory() && (/\.report$/i.test(e.name) || hasReport(path.join(dir, e.name), depth + 1))) return true;
-  }
-  return false;
-}
-function appConfig(root) {
-  for (const c of ['scripts/canvas-app.json', 'canvas-app.json']) {
-    try { return JSON.parse(fs.readFileSync(path.join(root, c), 'utf8').replace(/^\uFEFF/, '')); } catch { /* next */ }
-  }
-  return {};
-}
-export function designGate(root, cfg) {
-  const out = { findings: [], reminders: [] };
-  if (cfg.designGate === false) return out;
-  const app = appConfig(root);
-  const hasCanvas = canvasSrcDirs(root, cfg.canvasSrcGlob).length > 0 || (app.canvasSrc && fs.existsSync(path.join(root, app.canvasSrc)));
-  const hasBi = hasReport(path.join(root, 'fabric'));
-  if (!hasCanvas && !hasBi) return out;
-  const surface = [hasCanvas && 'canvas app', hasBi && 'Power BI report'].filter(Boolean).join(' and ');
-  if (!['DESIGN.md', 'docs/DESIGN.md'].some((p) => fs.existsSync(path.join(root, p)))) {
-    out.findings.push(`design: this project has a ${surface} but no DESIGN.md. Run the impeccable design skill (init, which writes PRODUCT.md and DESIGN.md), ` +
-      `then turn DESIGN.md into the theme tokens and the report theme (project-setup.md section 3). If the person declined impeccable, write DESIGN.md by hand and record the decline in it.`);
-  }
-  const critique = readFileSafe(path.join(root, 'docs', 'design-critique.md'));
-  const complete = /\.png\b/i.test(critique) && /score/i.test(critique);
-  if (complete) return out;
-  const outDir = path.join(root, app.outDir || 'out');
-  let shipped = false;
-  try { shipped = fs.readdirSync(outDir).some((f) => /\.(zip|msapp)$/i.test(f)); } catch { /* nothing packed yet */ }
-  const msg = `design: ${critique ? 'docs/design-critique.md does not name the screenshots (.png) and a score' : 'no docs/design-critique.md'} - ` +
-    `run impeccable's critique on the published screens at 1440 and 390 px${hasBi ? ' and the report' : ''}, fix what it raises in one batch, and record the screenshots and the score there.`;
-  (shipped ? out.findings : out.reminders).push(msg);
-  return out;
-}
 
 // ---- self-test (entry point only) ----
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

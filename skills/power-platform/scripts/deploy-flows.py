@@ -38,7 +38,9 @@ Rules it enforces (each one a defect seen in a real build):
     --allow-shared-connection. Make a connection of your own (the person signs in once per API).
   - Every connectionReferenceLogicalName a flow uses must be declared in the manifest.
   - Before any write, lint-flows.mjs runs over the flow files when node is available (self-trigger
-    loops, sends to anyone but the owner, date-only traps). Errors stop the run; --skip-lint skips.
+    loops, sends to anyone but the owner, date-only traps). Errors stop the run, and so does a lint
+    that could not run (no node, nothing read): SKILL.md non-negotiable 8 waives no finding.
+    --skip-lint is for the offline fixtures only and is refused against a live environment.
   - An active flow is turned off before its definition is updated, and back on only with --activate.
   - Activation refused by the server is reported with the server's reason, and the run exits 1.
   - Nothing is ever deleted.
@@ -118,8 +120,8 @@ def load(path):
 def lint(paths):
     node = shutil.which("node")
     if not node:
-        print("lint: node not on PATH - lint-flows.mjs skipped (run it before shipping)")
-        return 0
+        print("lint: node not on PATH - lint-flows.mjs cannot run, so nothing is deployed (install Node.js)")
+        return 1
     r = subprocess.run([node, os.path.join(HERE, "lint-flows.mjs")] + paths, capture_output=True, text=True)
     out = (r.stdout + r.stderr).strip()
     if out:
@@ -275,8 +277,11 @@ def run(argv, transport=None):
             pa = Client("https://api.powerapps.com/", pat, read_only=True, transport=transport)
             return cmd_connections(dv, pa, m, a.env)
         flows = [f for f in m["_flows"] if not a.only or f["name"] in a.only]
-        if a.apply and not a.skip_lint and lint([f["path"] for f in flows]) == 1:
-            print("lint errors: nothing was written (fix them, or --skip-lint with a reason)")
+        if a.apply and a.skip_lint and transport is None:
+            print("refused: --skip-lint is for the offline fixtures; a live run always lints (SKILL.md non-negotiable 8)")
+            return 1
+        if a.apply and not a.skip_lint and lint([f["path"] for f in flows]) != 0:
+            print("lint did not pass (errors, or it could not read the flows): nothing was written")
             return 1
         bad = step_connrefs(dv, m, a.apply, a.allow_shared_connection)
         if bad and a.apply:

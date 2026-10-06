@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.24.0"
+  version: "0.25.0"
 ---
 
 # Power Platform development
@@ -81,6 +81,8 @@ A denial is an instruction: do the named step with its tool, then retry; do not 
 ## The non-negotiables
 
 These hold on every task. The reasons are short here; the references carry the full story.
+Which of them a hook enforces, which a script refuses, and which stay instructions, and the surface
+each applies to, is in `references/rules-and-scope.md`.
 
 1. **The repo is the source of truth.** Canvas screens are `.pa.yaml` under `canvas/<app>/Src/`;
    the solution is an unpacked tree under `solution/src`. Studio is a validator and a data-source
@@ -110,7 +112,9 @@ These hold on every task. The reasons are short here; the references carry the f
    which each start a flow. A recovery or sweep job must end in a terminal state a person
    re-arms. The update trigger delivers the whole row, so any other guard loops forever, billed
    per run - one project measured 1,203 runs in 45 minutes. See `references/power-automate.md`
-   sections 3 and 4.
+   sections 3 and 4. Enforced: the plugin refuses `pac solution import` until a clean lint over
+   every flow is recorded (`.ship-work/flow-lint.json`, written by each lint run), and
+   `deploy-flows.py` refuses a live run it could not lint.
 9. **Before any bulk write, ask what watches the table** - and count the messages that would go
    to real people, then park the sender. While a build must not reach real people, prove it from
    source (`lint-flows.mjs --require-safe-recipients`) and from run history, and pin the one
@@ -238,6 +242,7 @@ points there.
 | **Reporting** | |
 | Reports for an app: the append-only history table every trend chart needs (start it first), baseline and labelled demo history, commitment fields, the change log and plan-vs-actual variance (planned vs unplanned), in-app charts from galleries (burn-down, burn-up, velocity, throughput, cycle time, aging, mix) and their compile traps, metric definitions, Power BI over a Fabric medallion (bronze, silver daily snapshot, gold facts, Direct Lake model), Power BI embedded in a canvas app or linked with a URL filter, viewer licensing | `references/reporting.md` |
 | **Process and environment** | |
+| Which rules a hook enforces and which stay instructions; the surface each rule applies to (canvas, Power Pages, Dataverse, Power Automate, Power BI and Fabric, model-driven); when an instruction becomes a hook | `references/rules-and-scope.md` |
 | Writing or trusting an audit; stale inputs; vacuous passes; comparing the published app with the repo; reusable tool designs | `references/audits.md` |
 | Starting from nothing: what the person needs, the machine, pac, a self-renewing token, a browser that signs in by itself, every identity signed in once (no repeated prompts), Studio and the authoring server, the app config, what the agent hands back, and the smoke test to run before the first change | `references/first-run.md` |
 | Starting a repo or a new app: offering and installing the harness (hooks, tools, config, continuity docs, update notice), theme intake (palette, fonts, logo, imagery, symbolism, landing page) before the first screen, layout, bootstrap, hooks, continuity docs, trackers, templates, CI, shipping without pipeline rights, offering GitHub version control (what it is, personal against organisation accounts, commit identity, releases) | `references/project-setup.md` |

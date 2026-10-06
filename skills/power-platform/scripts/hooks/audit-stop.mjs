@@ -4,14 +4,27 @@
 // the file ceiling, and reminds about bookkeeping (dependency register, state file, changelog)
 // when the solution changed. Blocks the stop ONCE on findings so they are fixed in the same
 // turn; never blocks twice in a row (stop_hook_active), and reminders alone never block.
-// Design gate (lib.mjs designGate, "designGate": false to turn off): a project with canvas source or
-// a Power BI report needs DESIGN.md, and once it has shipped, docs/design-critique.md.
+// Build gate: the same rules as the power-platform plugin's Stop hook (plugin-gate.mjs evaluate, which
+// stands aside in a harnessed project so the two never block twice): design record, critique, review,
+// the Power Pages review topics, and no token written to storage - each scoped to the surfaces that
+// have it (references/rules-and-scope.md). "designGate": false turns it off.
 // Self-test: node audit-stop.mjs --selftest
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { readStdinJson, listRepoTextFiles, isProse, isHookFile, findEmoji, findPurple, readFileSafe, loadConfig, canvasSrcDirs, designGate, isVendoredCopy, DEFAULT_CONFIG } from './lib.mjs';
+import { readStdinJson, listRepoTextFiles, isProse, isHookFile, findEmoji, findPurple, readFileSafe, loadConfig, canvasSrcDirs, isVendoredCopy, DEFAULT_CONFIG } from './lib.mjs';
+import { evaluate } from './plugin-gate.mjs';
+
+// The build gate as findings: one finding per numbered step of the plugin gate's reason.
+export function buildGate(root, cfg) {
+  if (cfg.designGate === false) return [];
+  const full = evaluate(root, {}, process.env, { harness: true });
+  if (!full) return [];
+  const reason = full.split('\nTurn this gate off')[0];
+  const steps = reason.split(/\n\s*\d+\.\s+/).slice(1).map((s) => s.trim()).filter(Boolean);
+  return steps.length ? steps.map((s) => 'build gate: ' + s) : ['build gate: ' + reason];
+}
 
 if (process.argv.includes('--selftest')) selftest();
 
@@ -19,26 +32,28 @@ function selftest() {
   const fails = [];
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'design-gate-'));
   const put = (rel, text = 'x') => { fs.mkdirSync(path.dirname(path.join(tmp, rel)), { recursive: true }); fs.writeFileSync(path.join(tmp, rel), text); };
-  const run = (cfg = DEFAULT_CONFIG) => designGate(tmp, cfg);
-  const want = (name, got, f, r) => { if (got.findings.length !== f || got.reminders.length !== r) fails.push(`${name}: ${got.findings.length} finding(s), ${got.reminders.length} reminder(s), want ${f}/${r}`); };
+  const run = (cfg = DEFAULT_CONFIG) => buildGate(tmp, cfg);
+  const want = (name, got, n, has = '') => { if (got.length !== n || (has && !got.join(' ').includes(has))) fails.push(`${name}: ${got.length} finding(s) [${got.join(' | ').slice(0, 200)}], want ${n}${has ? ' with ' + has : ''}`); };
   try {
-    want('no UI surface', run(), 0, 0);
+    put('.claude/hooks/audit-stop.mjs', '// harness');   // a harnessed project: the plugin Stop hook stands aside, this one decides
+    want('no Power Platform surface', run(), 0);
     put('canvas/app/Src/Screen1.pa.yaml');
-    want('canvas, no DESIGN.md, not shipped', run(), 1, 1);
-    want('turned off', run({ ...DEFAULT_CONFIG, designGate: false }), 0, 0);
-    put('docs/DESIGN.md');
-    want('DESIGN.md in docs, not shipped', run(), 0, 1);
+    want('canvas, no DESIGN.md', run(), 2, '[Canvas] design/prototype.html');
+    want('turned off', run({ ...DEFAULT_CONFIG, designGate: false }), 0);
+    put('docs/DESIGN.md'); put('design/prototype.html');
+    want('designed, not shipped', run(), 0);
     put('out/app.zip');
-    want('shipped without a critique', run(), 1, 0);
-    put('docs/design-critique.md', 'looked fine');
-    want('critique without screenshots or score', run(), 1, 0);
-    put('docs/design-critique.md', 'list-1440.png list-390.png - score 31/40');
-    want('critique complete', run(), 0, 0);
-    fs.rmSync(path.join(tmp, 'canvas'), { recursive: true }); fs.rmSync(path.join(tmp, 'docs'), { recursive: true });
+    want('shipped without critique or review', run(), 2, 'docs/review.md');
+    put('docs/design-critique.md', 'list-1440.png list-390.png - score 24/40'); put('docs/review.md', '# findings');
+    want('canvas complete (no critique floor outside Power Pages)', run(), 0);
+    fs.rmSync(path.join(tmp, 'canvas'), { recursive: true }); fs.rmSync(path.join(tmp, 'docs'), { recursive: true }); fs.rmSync(path.join(tmp, 'design'), { recursive: true });
     put('fabric/report/definition.pbir', '{}');
-    want('report only, no DESIGN.md, shipped', run(), 2, 0);
+    want('report only, no DESIGN.md, shipped', run(), 3, '[Power BI]');
+    fs.rmSync(path.join(tmp, 'fabric'), { recursive: true }); fs.rmSync(path.join(tmp, 'out'), { recursive: true });
+    put('fabric/notebooks/load.py', "token = get_token()\nnotebookutils.fs.put('Files/t.txt', token, True)\n");
+    want('Fabric only: token written to storage', run(), 1, 'Fabric');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
-  console.log(fails.length ? 'selftest FAILED:\n  ' + fails.join('\n  ') : 'selftest ok: 8 design-gate cases (no UI, canvas, off, DESIGN.md in docs, shipped without/with incomplete/complete critique, report only)');
+  console.log(fails.length ? 'selftest FAILED:\n  ' + fails.join('\n  ') : 'selftest ok: 8 build-gate cases (no surface, canvas, off, designed, shipped without critique/review, canvas complete, report only, Fabric token)');
   process.exit(fails.length ? 1 : 0);
 }
 
@@ -75,7 +90,7 @@ for (const src of canvasSrcDirs(root, cfg.canvasSrcGlob)) {
   }
 }
 
-{ const dg = designGate(root, cfg); findings.push(...dg.findings); reminders.push(...dg.reminders); }
+findings.push(...buildGate(root, cfg));
 
 try {
   const changed = execSync('git diff --name-only HEAD', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })

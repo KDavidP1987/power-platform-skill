@@ -32,6 +32,7 @@ export const MANIFEST = [
   ['scripts/check-canvas-overlap.mjs', '.claude/hooks/check-canvas-overlap.mjs', 'hooks', 'every .pa.yaml write: controls drawn over controls'],
   ['scripts/hooks/shared-guard.mjs', '.claude/hooks/shared-guard.mjs', 'hooks', 'edits naming a shared table: record it in the shared registry'],
   ['scripts/hooks/audit-stop.mjs', '.claude/hooks/audit-stop.mjs', 'hooks', 'end of turn: whole-repo audit and bookkeeping'],
+  ['scripts/hooks/plugin-gate.mjs', '.claude/hooks/plugin-gate.mjs', 'hooks', 'the build-gate rules audit-stop applies (the same as the plugin Stop hook)'],
   // Tools: the ship, verify and data loop.
   ['scripts/canvas-mcp.py', 'scripts/canvas-mcp.py', 'tools', 'compile, push and hold against Studio; sync; checker'],
   ['scripts/ship-canvas.py', 'scripts/ship-canvas.py', 'tools', 'ship a canvas app by solution import, build stamp read back'],

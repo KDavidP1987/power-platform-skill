@@ -11,6 +11,48 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-06
+
+An audit of every rule against the surface it serves. 0.24 added Power Pages rules to a gate that
+also served canvas apps and reports, and the question was which rules belong where. The audit found
+the rules were right but their reach was not: the 30/40 critique floor (measured on three sites)
+applied to canvas apps and reports too; the run checks fired in folders that are not Power Platform
+projects; a Fabric folder without a report escaped the token rule; the project harness ran an older
+design gate than the plugin; and the flow-lint "hard gate" (non-negotiable 8) could be passed by a
+plain `pac solution import`, by `deploy-flows.py` on a machine without Node.js, or by `--skip-lint`.
+
+### Added
+
+- **`references/rules-and-scope.md`**: every rule, hook and script check by surface (platform-wide,
+  canvas, Power Pages, Dataverse and model-driven, Power Automate, Power BI and Fabric), how each is
+  enforced (hook, script check or instruction), the evidence for it, the four criteria an instruction
+  must meet to become a hook, and the known gaps.
+- **Rule C, before tools**: `pac solution import` is refused while the folder holds flows and no clean
+  `lint-flows.mjs` run over all of them, newer than the newest flow, is recorded.
+- **`lint-flows.mjs` records each run** in `.ship-work/flow-lint.json` (`{at, clean, count, paths}`;
+  `--work-dir` moves it). Self-test case added.
+
+### Changed
+
+- **Every gate message names its surface**: `[Canvas]`, `[Power Pages]`, `[Power BI]`, `[Dataverse]`,
+  `[Power Automate]`, or `[All builds; most often Fabric]`.
+- **The critique floor applies to Power Pages only.** A canvas app or report records its score with no
+  floor until a measured build gives one.
+- **The run checks (R1 to R3) are silent outside Power Platform projects** (no surface, no
+  `.ship-work`, no `canvas-app.json`).
+- **The token rule covers a `fabric/` folder with no report.** A Dataverse-only or model-driven
+  solution gets no build gate.
+- **The harness applies the plugin's build gate.** `audit-stop.mjs` calls `plugin-gate.mjs`
+  `evaluate` (copied by `setup-harness.mjs`), so a harnessed project gets the same rules once;
+  `lib.mjs designGate` is removed. Re-run `setup-harness.mjs` in harnessed projects.
+- **`deploy-flows.py` refuses** a live run when Node.js is missing, when the lint read nothing (exit
+  2 was taken as a pass), or when `--skip-lint` is given; `--skip-lint` remains for the offline
+  fixtures.
+- `hooks.json` description rewritten (it said the gate was silent without canvas source or a report,
+  which stopped being true when sites were added).
+- 18 new scope cases in the plugin gate's self-test (93 in all); the harness audit's self-test now
+  covers the build gate across canvas, report and Fabric folders.
+
 ## [0.24.0] - 2026-10-06
 
 Three measured Power Pages builds (0.21, 0.22, 0.23.1) each passed 30 of 30 blind checks with the same
