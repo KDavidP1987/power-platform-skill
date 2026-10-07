@@ -11,6 +11,69 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-07
+
+Labels whose text is centred and cut at the top and the bottom, and controls drawn over each other,
+had become a common defect in canvas builds - and every check passed while the app showed both. The
+format and overlap checks resolved no geometry at all on an app whose layout constants followed a
+comment, the fit model counted a box too short for one line as one line, and the browser's clip
+check counted only whole hidden lines.
+
+### Fixed
+
+- **`App.Formulas` is read past comments** (`check-canvas-format.mjs` `stripFxComments`). A `//`
+  comment glued itself to the next statement, so the layout constants after it - and every constant
+  derived from them - never evaluated: a 33-screen app reported "0 measured, 225 not measurable"
+  and no findings. `check-canvas-overlap.mjs` uses the same reader and had resolved nothing ("0
+  errors"); it now reports the real overlaps. Self-tests in both checks put a comment before the
+  layout formula.
+- **Vertical fit is measured** (`text-cut-vertically`). Size is points (px = Size x 4/3) and a
+  rendered line is about 1.15 x px, calibrated in a published player; a box shorter than one line is
+  an error, and wrapped lines are counted the same way. One line of Size 13 needs a Height of about
+  17.
+- **`canvas-browser.mjs` clipcheck reports text cut vertically**: it measures the rendered text
+  against the box that clips it and reports `text cut Npx top+bottom`. Centred overflow of less
+  than a line at each edge was never reported; in one published app the new check found 14 cut
+  labels.
+- **`second-tab` never closes the held Studio tab.** Closing it before the save lost the push while
+  Save printed SAVE LANDED; `close-studio` closes the older tabs after publish. MISSING from
+  `--expect` and `studio-has` is now labelled as not proof of absence (the tree is virtualised).
+- **`save` compares the "Saved: <time>" stamp with the time it clicked** and reports UNPROVEN
+  (exit 7) when the stamp is older: it had printed SAVE LANDED for a stamp 12 minutes old.
+- **Playwright is found in the project.** Run from a plugin cache, the driver now resolves it from
+  the working folder and the config's folder (and their subfolders' `node_modules`, such as
+  `portal/`) before giving up, and names where it looked.
+- **A click-to-dismiss scrim is still a modal backdrop** (`check-canvas-overlap.mjs`). A full-screen
+  rectangle with its own `OnSelect` counted as a control, so every dialog control over it and every
+  page control under it was reported: 259 false errors in one app. The dialog's own content on its
+  backdrop is exempt too.
+- **`check-pa-yaml.mjs` no longer fails full-line comments between controls.** Section banners at
+  the control indent compiled with 0 errors on a 33-screen app, and the rule failed 30 of its 32
+  files. It now flags what breaks: a `#` line inside a formula (block scalar), which is formula text,
+  and ` #` inside a single-line value, which starts a YAML comment and cuts the formula.
+
+### Added
+
+- **`one-line-box-wraps`**: a one-line box holding data that can exceed its width, with `Wrap` on
+  and no tooltip, is an error - the wrapped text is cut at both ends. The remedy is `Wrap: =false`
+  plus a `Tooltip` reading the same columns, which `text-overflow` now also accepts as remedy (a);
+  `Wrap: =false` without a tooltip is still flagged.
+- **A vacuous run is not a pass.** `check-canvas-format.mjs` warns loudly when under half of the
+  data-bound text controls were measured and exits 2 when none were; `check-canvas-overlap.mjs`
+  warns when under half of the drawn controls resolved.
+- **Text over a clickable shape** is `covers-control` (the label takes the click); text on a
+  non-clickable card or row background (a shape whose only `OnSelect` is `Select(Parent)`) and a
+  caption with its own `OnSelect` are exempt.
+- **References:** "Text that fits vertically" (`canvas-layout.md` section 2: the measured numbers,
+  one-line cells, titles that show data, prose at the design width, the walk's vertical clip check);
+  the held tab and the save stamp (`canvas-shipping.md` section 4); Power Fx traps - two queued
+  `Select()`s, `Blank <> 0` after a `Sum` of nothing, `%` in a format string, and the width of a
+  screen that grows past the window (`power-fx-and-pa-yaml.md` section 8); the new rules in
+  `rules-and-scope.md`.
+
+- `canvas-browser.mjs` finds the repo root by its `.git` folder, so a config two folders down (`scripts/canvas/app.json`) no longer makes the review gate look for `docs/` in the wrong place.
+- `canvas-mcp.py`: `CANVAS_MCP_VERSION` pins the authoring server. A version listed on NuGet before its platform package fails to start under "latest".
+
 ## [0.26.0] - 2026-10-06
 
 Lessons from building a per-person visibility model across a canvas app and a Power Pages site,

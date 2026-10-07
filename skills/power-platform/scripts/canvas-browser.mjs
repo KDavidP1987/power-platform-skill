@@ -71,13 +71,44 @@
 
 // Playwright is loaded lazily so `lint` and `--selftest` run without it installed.
 let chromium = null;
+// Where Playwright may be installed. A bare import('playwright') resolves from THIS script's folder
+// upward and ignores NODE_PATH, so a driver run from a plugin cache never finds the project's install
+// (measured: exit 8 "not installed" while it sat in <project>/portal/node_modules). Look from the
+// working folder and the config's folder (and the repo above it), then in their direct subfolders.
+function playwrightRoots(cwd, configDir) {
+  const roots = [];
+  const add = (d) => { if (d && !roots.includes(d)) roots.push(d); };
+  for (const base of [cwd, configDir, configDir ? dirname(configDir) : null]) {
+    if (!base) continue;
+    add(base);
+    let subs = [];
+    try { subs = readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory() && !/^(\.|node_modules$)/.test(e.name)).map((e) => join(base, e.name)); } catch { /* unreadable */ }
+    for (const s of subs) if (existsSync(join(s, 'node_modules'))) add(s);
+  }
+  return roots;
+}
+async function loadPlaywright() {
+  try { return { mod: await import('playwright') }; } catch { /* look in the project */ }
+  const roots = playwrightRoots(process.cwd(), CONFIG_PATH ? dirname(CONFIG_PATH) : null);
+  for (const r of roots) {
+    try {
+      const file = createRequire(join(r, 'noop.js')).resolve('playwright');
+      return { mod: await import(pathToFileURL(file).href) };
+    } catch { /* next */ }
+  }
+  return { mod: null, roots };
+}
 async function pw() {
   if (!chromium) {
-    try { ({ chromium } = await import('playwright')); }
-    catch {
+    const found = await loadPlaywright();
+    if (found.mod) chromium = found.mod.chromium || (found.mod.default && found.mod.default.chromium) || null;
+    if (!chromium) {
       if (cmd === 'doctor') console.error('doctor: CANNOT VERIFY any selector - no browser can run here. This is NOT a pass.');
       console.error([
         'Playwright is not installed, so no browser check can run. Nothing has been verified.',
+        '  Looked from this script\'s folder, then from (and above) each of:',
+        ...(found.roots || []).map((r) => '    ' + r),
+        '  Run from the project folder whose node_modules holds playwright, or pass --config from inside it.',
         '  Install it in this repo (ask the user first; it changes package.json):',
         '    npm i -D playwright            # drives the Chrome already installed on this machine',
         '  No Chrome? Use Edge with --channel msedge, or download a bundled browser:',
@@ -92,9 +123,10 @@ async function pw() {
 import { readFileSync, mkdirSync, writeFileSync, existsSync, statSync, readdirSync, cpSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -222,7 +254,9 @@ function findConfig() {
 }
 const CONFIG_PATH = findConfig();
 const APP = CONFIG_PATH ? JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) : {};
-const REPO = CONFIG_PATH ? resolve(dirname(CONFIG_PATH), '..') : process.cwd();
+// The repo root holds .git; the config may sit one or more folders below it (scripts/canvas/x.json).
+export function findRepo(start) { let d = start; for (let i = 0; i < 6; i++) { if (existsSync(join(d, '.git'))) return d; const up = dirname(d); if (up === d) break; d = up; } return null; }
+const REPO = CONFIG_PATH ? (findRepo(dirname(resolve(CONFIG_PATH))) || resolve(dirname(CONFIG_PATH), '..')) : (findRepo(process.cwd()) || process.cwd());
 
 // Outside the repo on purpose: this directory holds live tenant session cookies.
 const PROFILE = resolve(String(flag('profile', join(homedir(), '.canvas-browser-profile'))));
@@ -549,28 +583,48 @@ async function visibleIn(frame, text) {
 // --- in-page measurements (run inside the app frame) ---------------------------------------
 const MEASURE = {
   clipped: (attr) => {
+    // Two failures. Sideways: text wider than its box. Vertical: text taller than the box that clips it.
+    // A single line centred in a box too short for its font is cut at the TOP and the BOTTOM; centred
+    // overflow is not counted by scrollHeight (the top half is negative overflow), so the vertical test
+    // measures the rendered text against its nearest clipping ancestor instead.
     const out = []; const seen = new Set();
+    const clipBox = (el) => {
+      for (let c = el; c && c !== document.body; c = c.parentElement) {
+        const s = getComputedStyle(c);
+        if (/hidden|clip|auto|scroll/.test(s.overflowY + ' ' + s.overflow)) return { el: c, r: c.getBoundingClientRect(), scrolls: /auto|scroll/.test(s.overflowY) };
+      }
+      return null;
+    };
     for (const el of document.querySelectorAll('div,span,p')) {
       if (el.children.length > 0) continue;
       const txt = (el.textContent || '').trim();
       if (!txt) continue;
       const cs = getComputedStyle(el);
-      if (cs.overflow === 'visible' && cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
-      if (/auto|scroll/.test(cs.overflowY + cs.overflowX)) continue;   // scrolls on purpose
+      if (cs.visibility === 'hidden' || cs.display === 'none') continue;
       if (el.clientWidth < 2 || el.clientHeight < 2) continue;
       const rr = el.getBoundingClientRect();
       if (rr.bottom < 0 || rr.top > innerHeight) continue;             // below the fold
       const fs = parseFloat(cs.fontSize) || 13;
       const lh = parseFloat(cs.lineHeight) || fs * 1.4;
-      const dw = el.scrollWidth - el.clientWidth;
-      const hidden = Math.floor((el.scrollHeight - el.clientHeight) / lh); // whole lines, not px
-      if (dw < 2 && hidden < 1) continue;
+      let dw = 0, hidden = 0, vcut = 0;
+      const ownClip = !(cs.overflow === 'visible' && cs.overflowX === 'visible' && cs.overflowY === 'visible');
+      if (ownClip && !/auto|scroll/.test(cs.overflowY + cs.overflowX)) {
+        dw = el.scrollWidth - el.clientWidth;
+        hidden = Math.floor((el.scrollHeight - el.clientHeight) / lh);   // whole lines below the box
+      }
+      try {
+        const rg = document.createRange(); rg.selectNodeContents(el);
+        const tr = rg.getBoundingClientRect();
+        const cb = clipBox(el);
+        if (cb && !cb.scrolls && tr.height > 0) vcut = Math.round(Math.max(0, cb.r.top - tr.top) + Math.max(0, tr.bottom - cb.r.bottom));
+      } catch { /* no range */ }
+      if (dw < 2 && hidden < 1 && vcut < 3) continue;
       const host = el.closest('[' + attr + ']');
       const name = host ? host.getAttribute(attr) : '(unnamed)';
       const key = name + '|' + txt.slice(0, 40);
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ name, text: txt.slice(0, 96), dw, hidden, box: Math.round(el.clientWidth) + 'x' + Math.round(el.clientHeight) });
+      out.push({ name, text: txt.slice(0, 96), dw, hidden, vcut, font: Math.round(fs * 10) / 10, box: Math.round(el.clientWidth) + 'x' + Math.round(el.clientHeight) });
     }
     return out;
   },
@@ -863,7 +917,7 @@ async function runSteps(page, frameRef, steps, results) {
         if (step.mustBeClean !== false) results.failed.push({ step: i + 1, detail: key + ' ' + where, error: found.length + ' finding(s)' });
       };
       await sweep('clipcheck', MEASURE.clipped, (c) => c.name + '  box ' + c.box
-        + (c.dw >= 2 ? '  text ' + c.dw + 'px wider than box' : '') + (c.hidden >= 1 ? '  ' + c.hidden + ' line(s) hidden' : '') + '  "' + c.text + '"');
+        + (c.dw >= 2 ? '  text ' + c.dw + 'px wider than box' : '') + (c.hidden >= 1 ? '  ' + c.hidden + ' line(s) hidden' : '') + (c.vcut >= 3 ? '  text cut ' + c.vcut + 'px top+bottom (font ' + c.font + 'px)' : '') + '  "' + c.text + '"');
       await sweep('deadclick', MEASURE.dead, (d) => d.n + ' "' + d.txt + '" is covered by ' + d.by);
       await sweep('overlapcheck', MEASURE.overlaps, (p) => p.a + ' over ' + p.b + ' by ' + p.ox + 'x' + p.oy + 'px "' + p.at + '"');
 
@@ -1135,8 +1189,34 @@ function selftest() {
     ['blank display falls back to logical', missingSources([{ display: '', logical: 'x_a' }], 'nothing here').length === 1],
   ].filter(([, okc]) => !okc).map(([k]) => 'publish/tabs: ' + k);
   tabs.push(...P);
+  // Save proof: a stamp older than the click is the previous save, not this one.
+  const click = new Date(2026, 0, 1, 10, 40, 5);
+  const S = [
+    ['stamp 12 minutes old is UNPROVEN', stampVerdict('10:28:27', null, click) === 'old'],
+    ['old stamp with AM/PM', stampVerdict('Today at 10:28 AM', null, click) === 'old'],
+    ['stamp after the click lands', stampVerdict('10:40:31', '10:28:27', click) === 'landed'],
+    ['minute stamp of the click minute lands', stampVerdict('10:40 AM', null, click) === 'landed'],
+    ['unchanged stamp', stampVerdict('10:28:27', '10:28:27', click) === 'unchanged'],
+    ['no stamp', stampVerdict(null, null, click) === 'none'],
+    ['no time in the stamp', stampVerdict('just now', null, click) === 'landed-untimed'],
+    ['PM parsed', stampTime('Saved 2:05 PM', click).t.getHours() === 14],
+    ['yesterday late is old', stampVerdict('11:59:00 PM', null, click) === 'old'],
+    // second-tab must leave the held tab open until after publish (closing it first lost the push).
+    ['second-tab closes no tab', !secondTabClosesTabs()],
+    // clipcheck reports text cut at the top and the bottom, not only whole hidden lines.
+    ['clipcheck measures vertical cuts', /vcut/.test(MEASURE.clipped.toString()) && /createRange/.test(MEASURE.clipped.toString())],
+  ];
+  // Playwright from the project: the working folder, then subfolders holding node_modules (portal/).
+  try {
+    const tmp = join(tmpdir(), 'pwroots-' + randomUUID().slice(0, 8));
+    mkdirSync(join(tmp, 'portal', 'node_modules'), { recursive: true }); mkdirSync(join(tmp, 'docs'), { recursive: true });
+    const r = playwrightRoots(tmp, null);
+    S.push(['playwright roots: cwd then portal/', r[0] === tmp && r.includes(join(tmp, 'portal')) && !r.includes(join(tmp, 'docs'))]);
+    rmSync(tmp, { recursive: true, force: true });
+  } catch (e) { S.push(['playwright roots: ' + e.message, false]); }
+  tabs.push(...S.filter(([, okc]) => !okc).map(([k]) => 'save/second-tab/clip: ' + k));
   const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0 && tabs.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 23 publish-guard, review-gate, fix-batch, data-source, profile-copy, terms-dialog and auto-tidy cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 23 publish-guard, review-gate, fix-batch, data-source, profile-copy, terms-dialog and auto-tidy cases, ${S.length} save-stamp, second-tab, clipcheck and Playwright-lookup cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
          : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}], tabs -> [${tabs.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }
@@ -1425,6 +1505,29 @@ async function readSaveStamp(studio, frame) {
   return null;
 }
 
+// The time of day in a "Saved: <time>" stamp ("10:28:27", "10:28 AM", "Today at 3:05 PM"), as a Date on
+// the click's day (the day before when that would be in the future). null when the stamp has no time.
+function stampTime(stamp, ref) {
+  const m = String(stamp || '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  if (m[4]) { const pm = /p/i.test(m[4]); if (h === 12) h = pm ? 12 : 0; else if (pm) h += 12; }
+  const t = new Date(ref); t.setHours(h, Number(m[2]), m[3] ? Number(m[3]) : 0, 0);
+  if (t.getTime() - ref.getTime() > 5 * 60000) t.setDate(t.getDate() - 1);
+  return { t, seconds: !!m[3] };
+}
+// Did this click save? 'landed' (a stamp at or after the click), 'old' (a stamp from before the click:
+// the flyout's previous save, not this one), 'unchanged', 'none' (no stamp read), or 'landed-untimed'.
+function stampVerdict(after, before, clickedAt) {
+  if (!after) return 'none';
+  if (after === before) return 'unchanged';
+  const s = stampTime(after, clickedAt);
+  if (!s) return 'landed-untimed';
+  // A stamp without seconds covers its whole minute; 30 s allows for the clocks of two machines.
+  const latest = s.t.getTime() + (s.seconds ? 999 : 59999);
+  return latest < clickedAt.getTime() - 30000 ? 'old' : 'landed';
+}
+
 // What a tab is, by URL alone: a Studio editor, a blank/new-tab/crashed page, or anything else.
 function tabKind(url) {
   if (rx('browser.blankUrl').test(url)) return 'blank';
@@ -1516,24 +1619,23 @@ async function cmdSecondTab() {
     if (rx('studio.titleEditing').test(title) && names.every((n) => text.includes(n))) break;
   }
   for (const n of names) log('  ' + (text.includes(n) ? 'FOUND   ' : 'MISSING ') + n);
+  if (names.some((n) => !text.includes(n))) log(TREE_TEXT_NOTE);
   log('  title: ' + title + (rx('studio.titleReadOnly').test(title) ? '  !! READ-ONLY: this tab did not join the editing session' : ''));
   await capture(page, 'studio-second-tab');
   if (names.some((n) => !text.includes(n))) process.exitCode = 6;
-  // One Studio tab at a time: a measured build opened 13 second tabs and left them, and Studio then
-  // raised dialogs in tabs nobody was looking at. Once the new tab is in edit mode with what was
-  // expected, the older Studio tabs are left properly (Back, Leave) and closed.
-  if (!process.exitCode && rx('studio.titleEditing').test(title)) {
-    for (const old of ctx.pages().filter((p) => p !== page && isStudioTab(p))) {
-      old.on('dialog', async (d) => { await d.accept().catch(() => {}); });
-      const r = await leaveEditor(old).catch(() => ({ stillEditing: true }));
-      if (r.stillEditing) { log('  kept the older Studio tab (still in the editor): ' + old.url().slice(0, 90)); continue; }
-      await old.close({ runBeforeUnload: false }).catch(() => {});
-      log('  closed the older Studio tab');
-    }
-  }
+  // The older (held) Studio tab is NEVER closed here. Closing it before the save is the order that
+  // loses the push: measured, Save then reported a new stamp, publish succeeded, and the published
+  // package had none of the pushed screens. Every Studio tab stays open until after publish;
+  // close-studio leaves and closes them all (or `tidy --studio` once the publish is proven).
+  const older = ctx.pages().filter((p) => p !== page && isStudioTab(p)).length;
+  if (older) log('  kept ' + older + ' older Studio tab(s) open on purpose: closing one before save and publish loses the push. close-studio closes them after publish.');
   log('  save / publish / keys now use this tab; close-studio leaves every Studio tab.');
   await browser.close();
 }
+const TREE_TEXT_NOTE = '  (MISSING reads the rendered tree text, which is virtualised: it is not proof of absence. Confirm a push by reading a pushed'
+  + ' control\'s property in the formula bar, or in the published package.)';
+// --selftest: second-tab must close nothing but its own CDP connection.
+const secondTabClosesTabs = () => /\.close\(/.test(cmdSecondTab.toString().replace(/browser\.close\(\)/g, ''));
 
 // Is a pushed control actually in the editor? Read the held tab's tree view and canvas text.
 async function cmdStudioHas() {
@@ -1544,7 +1646,7 @@ async function cmdStudioHas() {
   const text = await framesText(studio);
   for (const n of names) log('  ' + (text.includes(n) ? 'FOUND   ' : 'MISSING ') + n);
   log('  tab: ' + await studio.title().catch(() => '?'));
-  if (names.some((n) => !text.includes(n))) process.exitCode = 6;
+  if (names.some((n) => !text.includes(n))) { log(TREE_TEXT_NOTE); process.exitCode = 6; }
   await browser.close();
 }
 
@@ -1621,13 +1723,23 @@ async function cmdSave() {
   const before = await readSaveStamp(studio, hit.frame);
   // A REAL click (trusted event, actionability checks). element.click() through evaluate() was
   // measured to do nothing on Studio's command bar while reporting success.
+  const clickedAt = new Date();
   await hit.ctl.click({ timeout: 20000 });
-  log('  clicked Save; waiting for it to land ...');
+  log('  clicked Save at ' + clickedAt.toLocaleTimeString() + '; waiting for it to land ...');
   await studio.waitForTimeout(Number(flag('after', 25000)));
   const after = await readSaveStamp(studio, hit.frame);
   await capture(studio, 'save-after');
-  if (after && after !== before) {
-    log('  SAVE LANDED: "Saved: ' + after + '"' + (before ? '  (was "' + before + '")' : ''));
+  const verdict = stampVerdict(after, before, clickedAt);
+  if (verdict === 'old') {
+    // Measured: "SAVE LANDED: Saved: 10:28:27" printed at 10:40 - the flyout's OLD stamp, after a click
+    // that saved nothing (a clean push had not marked Studio dirty). A stamp older than the click is
+    // not this save.
+    log('  !! "Saved: ' + after + '" is OLDER than the click (' + clickedAt.toLocaleTimeString() + '): this click saved nothing. The save is UNPROVEN.');
+    log('     Run `dirty`, then `save` again, and read a stamp at or after the click time.');
+    process.exitCode = 7;
+  } else if (verdict === 'landed' || verdict === 'landed-untimed') {
+    log('  SAVE LANDED: "Saved: ' + after + '"' + (before ? '  (was "' + before + '")' : '')
+      + (verdict === 'landed-untimed' ? '  (no time of day in the stamp to compare with the click - check it by eye)' : ''));
   } else if (after && after === before) {
     log('  !! "Saved: ' + after + '" did not move. Studio saw nothing to save: the change may live only in the');
     log('     co-authoring session (was Studio in Preview when it arrived?). Treat the save as NOT done.');

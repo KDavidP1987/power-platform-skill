@@ -34,6 +34,19 @@ export function checkPaYaml(text, { fileCount = null, ceiling = 50, warnAt = 45 
     // block, and YAML then reports "found invalid mapping" far BELOW the real fault.
     if (block) {
       if (blank) return;
+      if (/^\s*#/.test(line)) {
+        // A comment at the key's indent or shallower ends the block as a key does (section banners
+        // between controls compile). One at the formula's indent IS formula text, and # is not a
+        // Power Fx comment: the compile fails. In between, skip it and keep scanning.
+        const base = block.baseIndent === null ? indent : block.baseIndent;
+        if (indent > block.keyIndent && indent >= base) {
+          problems.push(`${n}: a # comment inside a block scalar is part of the formula, and # is not a Power Fx comment - ` +
+            `the compile fails. Use // inside a formula, or move the note out of it.`);
+          if (block.baseIndent === null) block.baseIndent = indent;
+        }
+        if (indent <= block.keyIndent) block = null;
+        return;
+      }
       if (block.baseIndent === null) block.baseIndent = indent;
       if (indent > block.keyIndent && indent < block.baseIndent) {
         problems.push(`${n}: line is indented ${indent} but its block scalar started at ${block.baseIndent} - ` +
@@ -53,10 +66,14 @@ export function checkPaYaml(text, { fileCount = null, ceiling = 50, warnAt = 45 
         `     ${m[1].slice(0, 90)}`);
     }
 
-    // 2. A YAML comment. These files are machine-serialised and round-tripped; comments vanish.
-    if (/^\s+#/.test(line)) {
-      problems.push(`${n}: comment inside a .pa.yaml - the authoring service round-trips these files ` +
-        `and drops comments. Put the reasoning in the commit message or the decisions log.`);
+    // 2. " #" in a single-line value starts a YAML comment and silently cuts the formula there
+    //    ("Order #" lost the rest of its formula). Full-line comments between controls and properties
+    //    are NOT compile faults - a 33-screen app full of section banners compiled with 0 errors - so
+    //    they pass (a round trip may drop them; keep reasoning in the commit or the decisions log).
+    const sv = line.match(/^\s+[A-Za-z0-9_]+: (=.*)$/);
+    if (sv && /\s#/.test(sv[1])) {
+      problems.push(`${n}: " #" in a single-line value starts a YAML comment and cuts the formula there. ` +
+        `Write "No." (or Char(35) for the #), or move the formula into a block scalar (| ).\n     ${sv[1].slice(0, 90)}`);
     }
 
     // 3. Tooltip on a modern (Fluent) Button: a hard bind error. Labels and some classic
@@ -101,7 +118,11 @@ function selftest() {
     '          Control: Label',
     '          Properties:',
     '            Text: ="Total: " & gblTotal',
-    '            # explain the total',
+    '            Tooltip: ="Order #" & gblNo',
+    '            OnVisible: |',
+    '              =Set(a, 1);',
+    '              # load the rows',
+    '              Set(b, 2)',
     '      - btnSave:',
     '          Control: Button',
     '          Properties:',
@@ -120,6 +141,16 @@ function selftest() {
     '          Properties:',
     '            Text: ="Total:" & " " & gblTotal',
     '            Tooltip: ="Running total"',
+    '            OnVisible: |',
+    '              =Set(a, 1);',
+    '              // a Power Fx comment is fine',
+    '              Set(b, 2)',
+    '      # ---------- Shared app shell ----------',
+    '      - recBand:',
+    '          Control: Rectangle',
+    '          Properties:',
+    '            # the band behind the header',
+    '            Fill: =ColorValue("#1F3A5F")',
     '      - btnSave:',
     '          Control: Button',
     '          Properties:',
@@ -130,7 +161,7 @@ function selftest() {
   ].join('\n');
   const pb = checkPaYaml(bad, { fileCount: 51 });
   const pg = checkPaYaml(good, { fileCount: 12 });
-  const want = ['colon-space', 'comment', 'Tooltip', 'indented', 'ceiling'];
+  const want = ['colon-space', 'starts a YAML comment', 'not a Power Fx comment', 'Tooltip', 'indented', 'ceiling'];
   const missing = want.filter((w) => !pb.some((p) => p.includes(w)));
   // Plugin mode: runs where the session's folder has no harness copy, stands down where it has one.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-yaml-plugin-'));

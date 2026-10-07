@@ -312,7 +312,19 @@ preconditions change.
   white. But in one case the shell stayed empty (root present, zero menu items, five minutes) and
   could not save. **Fix: while the push session is still held, open a SECOND tab on the same edit
   URL.** It joins that session and renders the pushed document; a real-click Save there landed.
-  Then Back, reopen fresh, confirm. This removes the reload catch-22.
+  Then Back, reopen fresh, confirm. This removes the reload catch-22. **Keep the first tab open
+  until after publish.** `canvas-browser.mjs second-tab` never closes the held tab: an earlier
+  version left and closed it as soon as the new tab was editing, before the save, and Save then
+  printed "SAVE LANDED", publish succeeded, and the downloaded package held none of the three
+  pushed screens. `close-studio` (or `tidy --studio`) closes the older tabs once the publish is
+  confirmed. `second-tab --expect` and `studio-has` read the rendered tree text, which is
+  virtualised, so MISSING there is not proof of absence: confirm a push by reading a pushed
+  control's property in the formula bar, or by searching the published package.
+  **A save stamp older than the click is not this save.** `save` records when it clicked and
+  compares the flyout's `Saved: <time>` with it: measured, it read a stamp 12 minutes old after a
+  click that saved nothing (a clean push had not marked Studio dirty) and printed SAVE LANDED. It
+  now reports UNPROVEN (exit 7) when the stamp is older than the click; run `dirty`, then `save`
+  again. After a push, run `dirty` before `save` by default.
 - **A reload discards the push** - it joins a new session that does not contain it. The screen
   looks broken, the instinct is to refresh, and the work is gone. One exception: after a session
   expiry Studio can silently re-attach to a new session on its own (white screen, nobody reloaded,

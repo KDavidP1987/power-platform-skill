@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.26.0"
+  version: "0.27.0"
 ---
 
 # Power Platform development
@@ -169,14 +169,16 @@ user unproven.
    app").
 3. **Build in source.** Edit `.pa.yaml`, solution XML, or flow JSON in the repo. Hooks check each
    write for the compile-killers in `references/power-fx-and-pa-yaml.md`. **When the hooks are not
-   wired in the project, run the checks yourself before you finish** - a YAML comment or an
-   unquoted `": "` in a formula fails the whole app's compile, and nothing else will say so:
+   wired in the project, run the checks yourself before you finish** - a `#` line inside a formula
+   or an unquoted `": "` in one fails the whole app's compile, and nothing else will say so:
    `node scripts/hooks/check-pa-yaml.mjs <Src>`, `node scripts/check-canvas-format.mjs <Src>` and
    `node scripts/check-canvas-overlap.mjs <Src>` over every folder you wrote to, and
    `node scripts/lint-flows.mjs <flows>` over every flow. **Every label bound to
    data must fit the longest value it can show, or clamp with an ellipsis and a tooltip** -
    `scripts/check-canvas-format.mjs` checks it, with lengths from Dataverse metadata, and also
    fails literal colours once the theme exists (`references/canvas-layout.md` sections 8 and 10).
+   Every text control must fit vertically as well as horizontally (`text-cut-vertically`: Size is
+   points, a line is about 1.15 x Size x 4/3 px; a one-line data cell takes Wrap false and a tooltip).
    **No control may sit over another that can be on screen at the same time** - a new button over
    a label that only shows under some condition is the commonest layout defect an agent makes.
    `scripts/check-canvas-overlap.mjs` compares every pair across all their `Visible` conditions

@@ -474,6 +474,11 @@ duplicate**.
   anything whose result gates the next statement must be written inline. **`Select()` on a control
   with no `OnSelect` is a silent no-op** - a Refresh button that selected a nav label (which by
   convention had none) never rebuilt anything, and shipped "verified" by marker.
+- **Two queued `Select()`s: the second runs before the first's data lands.** `OnVisible:
+  Select(btnLoad); Select(btnBuild)` built every table from EMPTY collections in the published
+  player - the header bound to the loaded collections showed data, every built table was blank, and
+  any switch that re-selected the build filled them. Never chain two `Select`s where the second
+  depends on the first: run the load inline in `OnVisible`, then one `Select(btnBuild)` after it.
 - **`Refresh()` of a source the control does not read does nothing visible.** A gallery bound to a
   collection is unaffected by `Refresh('Orders')`; rebuild what the control actually binds.
 - **`Switch()` and `If()` take their result type from the first branch** and coerce the rest:
@@ -485,7 +490,10 @@ duplicate**.
   sentences read "Order total    items", and users could not tell where to click. A guard written
   `x = 0` does not catch Blank, so a percentage divided by it threw; a Blank persisted to a header
   total recorded "unknown" rather than zero. Wrap every displayed, persisted or dividing aggregate:
-  `Coalesce(Sum(...), 0)`, and sweep every total when you find one.
+  `Coalesce(Sum(...), 0)`, and sweep every total when you find one. **`Blank <> 0` is true**, so a
+  branch on a sum takes the wrong side: `If(Sum(colLines, Budget) <> 0, fromLines, fallback)` chose
+  the lines branch, with a blank budget, for every category that had no lines. Coalesce every `Sum`
+  that feeds a comparison, not only the ones on display.
 - **The same holds for a variable that has not been set yet.** `If(gblTotal = 0, 0, done / gblTotal)`
   divided by Blank in Studio before any record was opened, and Studio showed "Invalid operation:
   division by zero" on the first compile. Guard with `Coalesce(gblTotal, 0) = 0`.
@@ -495,8 +503,14 @@ duplicate**.
 - **`Text(x, "0.##")` keeps a dangling separator.** `Text(40, "[$-en-US]0.##")` renders "40." (as
   Excel does). It compiled, passed every audit and shipped twice in one app (eighteen sites, then
   seven). Use a fixed format (`"0.00"`) or bare `Text(x)`.
-- **`%` in a Power Fx format string does not multiply by 100.** `Text(0.64, "0.0%")` prints "0.6%".
-  Scale it yourself: `Text(x * 100, "[$-en-US]0.0") & "%"`.
+- **`%` in a Power Fx format string does not multiply by 100**, as Excel's does. `Text(0.64,
+  "0.0%")` prints "0.6%" (seen again in a published player: 0.494 showed "0.5%"). Scale it
+  yourself: `Text(x * 100, "[$-en-US]0.0") & "%"`, and search the app for `%"` inside every `Text(`.
+- **A screen that grows past the window needs a narrower width.** A report or print screen whose
+  `Height` exceeds `App.Height` gets a vertical scrollbar that takes about 17 px of the width, so a
+  `Width` of `App.Width` (or a floored `lyW`) then scrolls sideways too. Write
+  `Width: =If(Self.Height > App.Height, lyW - 18, lyW)`, and run the walk's sideways-scroll check
+  on growing screens at desktop width as well as on a phone.
 - **Sectioned format masks leak into the UI.** `Text(v, "+$#,##0;-$#,##0")` showed users
   `+$16;-$7,598` in one app (the project read it as locale-dependent; unverified). A small
   user-defined function that renders sign, currency and percent explicitly, applied at every
@@ -585,10 +599,14 @@ rarely points at the responsible line. The bundled hook catches the first four a
   strings avoids the trap in captions.
 - **A `#` preceded by a space in a single-line value starts a YAML comment** - `"Order #"` lost
   the rest of the formula; one app renamed it "Order No".
-- **No YAML comments.** The service round-trips these files and drops them; put reasoning in the
-  commit message or the decisions log. (A tooling note: a comment line indented shallower than a
-  block scalar legitimately ends the block, so an indentation checker must skip comment lines
-  rather than read them as broken continuations.)
+- **A `#` line inside a formula is formula text, and `#` is not a Power Fx comment.** Inside a
+  block scalar (`OnSelect: |`) write `//` or `/* */`. Full-line YAML comments **between** controls or
+  properties are not compile faults: an app with section banners (`# ---------- Shared shell
+  ----------`) at the control indent on 30 of its 32 screens compiled with 0 errors. They may still
+  be dropped when the service round-trips the file, so keep reasoning in the commit message or the
+  decisions log. (A tooling note: a comment line at or shallower than the key's indent ends a block
+  scalar as a key does, so an indentation checker must skip it rather than read it as a broken
+  continuation.)
 - **`Tooltip` on a modern Button** - a hard bind error (`canvas-controls-and-patterns.md`,
   section 1).
 - **The ~50 file ceiling** - see `canvas-shipping.md`.

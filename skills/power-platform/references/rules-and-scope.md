@@ -65,9 +65,13 @@ matters.
 |---|---|---|---|
 | Design (DESIGN.md, `design/prototype.html`) before the first screens of a new app | hook (before tools) | `plugin-gate.mjs` rule A | a build never ran the design step though it was "required" |
 | Design record, critique and review before hand-back | hook (Stop) | `plugin-gate.mjs` evaluate, and the harness's `audit-stop.mjs` (same function) | as above |
-| Compile-killers in `.pa.yaml` | hook (each write): the harness copy, or the plugin's own where the session's folder has no harness copy | `check-pa-yaml.mjs` (`--plugin` from the plugin) | each pattern broke a real compile; a session opened at a parent folder ran no harness and missed one |
+| Compile-killers in `.pa.yaml` (a full-line comment between controls is not one; a `#` line inside a formula and ` #` in a single-line value are) | hook (each write): the harness copy, or the plugin's own where the session's folder has no harness copy | `check-pa-yaml.mjs` (`--plugin` from the plugin) | each pattern broke a real compile; a session opened at a parent folder ran no harness and missed one; section banners compiled clean on 30 screens |
 | Text fit, theme tokens, contrast, visible build stamp, accessible names | hook (each write) | `check-canvas-format.mjs` | measured clipping and a stamp shown to users |
-| Controls drawn over controls | hook (each write) | `check-canvas-overlap.mjs` | measured |
+| Text fits vertically: one line of the font fits the box (`text-cut-vertically`); a one-line box holding data that can exceed its width has Wrap false and a Tooltip (`one-line-box-wraps`); a literal paragraph has room for its lines at the design width (`literal-text-overflow`) | hook (each write) and script check | `check-canvas-format.mjs` | labels cut at the top and the bottom shipped past every check; 14 found in one published app |
+| A text check that measured none of the bound text is not a pass (exit 2); under half measured warns loudly | script check | `check-canvas-format.mjs` | layout constants lost to a comment: 0 of 225 measured, 0 findings |
+| Controls drawn over controls; text over a clickable shape (`covers-control`); a click-to-dismiss scrim is still a modal backdrop | hook (each write) | `check-canvas-overlap.mjs` | measured; a clickable scrim produced 259 false overlaps in one app |
+| Text cut at the top and the bottom in the running app | script check (walk step `clipcheck`) | `canvas-browser.mjs` | measured: 14 cut labels the whole-line count missed |
+| The held Studio tab stays open until after publish; a save stamp older than the click is UNPROVEN | script check | `canvas-browser.mjs second-tab`, `save` | a push lost after the held tab closed; SAVE LANDED printed for a 12-minute-old stamp |
 | Screen-file ceiling | hook (Stop) | `audit-stop.mjs` | a compile refused at 50 files |
 | No critique floor | none, deliberately | | no canvas build has been measured against a floor yet; record the score, add a floor when the evidence exists |
 | Know which build runs (5); delegation (10) | instruction, plus `check-drift.py`, build-stamp read-back in `ship-canvas.py` | SKILL.md 5, 10 | per screen judgement |

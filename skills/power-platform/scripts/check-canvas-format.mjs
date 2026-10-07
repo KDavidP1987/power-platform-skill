@@ -39,7 +39,12 @@
 //   node check-canvas-format.mjs --hook            PostToolUse hook: file path from stdin JSON
 //   node check-canvas-format.mjs --selftest
 //
-// Exit: 0 clean, 1 findings, 2 nothing examined (no files, or no data-bound text control) - NOT a pass.
+// 8. VERTICAL FIT. Size is in points (px = Size x 4/3) and a rendered line is about 1.15 x px; a box
+//    shorter than one line (text-cut-vertically), or a one-line box whose data can wrap
+//    (one-line-box-wraps: set Wrap false + Tooltip), shows centred text cut at the top and the bottom.
+//
+// Exit: 0 clean, 1 findings, 2 nothing examined (no files, no data-bound text control, or none of the
+// bound text measurable) - NOT a pass. Under half measured prints a loud warning.
 // The formula, its error direction and the four remedies: references/canvas-layout.md, "Long text".
 // Names and contrast: references/canvas-layout.md, "Accessible names and contrast".
 import fs from 'node:fs';
@@ -60,7 +65,7 @@ export const DEFAULTS = {
 // 0.56 em per character - wider than typical mixed-case text (about 0.5 em), so the estimate errs
 // toward "does not fit". Semibold or bold is 6% wider. A wrapped box loses part of each line to
 // word breaks: 10% of the multi-line width is held back.
-export const MODEL = { pxPerPt: 4 / 3, unknownEm: 0.56, boldFactor: 1.06, wrapLoss: 0.9 };
+export const MODEL = { pxPerPt: 4 / 3, unknownEm: 0.56, boldFactor: 1.06, wrapLoss: 0.9, glyphLine: 1.15, cutTolerance: 3 };   // glyphLine: rendered Arial line / font px, measured in the player 2026-10-07
 const NARROW = { ' ': 0.27, i: 0.24, l: 0.24, j: 0.24, "'": 0.2, '.': 0.27, ',': 0.27, ':': 0.27, ';': 0.27, '!': 0.3, '|': 0.25,
   f: 0.32, t: 0.35, r: 0.35, I: 0.27, '(': 0.32, ')': 0.32, '-': 0.36, '/': 0.4 };
 const WIDE = { m: 0.82, w: 0.73, M: 0.85, W: 0.9, '@': 0.9, '%': 0.8 };
@@ -518,11 +523,26 @@ export function readConstants(appText) {
   for (const m of appText.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(-?\d+(?:\.\d+)?)\s*;/gm)) consts.set(m[1], Number(m[2]));
   return consts;
 }
+// Power Fx comments (// line, /* block */) outside strings. App.Formulas usually starts each group with
+// a comment; left in, the comment glues itself to the next statement ("// layout <newline> lyW = ...")
+// and that statement - and every constant derived from it - is never read.
+export function stripFxComments(src) {
+  let out = '', q = null;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (q) { out += ch; if (ch === q) q = null; continue; }
+    if (ch === '"' || ch === "'") { q = ch; out += ch; continue; }
+    if (ch === '/' && src[i + 1] === '/') { while (i < src.length && src[i] !== '\n') i++; out += '\n'; continue; }
+    if (ch === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); i = e < 0 ? src.length : e + 1; out += ' '; continue; }
+    out += ch;
+  }
+  return out;
+}
 // Named Formulas statements (App.Formulas), split at top-level semicolons; user-defined functions skipped.
 export function formulaStatements(appText) {
   let src = '';
   try { src = parseYaml(appText).App?.Properties?.Formulas?.v || ''; } catch { return []; }
-  src = src.replace(/^\s*=/, '');
+  src = stripFxComments(src.replace(/^\s*=/, ''));
   const out = []; let depth = 0, cur = '', q = null;
   for (const ch of src) {
     if (q) { cur += ch; if (ch === q) q = null; continue; }
@@ -777,7 +797,20 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
     const px = size * MODEL.pxPerPt;
     const innerW = W - val('PaddingLeft') - val('PaddingRight');
     const innerH = H - val('PaddingTop') - val('PaddingBottom');
-    const lines = wrap ? Math.max(1, Math.floor(innerH / (px * lh))) : 1;
+    // Size is in POINTS (13 pt = 17.3 px; a line is about 1.2 x that). Text may draw into the padding,
+    // but not past the control's box: a line taller than the box, or more wrapped lines than the box
+    // holds, is centred and loses its top AND its bottom - unreadable, and invisible to any check that
+    // counts whole hidden lines (measured in the player: canvas-browser clipcheck "text cut").
+    const linePx = px * Math.min(lh, MODEL.glyphLine);
+    const fitLines = Math.floor((H + MODEL.cutTolerance) / linePx);
+    if (fitLines < 1 && !auto) {
+      const needH = Math.ceil(linePx);
+      findings.push({ level: 'error', code: 'text-cut-vertically', file: c.file, line: c.props.Height?.line || c.line, control: c.name, gallery: !!gal,
+        msg: `${where}: the box is ${H} high but one line of size ${size} text is ${needH} px; the text is cut at the top and the bottom. ` +
+          `Set Height to ${needH + 4} or more, or a smaller Size (Size is in points: px = pt x 4/3).` });
+      continue;
+    }
+    const lines = wrap ? fitLines : 1;
     const roomPx = Math.max(0, innerW) * lines * (lines > 1 ? MODEL.wrapLoss : 1);
     const needPx = L.em * px * bold;
     const capacity = Math.floor(roomPx / (px * MODEL.unknownEm * bold));   // characters of unknown text that fit
@@ -797,7 +830,21 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
     if (needPx <= roomPx) continue;
     if (auto && !fixedRow) continue;                        // remedy b: grows (flexible-height gallery, or free layout)
     if (overflowScroll && !gal && wrap) continue;            // remedy d: a detail pane that scrolls
+    // Remedy a, short form: one line (Wrap false) cut at the right edge, the full value in a Tooltip
+    // that reads every column the text reads. It cannot be cut vertically, and hover shows the rest.
+    if (!literal && !wrap && tipAst && tipMissing.length === 0) continue;
     const suggest = Math.max(4, capacity);
+    // A one-line box with Wrap on: a value wider than the box wraps to a second line the box cannot
+    // hold, and the centred text is cut at the top AND the bottom - nothing readable is left. Only
+    // when the value can exceed the width (we are past needPx <= roomPx) and nothing shows the rest.
+    if (!literal && wrap && fitLines === 1 && !auto && !tipAst && !c.props.OnSelect?.v) {
+      findings.push({ level: 'error', code: 'one-line-box-wraps', file: c.file, line: c.props.Wrap?.line || c.line, control: c.name, gallery: !!gal,
+        msg: `${where}: a one-line box (${W}x${H} at size ${size}) with Wrap on can receive ${lenTxt} (${cols || 'data'}${L.heuristic ? '; a length was guessed from a column name - pass --schema' : ''}), ` +
+          `room for about ${capacity}. A longer value wraps to a line the box cannot show and the text is cut at the top and the bottom. ` +
+          `Set Wrap: =false and Tooltip: =<the same text> (or clamp with an ellipsis, remedy a).`,
+        capacity, maxLength: L.n, guessed: !!L.heuristic });
+      continue;
+    }
     if (literal) {
       findings.push({ level: 'error', code: 'literal-text-overflow', file: c.file, line: c.line, control: c.name, gallery: !!gal,
         msg: `${where}: the literal text (${L.n} characters) does not fit: the box has room for about ${capacity} characters ` +
@@ -808,6 +855,7 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
       msg: `${where}: has room for about ${capacity} characters (${lines} line${lines === 1 ? '' : 's'}, ${W}x${H} at size ${size}${wrap ? '' : ', no wrap'}) ` +
         `but can receive ${lenTxt} (${cols || 'data'}${L.heuristic ? '; a length was guessed from a column name - pass --schema' : ''}).` +
         (auto && fixedRow ? ' AutoHeight does not help in a fixed-height gallery: the row still clips.' : '') +
+        (wrap && fitLines === 1 ? ' In a one-line box set Wrap: =false too, or the wrapped text is cut at the top and the bottom.' : '') +
         ` Fix: Text: =With({v: <text>}, If(Len(v) > ${suggest}, Left(v, ${suggest - 3}) & "...", v)) with Tooltip: =<text>, or a flexible-height gallery with AutoHeight.`,
       capacity, maxLength: L.n, gallery: !!gal, guessed: !!L.heuristic });
   }
@@ -1035,9 +1083,19 @@ export function loadSchema(file) {
   const j = JSON.parse(fs.readFileSync(file, 'utf8').replace(BOM, ''));
   return j.tables || j.columns || j.overrides ? { tables: j.tables || null, columns: j.columns || {}, overrides: j.overrides || {} } : { columns: j };
 }
+// Is the run vacuous? A clean result over controls it could not measure proves nothing: measured on a
+// 33-screen app, layout constants lost to a comment left "0 measured, 225 not measurable" and 0 findings.
+export function vacuity(stats) {
+  if (!stats.bound) return { level: 'ok', msg: '' };
+  if (stats.measured === 0) return { level: 'none', msg: `NONE of the ${stats.bound} data-bound text control(s) could be measured - this run checked nothing and is NOT a pass. ` +
+    'Their Width/Height/Size did not resolve: define the layout constants in App.Formulas (or App.OnStart) as numbers or formulas over App.Width, or pass --screen-width.' };
+  if (stats.measured * 2 < stats.bound) return { level: 'warn', msg: `WARNING: only ${stats.measured} of ${stats.bound} data-bound text control(s) were measured - most of this app was NOT checked. ` +
+    'Read the "unmeasured" controls (--json) and make their geometry resolvable before trusting a clean result.' };
+  return { level: 'ok', msg: '' };
+}
 function report(res, json) {
   const { findings, stats } = res;
-  if (json) { console.log(JSON.stringify(res, null, 2)); return; }
+  if (json) { console.log(JSON.stringify({ ...res, vacuity: vacuity(stats) }, null, 2)); return; }
   for (const f of findings.filter((x) => x.level !== 'info')) console.log(`${f.level.toUpperCase().padEnd(5)} ${f.code}  ${path.basename(f.file)}:${f.line}  ${f.msg}`);
   const unm = findings.filter((x) => x.code === 'unmeasured').length;
   console.log(`\n${stats.files} screen file(s); ${stats.textControls} text control(s), ${stats.bound} bound to data, ${stats.measured} measured` +
@@ -1047,6 +1105,8 @@ function report(res, json) {
     `${stats.nameChecked} control(s) needing a name, ${stats.unnamed} without one; text contrast: ${stats.contrastExamined} examined, ` +
     `${stats.lowContrast} below the minimum, ${stats.contrastUnexamined} not examined (colour or backdrop unresolved - not a pass).`);
   console.log('Room is an estimate that errs toward "does not fit"; confirm a borderline case in the running app.');
+  const v = vacuity(stats);
+  if (v.level !== 'ok') console.log('\n!! ' + v.msg);
 }
 
 // The build-stamp variable is the one the ship writes (canvas-app.json buildStampVariable, default gblBuild).
@@ -1098,7 +1158,13 @@ const label = (name, props) => ['            - ' + name + ':', '                
 const SCHEMA = { Title: 200, Notes: { maxLength: 2000 }, Code: 8, 'Status (app_status)': { values: ['Open', 'Waiting on Approval', 'Closed'] } };
 const CASES = [
   // [name, rows, expected codes]
-  ['long-title-clips', label('lblTitle', { Text: '=ThisItem.Title', Width: '=300', Height: '=22', Size: '=11' }), ['text-overflow']],
+  ['long-title-clips', label('lblTitle', { Text: '=ThisItem.Title', Width: '=300', Height: '=22', Size: '=11', Wrap: '=false' }), ['text-overflow']],
+  ['one-line-box-wraps', label('lblTitle', { Text: '=ThisItem.Title', Width: '=300', Height: '=22', Size: '=11' }), ['one-line-box-wraps']],
+  ['one-line-wrap-false-with-tooltip', label('lblTitle', { Text: '=ThisItem.Title', Tooltip: '=ThisItem.Title', Width: '=300', Height: '=22', Size: '=11', Wrap: '=false' }), []],
+  ['wrap-false-tooltip-other-column', label('lblTitle', { Text: '=ThisItem.Title', Tooltip: '=ThisItem.Code', Width: '=300', Height: '=22', Size: '=11', Wrap: '=false' }), ['text-overflow']],
+  ['one-line-short-value-wraps-harmlessly', label('lblCode', { Text: '=ThisItem.Code', Width: '=120', Height: '=22', Size: '=10' }), []],
+  ['text-cut-vertically', label('lblBig', { Text: '=ThisItem.Code', Width: '=300', Height: '=20', Size: '=26' }), ['text-cut-vertically']],
+  ['one-line-13pt-in-18-fits', label('lblCode', { Text: '=ThisItem.Code', Width: '=120', Height: '=18', Size: '=13' }), []],
   ['clamped-with-tooltip', label('lblTitle', { Text: '=With({v: ThisItem.Title}, If(Len(v) > 34, Left(v, 31) & "...", v))', Tooltip: '=ThisItem.Title', Width: '=300', Height: '=22', Size: '=11' }), []],
   ['clamped-inline-with-tooltip', label('lblTitle', { Text: '=If(Len(ThisItem.Title) > 34, Left(ThisItem.Title, 31) & "...", ThisItem.Title)', Tooltip: '=ThisItem.Title', Width: '=300', Height: '=22', Size: '=11' }), []],
   ['clamped-without-tooltip', label('lblTitle', { Text: '=Left(ThisItem.Title, 30)', Width: '=300', Height: '=22', Size: '=11' }), ['clamped-without-full-text']],
@@ -1106,7 +1172,7 @@ const CASES = [
   ['clamped-opens-detail', label('lblTitle', { Text: '=Left(ThisItem.Title, 30)', OnSelect: '=Set(locOpen, ThisItem)', Width: '=300', Height: '=22', Size: '=11' }), []],
   ['short-code-fits', label('lblCode', { Text: '="Ref " & ThisItem.Code', Width: '=120', Height: '=22', Size: '=10' }), []],
   ['choice-measured-by-its-labels', label('lblStatus', { Text: '=ThisItem.\'Status (app_status)\' & ""', Width: '=150', Height: '=24', Size: '=10', FontWeight: '=FontWeight.Semibold' }), []],
-  ['choice-too-narrow', label('lblStatus', { Text: '=ThisItem.\'Status (app_status)\' & ""', Width: '=90', Height: '=24', Size: '=10' }), ['text-overflow']],
+  ['choice-too-narrow', label('lblStatus', { Text: '=ThisItem.\'Status (app_status)\' & ""', Width: '=90', Height: '=24', Size: '=10' }), ['one-line-box-wraps']],
   ['parent-width-relative', label('lblNotes', { Text: '=ThisItem.Notes', Width: '=Parent.TemplateWidth - 20', Height: '=40', Size: '=10' }), ['text-overflow']],
   ['autoheight-in-fixed-row', label('lblNotes', { Text: '=ThisItem.Notes', Width: '=300', Height: '=40', Size: '=10', AutoHeight: '=true' }), ['autoheight-in-fixed-row']],
   ['scroll-in-row', label('lblNotes', { Text: '=ThisItem.Notes', Width: '=300', Height: '=40', Size: '=10', Overflow: '=Overflow.Scroll' }), ['scroll-in-gallery-row']],
@@ -1145,7 +1211,7 @@ function selftest() {
      '            Width: =120', '            Height: =22', '            Size: =10'].join('\n');
   const rs = run(sel('Category'), tschema);
   if (rs.findings.some((f) => f.level === 'error') || rs.stats.bound !== 2) fails.push(`Selected.Category of a Requests gallery should fit (bound ${rs.stats.bound})`);
-  if (!run(sel('Notes')).findings.some((f) => f.code === 'text-overflow' && /lblSel/.test(f.msg + (f.control || '')))) fails.push('Selected.Notes (2,000) should overflow 120 px');
+  if (!run(sel('Notes')).findings.some((f) => /^(text-overflow|one-line-box-wraps)$/.test(f.code) && /lblSel/.test(f.msg + (f.control || '')))) fails.push('Selected.Notes (2,000) should overflow 120 px');
   // With(): a bound name carries its clamped length.
   const r7 = run(screen(label('lblW', { Text: '=With({t: Left(ThisItem.Notes, 8)}, "Note " & t)', Width: '=120', Height: '=22', Size: '=10', Tooltip: '=ThisItem.Notes' })));
   if (r7.findings.some((f) => f.level === 'error') || r7.stats.bound !== 1) fails.push('With(): a bound name carries its clamped length');
@@ -1154,7 +1220,7 @@ function selftest() {
     .replace('    Children:\n      - galItems:', '    Properties:\n      OnVisible: =ClearCollect(colRows, ForAll(Requests As r, {Short: Left(r.Notes, 10), Long: r.Notes}))\n    Children:\n      - galItems:');
   const rc = run(coll);
   if (rc.findings.some((f) => f.level === 'error') || rc.stats.collections !== 1) fails.push(`collection column measured from its formula (collections ${rc.stats.collections})`);
-  if (!run(coll.replace('ThisItem.Short', 'ThisItem.Long')).findings.some((f) => f.code === 'text-overflow')) fails.push('a long collection column should overflow');
+  if (!run(coll.replace('ThisItem.Short', 'ThisItem.Long')).findings.some((f) => /^(text-overflow|one-line-box-wraps)$/.test(f.code))) fails.push('a long collection column should overflow');
   // Lists: a table gallery with no input feeding it is advised; a dropdown or search feeding it, a
   // literal table, or a nested gallery is not. The advice is a warning, so the CLI exit stays 0.
   const listCode = (text) => run(text).findings.filter((f) => f.code === 'list-without-filter').map((f) => f.level);
@@ -1220,6 +1286,12 @@ function selftest() {
   expect('literal: long hint clips', free([['lblHint', 'Label', { ...box, Width: '=120', Height: '=22', Size: '=10', Text: hint }]]), ['literal-text-overflow']);
   expect('literal: hint with room', free([['lblHint', 'Label', { ...box, Width: '=600', Height: '=40', Size: '=10', Text: hint }]]), []);
   expect('literal: If of captions', free([['lblHint', 'Label', { ...box, Width: '=60', Height: '=22', Size: '=10', Text: '=If(locNew, "New order for this vendor", "Edit")' }]]), ['literal-text-overflow']);
+  // Vertical fit: a paragraph wrapping to 3 lines where 2 fit; a font too tall for its box; the tolerance.
+  const para = '="Orders placed after the cut-off are packed the next working day. Vendors who ship direct confirm the date by email, and the order shows it once they do."';
+  expect('literal: a paragraph that wraps to 3 lines in a 2-line box', free([['lblPara', 'Label', { ...box, Width: '=300', Height: '=44', Size: '=11', Text: para }]]), ['literal-text-overflow']);
+  expect('literal: the same paragraph with room for 4 lines', free([['lblPara', 'Label', { ...box, Width: '=300', Height: '=84', Size: '=11', Text: para }]]), []);
+  expect('vertical: size 26 in a 20-high box is cut', free([['lblHead', 'Label', { ...box, Width: '=300', Height: '=20', Size: '=26', Text: '="Orders"' }]]), ['text-cut-vertically']);
+  expect('vertical: size 13 in an 18-high box fits (tolerance)', free([['lblHead', 'Label', { ...box, Width: '=300', Height: '=18', Size: '=13', Text: '="Orders"' }]]), []);
   expect('literal: a count is not literal text', free([['lblN', 'Label', { ...box, Width: '=60', Height: '=22', Size: '=10', Text: '=CountRows(colRows)' }]]), []);
   // Build stamp: shown to everyone is an error; gated by any Visible formula is not.
   expect('stamp: shown to every user', free([['lblBuild', 'Label', { ...box, Text: '="Build " & gblBuild' }]]), ['build-stamp-visible']);
@@ -1232,6 +1304,17 @@ function selftest() {
   const mwCases = [['phone branch, no MinScreenWidth', appPhone, true], ['phone branch, MinScreenWidth 320', appPhone + '    MinScreenWidth: =320\n', false],
     ['phone branch, MinScreenWidth 640', appPhone + '    MinScreenWidth: =640\n', true], ['no phone branch', 'App:\n  Properties:\n    OnStart: =Set(a, 1)\n', false]];
   for (const [nm, txt, want] of mwCases) if (!!minWidthFinding(txt) !== want) fails.push('min-screen-width: ' + nm);
+  // A comment before a layout formula: the statement after it must still be read, and the constants
+  // derived from it (lyK, lyX) with it. Glued to the comment, every control went unmeasured.
+  const APPC = ['App:', '  Properties:', '    Formulas: |-', '      =// layout: the design width and the scale', '      lyW = Max(App.Width - 18, 320);',
+    '      /* scale against the 1348 design */ lyK = lyW / 1348;', '      // centre the design', '      lyX = (lyW - 1348 * lyK) / 2;', '      clrInk = RGBA(27, 37, 51, 1); // ink'].join('\n');
+  const cc = evalFormulaConstants(APPC, new Map(), 1366, 768);
+  if (cc.get('lyW') !== 1348 || cc.get('lyK') !== 1 || cc.get('lyX') !== 0) fails.push(`comment before a layout formula: lyW ${cc.get('lyW')}, lyK ${cc.get('lyK')}, lyX ${cc.get('lyX')}`);
+  const rcm = analyse([{ path: 'App.pa.yaml', text: APPC }, { path: 'c.pa.yaml', text: free([['lblN', 'Label', { X: '=lyX + 24 * lyK', Y: '=20', Width: '=300 * lyK', Height: '=28', Size: '=11', Text: '=gblOrder.Code' }]]) }]);
+  if (rcm.stats.measured !== 1) fails.push(`comment before a layout formula: a control at lyX/lyK must be measured (measured ${rcm.stats.measured})`);
+  // A vacuous run: under half the bound text measured warns loudly; none measured is "cannot judge".
+  if (vacuity({ bound: 10, measured: 4 }).level !== 'warn' || vacuity({ bound: 10, measured: 0 }).level !== 'none' || vacuity({ bound: 10, measured: 5 }).level !== 'ok')
+    fails.push('vacuity: under half measured must warn, none measured must be "none"');
   // Layout constants from Named Formulas: If on a resolved breakpoint, Mod and RoundDown.
   const cst = evalFormulaConstants(APP2, new Map(), 1366, 768), cstP = evalFormulaConstants(APP2, new Map(), 390, 844);
   if (cst.get('lyPad') !== 28 || cstP.get('lyPad') !== 14 || cst.get('lyCols') !== 6) fails.push(`formula constants: lyPad ${cst.get('lyPad')}/${cstP.get('lyPad')}, lyCols ${cst.get('lyCols')}`);
@@ -1241,7 +1324,7 @@ function selftest() {
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 4 literal-fit, 5 build-stamp and 4 phone-width cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 6 literal-fit, 2 vertical-fit, 5 build-stamp, 4 phone-width, comment-before-layout and vacuity cases decided as expected`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }
@@ -1273,6 +1356,8 @@ if (isMain) {
     report(res, argv.includes('--json'));
     // An error found anywhere (a visible build stamp, a literal colour) fails the run even when no
     // data-bound text was examined; only a run with nothing examined AND nothing found is "cannot judge".
+    // ...except a run that measured NONE of the bound text: its findings are a fraction of the truth.
+    if (vacuity(res.stats).level === 'none') { console.error('No data-bound text control could be measured - this is NOT a pass.'); process.exit(2); }
     if (res.findings.some((f) => f.level === 'error')) process.exit(1);
     if (res.stats.bound === 0) { console.error('No data-bound text control was examined - this is NOT a pass.'); process.exit(2); }
     process.exit(res.findings.some((f) => f.level === 'error') ? 1 : 0);

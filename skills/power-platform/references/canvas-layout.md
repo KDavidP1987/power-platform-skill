@@ -77,6 +77,36 @@ divides by.
   wrapping into the row below a fixed-height row, and add a `Tooltip` with the full text (Labels
   take `Tooltip`). Section 8 makes this a checked rule for every data-bound label.
 
+### Text that fits vertically
+
+A label whose text is centred and cut at the **top and the bottom** is the commonest text defect
+after overflow, and it passed every check until measured. Two causes: a box too short for its font,
+and text that wraps in a box that holds one line. Measured in a published player:
+
+- `Size` is points: **px = Size x 4/3**. A rendered line (Arial) is about **1.15 x px**. Text may
+  draw into the padding but never past the control's box. One line of Size 13 (17.3 px, a 20 px
+  line) needs **Height of about 17 or more**; Size 26 in a 20-high box is cut at both ends.
+- `check-canvas-format.mjs` reports `text-cut-vertically` when one line does not fit
+  (`floor((Height + 3) / (1.15 x px)) < 1`; the 3 px tolerance passes Size 13 in an 18-high box), and
+  counts wrapped lines the same way: `lines = floor((Height + 3) / (1.15 x px))`. It no longer
+  counts a box too short for one line as one line.
+- **A one-line cell holding data: `Wrap: =false` plus a `Tooltip`** reading the same columns. With
+  Wrap on, a value wider than the box wraps to a second line the box cannot show and the centred
+  text loses both ends - nothing readable is left. With Wrap off it is cut at the right edge and the
+  tooltip shows the rest. The check reports `one-line-box-wraps` when the box fits one line, Wrap is
+  on, there is no Tooltip, and the value can exceed the width; Wrap off with a matching Tooltip is
+  accepted as remedy (a) (section 8).
+- **A title that shows data** (a record name in a header, a card heading) needs room for two lines,
+  or one line with Wrap off and a tooltip. Decide which per title; never a one-line box with Wrap on.
+- **Prose** (a hint, an explanation, an empty state) is literal text: count its lines at the design
+  width, not at the width you are looking at. A paragraph that wraps to three lines in a 44-high box
+  (two lines at Size 11) is `literal-text-overflow`. Top-align it (`VerticalAlign.Top`) and give it
+  the lines it needs.
+- **In the running app**, the walk's `clipcheck` step now measures the rendered text against the
+  box that clips it and reports `text cut Npx top+bottom` - centred overflow of less than a line at
+  each edge was invisible to the old whole-line count. In one published app it found 14 cut labels
+  the old check missed.
+
 ## 3. Galleries
 
 - **A vertical gallery draws its scrollbar INSIDE its width**, over the last ~16px of every row,
@@ -263,7 +293,17 @@ but no `Visible` said so - the fix was to write the rule into `Visible`, which m
   term of the covered control's plus more, or it is driven by a panel local and its group contains
   a full-size backdrop rectangle. A card whose `Visible` is only a role or tab test is body content,
   not an overlay. Whitelist the deliberate text-less button drawn last over a tile. Treat 1-2 px
-  touches as rounding.
+  touches as rounding. A backdrop with its own `OnSelect` (click outside to dismiss) is still a
+  backdrop - counting it as a control produced 259 false overlaps in one app - and the dialog's
+  content sitting on it is not an overlap.
+- **Text on a shape: background or click target.** Text declared after a non-clickable rectangle
+  (a card, or a row background whose only `OnSelect` is `Select(Parent)`) is normal. Text over a
+  rectangle with its own `OnSelect` takes the click on the caption - `covers-control` - unless the
+  label carries the same `OnSelect`, or a text-less transparent button sits on top of both.
+- **Read the resolved count before the finding count.** `check-canvas-overlap.mjs` prints how many
+  controls it resolved and warns when under half; a run that resolved nothing exits 2. Layout
+  constants after a comment in `App.Formulas` were once lost, nothing resolved, and "0 errors" hid
+  real overlaps users could see.
 - **Check every control against the design surface**, not only against each other: read
   `DocumentLayoutWidth`/`DocumentLayoutHeight` from the live app's `Properties.json` and flag any
   screen-level control extending past it ("runs 775 px past the right edge"). A uniform shift
@@ -320,16 +360,20 @@ node scripts/check-canvas-format.mjs canvas/<app>/Src --schema canvas/text-fit-s
 node scripts/check-canvas-format.mjs --selftest
 ```
 
-Exit 0 clean, 1 findings, 2 nothing examined (no files, or no data-bound label) - which is not a
-pass. Every run prints how many text controls it examined, how many read data, and how many it
-could measure; read those numbers, not only the finding count.
+Exit 0 clean, 1 findings, 2 nothing examined (no files, no data-bound label, or none of them
+measurable) - which is not a pass. Every run prints how many text controls it examined, how many
+read data, and how many it could measure, and warns loudly when under half were measured; read
+those numbers, not only the finding count. Measured: a `//` comment in `App.Formulas` once glued
+itself to the next statement, the layout constants after it never evaluated, and a 33-screen app
+reported "0 measured, 225 not measurable" with no findings (fixed in 0.27.0: comments are stripped).
 
 **The room** (classic Label defaults when a property is absent: Size 13, padding 5, Wrap on;
 the modern Text control: Size 14, no padding):
 
 ```
 px        = Size * 4/3                                   (Size is in points)
-lines     = Wrap ? max(1, floor((Height - PaddingTop - PaddingBottom) / (px * LineHeight))) : 1
+fitLines  = floor((Height + 3) / (px * min(LineHeight, 1.15)))   (under 1: text-cut-vertically)
+lines     = Wrap ? fitLines : 1
 room (px) = (Width - PaddingLeft - PaddingRight) * lines * (lines > 1 ? 0.9 : 1)
 need (px) = widest text in em * px * (1.06 if Semibold/Bold)
 ```
@@ -396,7 +440,10 @@ row only (a) and (c) work; (b) needs a flexible-height gallery; (d) is for detai
 
 Write the clamp as a block scalar: `{v: ...}` holds a colon-space, which breaks a single-line value.
 The Tooltip must read every column the clamped text reads - a tooltip showing the email does not
-reveal a cut-off name, and the check reports that as `clamped-without-full-text`.
+reveal a cut-off name, and the check reports that as `clamped-without-full-text`. The short form
+is accepted too: `Wrap: =false` with a `Tooltip` that reads the same columns, no clamp - the value
+is cut at the right edge on its one line and hover shows it all. `Wrap: =false` without a tooltip
+is still `text-overflow`.
 
 (b) **Let the row grow.** A flexible-height gallery with `AutoHeight` on the label; everything below
 it in the template is positioned from it (`Y: =lblBody.Y + lblBody.Height + 4`). `AutoHeight` in a

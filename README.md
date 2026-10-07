@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.26.0](https://img.shields.io/badge/plugin-0.26.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.27.0](https://img.shields.io/badge/plugin-0.27.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.26.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.27.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -53,7 +53,7 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 |---|---|---|---|
 | 1 | Power Pages: a site walk driver with sign-in, refusal and `/_api` proofs, and a reference covering row visibility, "my records", Private sign-in, deploy and teardown | The thinnest area: written from one real site, and nothing could walk a site or prove a refusal on one | First measured build (0.21): 30 of 30 blind checks, design 23 of 25, 85 minutes, no person needed. 0.22 adds Dataverse confirmation, captures and freshness waits to the walker, and the build's lessons (go-live decisions, identity for people who are not Dataverse users, the 15-minute cache window, feedback patterns). Second measured build (0.22): 30 of 30, design 23 of 25, 96 minutes (30 lost waiting on the site's sign-in consent), no person needed; it used the bundled walker for all 65 checks. 0.23 accepts the site's own consent when nobody is present, adds spill and covered-field checks to the walker, and stops asking a build with no seed to re-seed. Third measured build (0.23.1): 30 of 30, design 23 of 25, 90 minutes, no person needed. 0.24 turns what blind reviews kept finding into checks (current-page marker, focus contrast, double writes, unfilled columns, unguarded Global read), holds a site's hand-back for a critique of 30/40 and a five-topic security review, settles identity first with the administrator's steps, and ships in one call. 0.25 scopes every rule to the surface it serves (`rules-and-scope.md`): the 30/40 floor is for sites only, and the flow lint gates every import; 0.25.1 reads server logic in the permissions audit. 0.26 adds what a per-person visibility build taught: several relationships deciding visibility, server logic's read cache, and the site address and rename procedures. Microsoft's plugin arm is next |
 | 2 | Speed and cost against Microsoft's plugins | The last four canvas builds beat them on quality but not on time or cost | 0.21: data-source check on `create`, a design-helper time box, no single-issue publishes after the fix batch; to be measured |
-| 3 | A self-test in CI for every script, and a floor that refuses to pass when nothing was examined | A 1.0 criterion; four scripts had none | Done in 0.21 |
+| 3 | A self-test in CI for every script, and a floor that refuses to pass when nothing was examined | A 1.0 criterion; four scripts had none | Done in 0.21. 0.27 extends the floor: a text check that measured none of its bound text exits 2, and one that measured under half warns |
 | 4 | Teardown order for Fabric: Dataflows before their lakehouse | Dataflows can refuse deletion once their destination is gone | Done in 0.21 |
 | 5 | Stabilise (0.9): one interface table, the compatibility file, upgrade notes | Users need options, exit codes and finding codes that stop moving | Interface table and compatibility file drafted in 0.21; freeze at 0.9 |
 | 6 | Re-run the graded evaluation on the current version: ten or more task types (adding Power Pages, model-driven and SharePoint), three runs each, the held-out triggering set | A 1.0 criterion; the last graded run was 0.7.1 (217/222 with the skill, 136/222 without) and much has changed since | Open |
@@ -388,7 +388,9 @@ when the text can overflow with no remedy. Lengths come from a schema generated 
 metadata (`MaxLength`, choice labels, number ranges), per table, with overrides for limits the app
 enforces; collections are measured from the formulas that build them. Remedies it accepts: clamp
 with an ellipsis plus a tooltip that reads the same columns, a flexible-height row with `AutoHeight`,
-an `OnSelect` detail view, or a scrolling detail pane outside a gallery. **Theme tokens:** once the
+an `OnSelect` detail view, a scrolling detail pane outside a gallery, or (one-line cells) `Wrap` off
+with a tooltip that reads the same columns. **Vertical fit:** a box shorter than one line of its
+font, or a one-line box whose data can wrap, shows text cut at the top and the bottom. **Theme tokens:** once the
 app defines its colours and fonts in `App.pa.yaml`, a literal colour or font in a screen fails.
 
 ```bash
@@ -400,6 +402,9 @@ echo '{"tool_input":{"file_path":"canvas/app/Src/Home.pa.yaml"}}' | node check-c
 | Check | Catches |
 |---|---|
 | `text-overflow` | Data-bound text that can exceed its box (rows x width, at its size and weight) |
+| `text-cut-vertically` | A box shorter than one line of its font (Size is points; a line is about 1.15 x Size x 4/3 px) |
+| `one-line-box-wraps` | A one-line box with `Wrap` on, no tooltip, holding data that can exceed its width |
+| `literal-text-overflow` | A literal caption or paragraph with more lines than its box holds |
 | `autoheight-in-fixed-row` | `AutoHeight` in a fixed-height gallery, where the row still clips |
 | `clamped-without-full-text` | Text cut with `Left()` and no tooltip reading the same columns, nor an `OnSelect` |
 | `scroll-in-gallery-row` | `Overflow.Scroll` inside a gallery row |
@@ -407,7 +412,8 @@ echo '{"tool_input":{"file_path":"canvas/app/Src/Home.pa.yaml"}}' | node check-c
 | `list-without-filter` | Advisory warning: a table gallery whose Items reads no filter, search or grouping control. Never changes the exit code |
 
 Every run prints how many controls it examined, read data and could measure. Exit codes: `0` clean,
-`1` findings, `2` nothing examined, which is not a pass. The room is an estimate that errs toward
+`1` findings, `2` nothing examined or none of the bound text measurable, which is not a pass; under
+half measured prints a loud warning. The room is an estimate that errs toward
 "does not fit"; `canvas-browser.mjs clipcheck` is the authority in the running app.
 
 ### `check-canvas-overlap.mjs`: controls drawn over other controls
@@ -519,7 +525,7 @@ Platform build, `"pluginGate": false` in `scripts/canvas-app.json` turns them of
 | Hook | Event | Does |
 |---|---|---|
 | `preflight.mjs` | SessionStart | Git state, `pac org who`, the top of `docs/STATE.md`, the ship loop in one line |
-| `check-pa-yaml.mjs` | PostToolUse | Colon-space in single-line Power Fx, YAML comments, `Tooltip` on a modern Button, shallow block-scalar lines, the file ceiling: faults that fail a whole-app compile |
+| `check-pa-yaml.mjs` | PostToolUse | Colon-space in single-line Power Fx, a `#` line inside a formula or ` #` in a single-line value, `Tooltip` on a modern Button, shallow block-scalar lines, the file ceiling: faults that fail a whole-app compile |
 | `check-standards.mjs` | PostToolUse | Optional, configurable output standards (by default emoji and purple accents, Power Fx `RGBA` included) |
 | `check-canvas-format.mjs --hook` | PostToolUse | Long data-bound text with no remedy, and literal colours or fonts once theme tokens exist; blocks only on lengths it knows (`textFitSchema` in `standards.config.json`) |
 | `check-canvas-overlap.mjs --hook` | PostToolUse | A control placed over another that can be on screen at the same time, or decoration declared over a button or label; blocks on errors in the file just written |

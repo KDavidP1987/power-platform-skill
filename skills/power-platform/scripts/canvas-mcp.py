@@ -49,8 +49,13 @@ if hasattr(sys.stdout, "reconfigure"):
     # UnicodeEncodeError and the result is lost after the compile already ran.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-DEFAULT_CMD = ["dnx", "Microsoft.PowerApps.CanvasAuthoring.McpServer", "--yes", "--prerelease",
-               "--source", "https://api.nuget.org/v3/index.json"]
+# CANVAS_MCP_VERSION pins the server (e.g. 1.1.5). A new version can be listed on NuGet before its
+# platform package is, and "latest" then fails to start (the process exits; writing to it raises
+# OSError 22). dnx refuses --prerelease together with a version, so a pin drops it.
+_PIN = os.environ.get("CANVAS_MCP_VERSION", "").strip()
+DEFAULT_CMD = (["dnx", "Microsoft.PowerApps.CanvasAuthoring.McpServer" + ("@" + _PIN if _PIN else ""), "--yes"]
+               + ([] if _PIN else ["--prerelease"])
+               + ["--source", "https://api.nuget.org/v3/index.json"])
 NO_SESSION = "No active coauthoring canvas designer session detected"
 SERVER_EXE = "CanvasAuthoringMcpServer"
 

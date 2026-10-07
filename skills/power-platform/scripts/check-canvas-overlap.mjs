@@ -19,7 +19,11 @@
 //   3. OFF-CANVAS and OUTSIDE-ROW (warnings). A screen-level control past the design surface; a
 //      gallery child past its row (gallery Width, TemplateSize).
 //
-// Deliberate patterns that are not findings: a card Rectangle declared BEFORE the content on it; a
+//   Text drawn over a CLICKABLE shape declared before it is covers-control too: the label takes the
+//   click. A shape whose only OnSelect is Select(Parent) in a gallery row is the row's background.
+//
+// Deliberate patterns that are not findings: a card or row-background Rectangle (not clickable)
+// declared BEFORE the content on it; a caption with its own OnSelect over a clickable tile; a
 // modal (a later control whose condition is shared by a backdrop that covers the earlier control);
 // a text-less button laid over a tile; an empty-state label whose Visible tests the gallery under
 // it; a results list whose Visible reads the input it drops down from (one control's Visible names
@@ -56,6 +60,7 @@ const INVISIBLE = /^(Timer|Classic\/Timer|ComboBoxDataField|Export|Import|Microp
 const val = (c, k) => (c.props[k] && c.props[k].v !== undefined ? String(c.props[k].v).trim() : '');
 const hasHandler = (c) => { const v = val(c, 'OnSelect').replace(/^=/, '').trim(); return v !== '' && !/^false$/i.test(v); };
 const emptyText = (c) => /^=\s*""\s*$/.test(val(c, 'Text'));
+const rowSelectOnly = (c) => !!c.parent && GALLERY.test(c.parent.control || '') && /^=?\s*Select\(\s*Parent\s*\)\s*;?\s*$/i.test(val(c, 'OnSelect'));
 const transparent = (c) => /Color\.Transparent|RGBA\([^)]*,\s*0(\.0+)?\s*\)/i.test(val(c, 'Fill'));
 
 export function kindOf(c) {
@@ -66,7 +71,9 @@ export function kindOf(c) {
   if (TEXTY.test(t)) return emptyText(c) ? (hasHandler(c) ? 'clickpad' : 'decor') : 'text';
   if (/Button/i.test(t)) return emptyText(c) ? 'clickpad' : 'interactive';
   if (INTERACTIVE.test(t)) return 'interactive';
-  if (DECOR.test(t)) return hasHandler(c) ? 'interactive' : 'decor';
+  // A shape in a gallery row whose only action is the row's own (Select(Parent)) is the row's
+  // background: text on it clicks the same row. Any other handler makes it a click target.
+  if (DECOR.test(t)) return hasHandler(c) && !rowSelectOnly(c) ? 'interactive' : 'decor';
   return 'text';                                                                    // unknown: assume it draws content
 }
 const CONTENT = new Set(['text', 'interactive', 'gallery']);
@@ -445,9 +452,15 @@ export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) 
       const contentPair = CONTENT.has(E.kind) && CONTENT.has(L.kind);
       // Decoration declared AFTER content paints over it: a button stops clicking, text disappears.
       const deadClick = (E.kind === 'interactive' || E.kind === 'clickpad' || E.kind === 'text' || E.kind === 'gallery') && L.kind === 'decor';
-      const padOver = L.kind === 'clickpad' || E.kind === 'clickpad';
+      const padOver = L.kind === 'clickpad' || E.kind === 'clickpad'
+        || (DECOR.test(E.control || '') && E.kind === 'interactive' && L.kind === 'text' && hasHandler(L));   // a caption with its own click
+      // Text drawn over a CLICKABLE shape declared before it: the text takes the click (a dead click on
+      // the caption). A non-interactive shape under text is a card or row background - never compared.
+      const textOverShape = DECOR.test(E.control || '') && E.kind === 'interactive' && L.kind === 'text' && !hasHandler(L);
       if (!contentPair && !deadClick && !padOver) continue;
-      const geo = deadClick
+      const centre = (e, l) => { const cx = e.x + e.w / 2, cy = e.y + e.h / 2; return cx > l.x && cx < l.x + l.w && cy > l.y && cy < l.y + l.h ? { ox: Math.round(e.w), oy: Math.round(e.h) } : null; };
+      const geo = textOverShape ? allPairs(E, L, ov)
+        : deadClick
         ? allPairs(E, L, (e, l) => { const cx = e.x + e.w / 2, cy = e.y + e.h / 2; return cx > l.x && cx < l.x + l.w && cy > l.y && cy < l.y + l.h && !transparent(L) ? { ox: Math.round(e.w), oy: Math.round(e.h) } : null; })
         : allPairs(E, L, ov);
       if (!geo.hit && !geo.excl) continue;
@@ -457,13 +470,21 @@ export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) 
       if (padOver) { exempt('clickpad'); continue; }
       if (linked(E, L)) { exempt('linked'); continue; }
       // A modal: some backdrop declared between them covers E, and L's condition carries the backdrop's.
-      const backdrop = list.find((R) => R.order > E.order && R.order <= L.order && (R.kind === 'decor' || R === L)
+      // The backdrop may carry its own OnSelect (click outside to dismiss); that is still a backdrop.
+      const backdrop = list.find((R) => R.order > E.order && R.order <= L.order && (R.kind === 'decor' || R.kind === 'interactive' || R.kind === 'clickpad' || R === L)
         && R.cond.length > 0 && subset(R.cond, L.cond) && !subset(R.cond, E.cond) && fullSurface(R, space));
       if (backdrop) { exempt('modal', `  (backdrop ${backdrop.name})`); continue; }
+      // The dialog's own content sits on its backdrop: E is the backdrop and L shows only with it.
+      if (E.cond.length > 0 && subset(E.cond, L.cond) && fullSurface(E, space)) { exempt('modal', `  (backdrop ${E.name})`); continue; }
       const where = path.basename(E.file);
       const layout = geo.when.length ? ` In the layout where ${geo.when.join(' and ')}.` : '';
       const cond = `${E.name} shows ${condText(E) === 'always' ? 'always' : 'when ' + condText(E)}; ${L.name} shows ${condText(L) === 'always' ? 'always' : 'when ' + condText(L)}`;
-      if (deadClick) {
+      if (textOverShape) {
+        const onCentre = allPairs(E, L, centre).hit > 0;
+        findings.push({ level: 'error', code: onCentre ? 'covers-control' : 'overlap', file: E.file, line: L.line, space, a: L.name, b: E.name,
+          msg: `${L.name} (${L.control}, line ${L.line}) is text drawn over the clickable ${E.control.toLowerCase()} ${E.name} (line ${E.line}) by ${geo.first.ox}x${geo.first.oy} px: `
+            + `a click on the text lands on the label and ${E.name}.OnSelect does not run. ${cond}.${layout} Give the label the same OnSelect, or put a text-less transparent button on top (the click-pad pattern), or move it.` });
+      } else if (deadClick) {
         const clicks = E.kind === 'interactive' || E.kind === 'clickpad';
         findings.push({ level: 'error', code: clicks ? 'covers-control' : 'hidden-under', file: E.file, line: L.line, space, a: L.name, b: E.name,
           msg: `${L.name} (${L.control}, line ${L.line}) is declared after ${E.name} (${E.control}, line ${E.line}) and covers its centre: `
@@ -520,6 +541,7 @@ function report(res, json, explain = false) {
   for (const k of stats.skippedControls) console.log(`    ${k.name}  ${k.file ? path.basename(k.file) : ''}${k.line ? ':' + k.line : ''}  (${k.why})`);
   if (explain) { console.log('\nExempted pairs (audit these: an exemption that hides a real overlap is a bug in this check):'); stats.exempted.forEach((x) => console.log('  ' + x)); }
   console.log(`${findings.filter((f) => f.level === 'error').length} error(s), ${findings.filter((f) => f.level === 'warn').length} warning(s). A skipped control was NOT checked; the published app is the authority (canvas-browser.mjs overlapcheck / deadclick).`);
+  if (stats.compared && stats.resolved * 2 < stats.compared) console.log(`\n!! WARNING: only ${stats.resolved} of ${stats.compared} drawn controls were resolved - most of this app was NOT checked, whatever the error count says. Make the skipped geometry resolvable (layout constants in App.Formulas) before trusting a clean result.`);
 }
 function hookMode() {
   let input = {}; try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { /* not a hook payload */ }
@@ -564,6 +586,10 @@ const CASES = [
   ['rectangle-after-button', scr(B('btnB'), ctl('recPill', 'Rectangle', { X: '=190', Y: '=90', Width: '=200', Height: '=60', Fill: '=clrPill' })), ['covers-control']],
   ['modal-with-backdrop', scr(L('lblA'), ctl('recShade', 'Rectangle', { Visible: '=locDlg', X: '=0', Y: '=0', Width: '=Parent.Width', Height: '=Parent.Height', Fill: '=clrShade' }),
     B('btnOk', { Visible: '=locDlg' })), []],
+  ['modal-clickable-backdrop', scr(L('lblA'), ctl('recShade', 'Rectangle', { Visible: '=locDlg', X: '=0', Y: '=0', Width: '=Parent.Width', Height: '=Parent.Height', Fill: '=clrShade', OnSelect: '=UpdateContext({locDlg: false})' }),
+    B('btnOk', { Visible: '=locDlg' })), []],
+  ['modal-text-on-clickable-backdrop', scr(ctl('recShade', 'Rectangle', { Visible: '=locDlg', X: '=0', Y: '=0', Width: '=Parent.Width', Height: '=Parent.Height', Fill: '=clrShade', OnSelect: '=UpdateContext({locDlg: false})' }),
+    L('lblDlgTitle', { Visible: '=locDlg' })), []],
   ['clickpad-over-tile', scr(L('lblTile'), ctl('btnTile', 'Button', { Text: '=""', X: '=24', Y: '=100', Width: '=300', Height: '=24', OnSelect: '=Navigate(scrX)' })), []],
   ['empty-state-over-gallery', scr(ctl('galCases', 'Gallery', { Items: '=colCases', X: '=24', Y: '=100', Width: '=600', Height: '=300', TemplateSize: '=48' }),
     L('lblEmpty', { Visible: '=CountRows(colCases) = 0', Y: '=200' })), []],
@@ -593,6 +619,13 @@ const CASES = [
   ['empty-state-of-another-gallery', scr(ctl('galMgr', 'Gallery', { Items: '=Search(People, txtMgr.Value, Name)', X: '=24', Y: '=100', Width: '=600', Height: '=300', TemplateSize: '=48' }),
     L('lblMentorHint', { Visible: '=galMentor.AllItemsCount = 0', Y: '=200' })), ['overlap']],
   ['button-over-empty-state', scr(L('lblNone', { Visible: '=gblItemShown = 0' }), B('btnAdd')), ['overlap']],
+  ['text-on-card-background', scr(ctl('recCard', 'Rectangle', { X: '=0', Y: '=80', Width: '=600', Height: '=200', Fill: '=clrCard' }), L('lblA'), L('lblB', { Y: '=140' })), []],
+  ['text-on-row-background', ['Screens:', '  scrS:', '    Children:',
+    ...ctl('galA', 'Gallery', { Items: '=A', X: '=0', Y: '=80', Width: '=600', Height: '=200', TemplateSize: '=40' }), '          Children:',
+    ...ctl('recRow', 'Rectangle', { X: '=0', Y: '=0', Width: '=600', Height: '=40', Fill: '=clrRow', OnSelect: '=Select(Parent)' }).map((s) => '      ' + s),
+    ...L('lblRowA', { X: '=8', Y: '=8' }).map((s) => '      ' + s)].join('\n'), []],
+  ['label-over-clickable-rectangle', scr(ctl('recTile', 'Rectangle', { X: '=24', Y: '=96', Width: '=300', Height: '=40', Fill: '=clrTile', OnSelect: '=Navigate(scrOrders)' }), L('lblTile')), ['covers-control']],
+  ['label-with-its-own-click-over-tile', scr(ctl('recTile', 'Rectangle', { X: '=24', Y: '=96', Width: '=300', Height: '=40', Fill: '=clrTile', OnSelect: '=Navigate(scrOrders)' }), L('lblTile', { OnSelect: '=Navigate(scrOrders)' })), []],
   ['never-visible-spacer', scr(L('lblA'), ctl('recSpacer', 'Rectangle', { Visible: '=false', X: '=0', Y: '=0', Width: '=999', Height: '=999' }), B('btnB', { Y: '=200' })), []],
 ];
 function selftest() {
@@ -605,11 +638,17 @@ function selftest() {
     if (JSON.stringify(got) !== JSON.stringify([...want].sort())) fails.push(`${name}: expected [${want.join(', ')}], got [${got.join(', ')}]  ${res.findings.map((f) => f.msg).join(' | ')}`);
     if (res.stats.skipped) fails.push(`${name}: ${res.stats.skipped} control(s) skipped: ${Object.keys(res.stats.skipReasons).join('; ')}`);
   }
+  // Layout constants after a comment in App.Formulas resolve (the shared formula reader strips comments):
+  // before, a comment glued itself to lyW, lyK and lyX never resolved, and the check compared nothing.
+  const APPC = ['App:', '  Properties:', '    Formulas: |-', '      =// layout', '      lyW = Max(App.Width - 18, 320);', '      // scale', '      lyK = lyW / 1348;',
+    '      lyX = (lyW - 1348 * lyK) / 2;'].join('\n');
+  const rc = analyse([{ path: 'App.pa.yaml', text: APPC }, { path: 'c.pa.yaml', text: scr(L('lblA', { X: '=lyX + 24 * lyK', Width: '=300 * lyK' }), B('btnB', { X: '=lyX + 200 * lyK', Width: '=120 * lyK' })) }]);
+  if (rc.stats.resolved !== 2 || !rc.findings.some((f) => f.code === 'overlap')) fails.push(`comment before lyW: resolved ${rc.stats.resolved} of 2, findings [${rc.findings.map((f) => f.code).join(', ')}]`);
   // The floor: unresolvable geometry is counted, not passed silently.
   const r = analyse([{ path: 's.pa.yaml', text: scr(L('lblA', { X: '=Rand() * 10' })) }]);
   if (r.stats.resolved !== 0 || r.stats.skipped !== 1 || r.stats.skippedControls.length !== 1) fails.push('an unresolvable X must be counted as skipped and named');
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} layouts decided as expected (overlaps, exclusive conditions, modal, card, click pad, empty state, gallery rows, edges), and the skip floor`
+  console.log(ok ? `selftest ok: ${CASES.length} layouts decided as expected (overlaps, exclusive conditions, modal (clickable backdrops too), card and row backgrounds, text over a clickable shape, click pad, empty state, gallery rows, edges), layout constants after a comment, and the skip floor`
     : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }
