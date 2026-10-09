@@ -474,6 +474,11 @@ The rules below are what that pairing found the platform needs, in order:
    `p` (20 px, black) and every heading (weight 400). Class selectors already beat it; for bare
    paragraphs and headings inside your containers use class-scoped rules
    (`.wrap p:not([class])`). Measure computed sizes in the browser - the stylesheet looks right.
+   The same scoping bites your own classes: a wrapper rule such as `.wrap p { margin: 0 0 12px }` beats
+   `.hero__actions { margin-top: 28px }` on a `<p class="hero__actions">`, and `.wrap a { color: blue }`
+   beats `.btn { color: navy }` on an `<a class="btn">` - a measured redesign shipped blue text on its green
+   buttons until both were written `.wrap .hero__actions` and `.wrap a.btn`. Scope a component's rules
+   under the same wrapper as the base rules they must beat.
    A platform script also rewrites the text of `<time>` elements into a long local date and time:
    render a date the person should read as a `<span>` holding the formatted text (observed).
 4. **A CSS web file under Home is linked into every page automatically**, with a version stamp;
@@ -482,7 +487,9 @@ The rules below are what that pairing found the platform needs, in order:
    `Network.clearBrowserCache` in Playwright) before judging a CSS change. To tell "not uploaded"
    from "cached", read what the site serves, bypassing the cache, and look for a rule you just
    added: `await (await fetch('/site.css', { cache: 'reload' })).text()` in the page. If the served
-   file has it, the upload landed and only the browser is stale. Custom CSS web files are served
+   file has it, the upload landed and only the browser is stale. `site-walk.mjs ship` clears its own
+   browser cache before the walk (and `walk --clear-browser-cache` does on request): one ship had judged
+   new templates against the old stylesheet and reported a phone page 1,600 px wide that did not exist. Custom CSS web files are served
    with `Cache-Control: max-age=3600` (measured), so a returning visitor can see the old style for up
    to an hour after a release: say so in the hand-back.
 5. **Brand artwork the owner keeps out of git** needs a prepare script that writes each web file
@@ -562,7 +569,17 @@ The rules below are what that pairing found the platform needs, in order:
     over 5,000 px on a phone); page it (10 to 20 rows) or give it the same search and status filter as
     the shared list, newest first. Comment threads show the newest first or put the comment box at the
     top once there are more than a few.
-15. **The design critique has a floor.** Run impeccable `critique` on the live pages at 1440 and 390 px
+15. **Bringing an existing site up to a sibling's level ("family match").** A site that already wore the
+    brand but looked plain beside its sibling reached the sibling's level with a short, fixed set of
+    moves, all presentation only (no query, permission or data change): the photograph hero with a
+    slanted brand panel on Home, carrying the greeting and the two main actions (it falls back to a
+    plain brand field when the image fails); the sibling's signature repeated where it repeats there (a
+    short green tab under every page head and on the footer); a footer in the frame colour, not white;
+    sheets with the brand-tinted shadow and a softer rule; the state the reader came for drawn rather
+    than written (a stage track for a project's governance stage, a status chip on each card); and no
+    eyebrow labels above headings. Walk it at both widths after a cleared browser cache, record the
+    critique, then stop: the batch above took two rounds.
+16. **The design critique has a floor.** Run impeccable `critique` on the live pages at 1440 and 390 px
     (screenshots), fix every P0 and P1 in one batch, critique once more, and record the score in
     `docs/design-critique.md` with the screenshot names. Thirty out of forty or more; under that, write
     "Below 30 accepted:" and the reason. Three measured builds scored 30, 29 and 25 on the same brief;
