@@ -27,7 +27,9 @@
 // modal (a later control whose condition is shared by a backdrop that covers the earlier control);
 // a text-less button laid over a tile; an empty-state label whose Visible tests the gallery under
 // it; a results list whose Visible reads the input it drops down from (one control's Visible names
-// the other).
+// the other); an access-denied cover (a screen-wide shape declared after the content, reaching the
+// bottom of the screen, shown on the negation of one permission flag - =!gblIsAdmin - with a message
+// on it that shows on the same condition): covering the screen is its job.
 //
 // Geometry is resolved from literals, numeric globals set in App.OnStart or Named Formulas, simple
 // arithmetic, Parent.Width/Height, Parent.TemplateWidth/TemplateHeight, App.Width/Height, other
@@ -222,7 +224,7 @@ export function show(n) {
 
 export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) {
   const findings = [];
-  const stats = { files: 0, controls: 0, compared: 0, resolved: 0, skipped: 0, skipReasons: {}, skippedControls: [], perFile: {}, alwaysHidden: 0, pairs: 0, exempt: { exclusive: 0, modal: 0, linked: 0, clickpad: 0 }, exempted: [] };
+  const stats = { files: 0, controls: 0, compared: 0, resolved: 0, skipped: 0, skipReasons: {}, skippedControls: [], perFile: {}, alwaysHidden: 0, pairs: 0, exempt: { exclusive: 0, modal: 0, linked: 0, clickpad: 0, denied: 0 }, exempted: [] };
   const appFile = files.find((f) => /(^|[\\/])App\.pa\.yaml$/i.test(f.path));
   const appText = appFile ? appFile.text : '';
   const consts = evalFormulaConstants(appText, readConstants(appText), screenWidth, screenHeight);
@@ -446,6 +448,14 @@ export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) 
   const covers = (R, E) => R.alts.every((r) => E.alts.every((e) => r.x <= e.x + 2 && r.y <= e.y + 2 && r.x + r.w >= e.x + e.w - 2 && r.y + r.h >= e.y + e.h - 2));
   const subset = (P, Q) => { const q = new Set(Q.map((t) => keyOf(t.map((a) => [a.key, a.op, [...a.vals]])))); return P.every((t) => q.has(keyOf(t.map((a) => [a.key, a.op, [...a.vals]])))); };
   const condKey = (C) => C.map((t) => keyOf(t.map((a) => [a.key, a.op, [...a.vals]])));
+  // An access-denied cover: a non-clickable shape across the screen's width down to its bottom (a header
+  // above it may stay visible), shown on the negation of ONE flag, with a text control declared after it
+  // on the same condition (the message). Two screens with such a cover reported 12 errors each.
+  const DENIED = /^=\s*(?:!\s*\(?\s*[A-Za-z_]\w*\s*\)?|Not\s*\(\s*[A-Za-z_]\w*\s*\)|[A-Za-z_]\w*\s*=\s*false)\s*$/i;
+  const normVis = (c) => val(c, 'Visible').replace(/\s+/g, '');
+  const deniedCover = (R, list, space) => R.kind === 'decor' && !hasHandler(R) && !space.endsWith('#row') && DENIED.test(val(R, 'Visible').trim())
+    && R.alts.every((r) => r.x <= 2 && r.x + r.w >= screenWidth * 0.98 && r.y + r.h >= screenHeight * 0.98)
+    && list.some((T) => T.order > R.order && T.kind === 'text' && normVis(T) === normVis(R));
 
   const spaces = new Map();
   for (const c of boxes) { if (!spaces.has(c.space)) spaces.set(c.space, []); spaces.get(c.space).push(c); }
@@ -480,6 +490,10 @@ export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) 
       if (backdrop) { exempt('modal', `  (backdrop ${backdrop.name})`); continue; }
       // The dialog's own content sits on its backdrop: E is the backdrop and L shows only with it.
       if (E.cond.length > 0 && subset(E.cond, L.cond) && fullSurface(E, space)) { exempt('modal', `  (backdrop ${E.name})`); continue; }
+      if (deadClick && deniedCover(L, list, space)) { exempt('denied', `  (cover ${L.name})`); continue; }
+      // The cover's message, drawn over content the cover already hides.
+      const under = list.find((R) => R.order > E.order && R.order < L.order && normVis(R) === normVis(L) && covers(R, E) && deniedCover(R, list, space));
+      if (under) { exempt('denied', `  (cover ${under.name})`); continue; }
       const where = path.basename(E.file);
       const layout = geo.when.length ? ` In the layout where ${geo.when.join(' and ')}.` : '';
       const cond = `${E.name} shows ${condText(E) === 'always' ? 'always' : 'when ' + condText(E)}; ${L.name} shows ${condText(L) === 'always' ? 'always' : 'when ' + condText(L)}`;
@@ -546,7 +560,7 @@ function report(res, json, explain = false) {
   for (const f of findings) console.log(`${f.level.toUpperCase().padEnd(5)} ${f.code}  ${path.basename(f.file)}:${f.line}  ${f.msg}`);
   const e = stats.exempt;
   console.log(`\n${stats.files} screen file(s); ${stats.compared} drawn control(s): ${stats.resolved} resolved, ${stats.skipped} skipped, ${stats.alwaysHidden} never visible.`
-    + ` ${stats.pairs} overlapping pair(s) examined; exempt: ${e.exclusive} exclusive by Visible, ${e.modal} modal, ${e.linked} linked, ${e.clickpad} text-less click pad.`);
+    + ` ${stats.pairs} overlapping pair(s) examined; exempt: ${e.exclusive} exclusive by Visible, ${e.modal} modal, ${e.linked} linked, ${e.clickpad} text-less click pad, ${e.denied} under an access-denied cover.`);
   for (const [why, n] of Object.entries(stats.skipReasons)) console.log(`  skipped ${n}: ${why}`);
   for (const k of stats.skippedControls) console.log(`    ${k.name}  ${k.file ? path.basename(k.file) : ''}${k.line ? ':' + k.line : ''}  (${k.why})`);
   if (explain) { console.log('\nExempted pairs (audit these: an exemption that hides a real overlap is a bug in this check):'); stats.exempted.forEach((x) => console.log('  ' + x)); }
@@ -637,6 +651,16 @@ const CASES = [
     ...L('lblRowA', { X: '=8', Y: '=8' }).map((s) => '      ' + s)].join('\n'), []],
   ['label-over-clickable-rectangle', scr(ctl('recTile', 'Rectangle', { X: '=24', Y: '=96', Width: '=300', Height: '=40', Fill: '=clrTile', OnSelect: '=Navigate(scrOrders)' }), L('lblTile')), ['covers-control']],
   ['label-with-its-own-click-over-tile', scr(ctl('recTile', 'Rectangle', { X: '=24', Y: '=96', Width: '=300', Height: '=40', Fill: '=clrTile', OnSelect: '=Navigate(scrOrders)' }), L('lblTile', { OnSelect: '=Navigate(scrOrders)' })), []],
+  // An access-denied cover with its message, below a header: covering the screen is its job.
+  ['access-denied-cover', scr(L('lblA'), B('btnB', { Y: '=200' }),
+    ctl('recDenied', 'Rectangle', { Visible: '=!gblIsAdmin', X: '=0', Y: '=78', Width: '=Parent.Width', Height: '=Parent.Height - 78', Fill: '=clrAppBg' }),
+    L('lblDenied', { Visible: '=!gblIsAdmin', Text: '="This area is for administrators."', X: '=0', Y: '=180', Width: '=Parent.Width', Height: '=80' })), []],
+  // The same shape without its message, or on a condition that is not a negated flag, is still a finding.
+  ['cover-without-message', scr(L('lblA'), B('btnB', { Y: '=200' }),
+    ctl('recDenied', 'Rectangle', { Visible: '=!gblIsAdmin', X: '=0', Y: '=78', Width: '=Parent.Width', Height: '=Parent.Height - 78', Fill: '=clrAppBg' })), ['covers-control', 'hidden-under']],
+  ['cover-on-busy-flag-and-filter', scr(L('lblA'), B('btnB', { Y: '=200' }),
+    ctl('recBusy', 'Rectangle', { Visible: '=locBusy && locTab = "a"', X: '=0', Y: '=78', Width: '=Parent.Width', Height: '=Parent.Height - 78', Fill: '=clrAppBg' }),
+    L('lblBusy', { Visible: '=locBusy && locTab = "a"', X: '=0', Y: '=300', Width: '=Parent.Width', Height: '=80' })), ['covers-control', 'hidden-under']],
   ['never-visible-spacer', scr(L('lblA'), ctl('recSpacer', 'Rectangle', { Visible: '=false', X: '=0', Y: '=0', Width: '=999', Height: '=999' }), B('btnB', { Y: '=200' })), []],
 ];
 function selftest() {
@@ -667,7 +691,7 @@ function selftest() {
   const rh = analyse([{ path: 'App.pa.yaml', text: APP }, { path: 'half.pa.yaml', text: scr(L('lblA'), L('lblN', { X: '=Rand() * 10', Y: '=200' })) }]);
   if (thinFiles(rh.stats).length) fails.push('per-file floor: exactly half resolved is not under half');
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} layouts decided as expected (overlaps, exclusive conditions, modal (clickable backdrops too), card and row backgrounds, text over a clickable shape, click pad, empty state, gallery rows, edges), layout constants after a comment, the skip floor and the per-file floor`
+  console.log(ok ? `selftest ok: ${CASES.length} layouts decided as expected (overlaps, exclusive conditions, modal (clickable backdrops too), access-denied cover, card and row backgrounds, text over a clickable shape, click pad, empty state, gallery rows, edges), layout constants after a comment, the skip floor and the per-file floor`
     : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }
