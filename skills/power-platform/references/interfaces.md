@@ -82,6 +82,7 @@ that call them:
 
 | Version | Change | What to do |
 |---|---|---|
+| 0.28.0 | `check-canvas-overlap.mjs` and `check-canvas-format.mjs` exit 2 when a screen file has under half its controls resolved and there are no errors (they warned); `site-walk.mjs` exits 2 with `SW-SIGNED-OUT` when it cannot sign in to the site (it reported page misses, exit 1); `canvas-mcp.py hold` waits for a proven save before releasing; new `check-pa-yaml.mjs` blocks (AccessibleLabel on a Label, an unguarded aggregate compared with 0) | Resolve the layout constants the screen uses, or read 2 as "not verified"; `signInSelector: false` skips the sign-in; after Save, let `hold` see the save (or write `saved` / `discard` to its release file) |
 | 0.21.0 | `seed-data.py check` with no seed row to compare, `reconcile-report.py` with no checks, and `inspect-artifact.py` on a solution with nothing in it now exit 2 (they exited 0) | Treat 2 as "not verified", never as a pass |
 | 0.22.0 | `site-walk.mjs walk` refuses a writing scenario without `confirm` and `restore` (exit 2), and logs writes to `.ship-work/writes.json` | Add confirm checks that read the rows back; the seed gate now sees site walks |
 | 0.23.0 | `site-walk.mjs walk` runs spill and cover checks on every page (`SW-OVERFLOW`, `SW-COVERED`), so a walk that passed before can now exit 1 | Fix the layout, or skip a subtree meant to bleed with `layoutIgnore`; `layoutChecks: false` turns both off |

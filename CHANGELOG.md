@@ -11,6 +11,84 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-08
+
+Eighty-odd lessons from four apps, a portal and a Power BI report, analysed and folded in. The biggest
+groups: formula traps that three apps hit independently (percent masks, blank sums, Yes/No reads), walk
+steps that passed while the app did the wrong thing, and ship steps that reported success while the
+saved app was the old one. Where a fault can be seen in source it is now a check, not a paragraph.
+
+### Added
+
+- `check-canvas-format.mjs` format strings: `percent-format` (Power Fx `Text(x, "0%")` does not multiply
+  by 100: 0.8 shows "1%") and `dangling-decimal-format` (`"0.##"` shows "110."), in every file including
+  `App.pa.yaml`.
+- `check-canvas-format.mjs` control traps: `textmode-on-modern-input` (error; the modern TextInput
+  ignores `TextMode.MultiLine`), `dropdown-forall-items` (a modern DropDown over a ForAll projection
+  showed numbers), `row-click-lost` (a template child without `Select(Parent)`), `number-spin-arrows`
+  (the arrows change the display, not Value; `Step: =0`), `same-colour-branches` (an If between two
+  tokens with the same value).
+- `hooks/check-pa-yaml.mjs` blocks `AccessibleLabel` on a classic Label and an aggregate
+  (`Sum`/`Average`/`Min`/`Max`) compared with 0 without `Coalesce` - over an empty table it is Blank, and
+  `Blank() = 0` is false. Notes (not blocking): `Coalesce(rec.'Yes No Column', false)` always reads false;
+  two queued `Select()` calls in one formula. `--fix` moves a colon-space formula into a block scalar.
+- Per-file coverage floor in `check-canvas-overlap.mjs` and `check-canvas-format.mjs`: a screen file
+  under half resolved is named.
+- `canvas-mcp.py diff` and `sync --diff`: an order-independent property diff between a fresh-session sync
+  and the source - the only proof of what Studio saved. `--behaviour`; `--restyle` fails on any change
+  outside presentation properties and on If/Switch colours whose branches collapse to one value.
+- `canvas-browser.mjs`: `stable` (read a value until two reads agree; a chunked load shows a part total
+  while it fills), `studio --reload`, `dirty --toggle`.
+- `contract-to-walk.mjs` gives every edit form a save-reopen-save walk (kind `reopen`): a form that
+  reopens blank and then saves the blanks is caught.
+- `site-walk.mjs` signs in through the site's own link before judging pages (`signInSelector`,
+  `signInPath`, `signInTimeout`) and reports `SW-SIGNED-OUT` instead of page-by-page misses.
+- `audit-pages-permissions.py` `LIQUID-CASE-CLASH`: Liquid variables that differ only by case across a
+  page and its includes are one variable.
+- `fabric.py deploy` refuses a semantic model where a measure has the name of a column in its table (case
+  ignored), in the plan, before the service's bare 400.
+- `deploy-tables.py`: per-table counts in the plan; `"default"` on yes/no columns (sent as DefaultValue;
+  the plan warns when it is missing, because every new row then reads No).
+- References: a step-gates table for shipping; restyling an existing app (font change, skip counts,
+  equal tokens); growing screens; read-only at phone width; validation on Save; recomputing child rows in
+  place; the unclassified remainder; group once, load once, invalidate on write; print interception;
+  the stale-player package check; the whole-app clip and overlap sweep; model-driven app modules by
+  script (unpublished lookup, sitemap ids, a per-app header theme) and their verification traps; an
+  independent source-vs-live check after a data load; Liquid traps, the data-driven grid and the
+  one-account profile switch; the Power BI tile's two first-use prompts and embed parameters; the
+  report masthead image and card formats; republishing a dataflow after a source schema change; the
+  design detector's parser modules.
+
+### Changed
+
+- `canvas-mcp.py hold` releases only after a proven save newer than the push; `publish` records the hash
+  the last clean push sent; `save`, `publish` and `dirty` use the Studio tab whose frame holds a Save
+  button; `studio` prints STUDIO READY or exits 3.
+- Walk targets match an exact accessible name before a substring and report ties (`into: City` had typed
+  into "Search city"; `click: RAR` had pressed "New RAR"); a warning when the clicked control's name
+  lacks the step's text.
+- `site-walk.mjs` text checks ignore case (`innerText` applies `text-transform`).
+- `deploy-tables.py` refuses `<lookup>yominame` too, and checks reserved companion names against the live
+  table; data-load purges read cascade behaviour live and delete children explicitly.
+- No accessible-name finding for a gallery child whose `OnSelect` is exactly `Select(Parent)`.
+- Power Fx reference: `Sort` takes one key, `GroupBy` on a display name, Dataverse `ne` includes nulls,
+  the primary-name clash, `Trim()` of an empty input is Blank.
+
+### Fixed
+
+- A classic CheckBox click is proved by its checked state; a wrapper click had reported OK without
+  ticking the box, so a save wrote No while the walk passed.
+- A failed `studio` or an authoring server that never started (now AUTHORING SERVER DID NOT START, not
+  OSError 22) stops the chain before save and publish; `close-studio` frees a profile whose editor is
+  gone; a push after a Studio disconnect is no longer saved as if it had landed.
+- `pbi-theme.py` no longer writes made-up faces such as "Arial Semibold", which Power BI replaced with its
+  default font.
+- `audit-pages-permissions.py` reads lookup binds and helper-wrapped calls in server-logic JavaScript.
+- Model-driven form-control classids for whole number and decimal corrected; HTTP 500 with SQL 40197 is
+  retried.
+- `plugin-gate.mjs`: the schema-deploy gate fires on a real deploy run, not on any command that names the
+  script (a `git diff` and the deployer's own `--selftest` were refused).
+
 ## [0.27.1] - 2026-10-08
 
 The Stop gate misfired in four live sessions across three projects, and two owners turned it off. Each
