@@ -38,6 +38,8 @@
 //         --channel <chrome|msedge|chromium>   browser (default chrome, falls back to Edge when a
 //                           managed Chrome refuses an automated launch)
 //         --headed          walk with a visible browser
+//         --clear-browser-cache  clear the profile's HTTP cache first (ship always does): custom CSS is cached
+//                           for an hour, so a fresh upload is otherwise judged with the old stylesheet
 //         --allow-writes    required to walk a scenario that declares "writes": true (it posts
 //                           comments, saves forms); without it such a scenario is refused
 //         --token-cmd       a command that prints a Dataverse bearer token for orgUrl (overrides the
@@ -49,7 +51,8 @@
 //   widths         viewport widths, default [1440, 390]; the sideways-scroll check runs after
 //                  every width change and on every page
 //   signInPattern  regex for sign-in URLs (default: Entra, b2c, /SignIn, /Account/Login)
-//   signInSelector the site's own sign-in link (default a[href*="/SignIn" i], a[href*="/Account/Login" i]);
+//   signInSelector the site's own sign-in link (default a[href*="/SignIn" i], a[href*="/Account/Login" i],
+//                  never a sign-out link: /Account/Login/LogOff is the platform's Sign out);
 //                  false skips the check. Before the pages (and before ship's Clear buttons) the walk
 //                  opens signInPath (default /); when the link is shown it follows it and waits up to
 //                  signInTimeout seconds (default 60) for the site to come back signed in. A profile
@@ -111,7 +114,8 @@
 //   SW-OVERFLOW       text spills out of its box, past the viewport or into the next element
 //   SW-COVERED        a fixed or sticky bar covers a control when it is scrolled into view
 //   SW-NAV-CURRENT    the menu marks a page other than the one shown as current (aria-current or an
-//                     active/current class on a header or nav link)
+//                     active/current class on a header or nav link); a page outside the menu may mark
+//                     the one section it sits under
 //   SW-FOCUS          a control has no focus indicator of 2 px or more at 3:1 against what is behind
 //                     it (outline, box-shadow or a thicker border); a 1 px colour change is not enough
 //                     ("uiChecks": false turns the last two off; "navSelector" overrides the menu links)
@@ -325,7 +329,12 @@ export function textHas(haystack, needle) {
 // empty), and then every scoped page answers "not found" for the wrong reason. state of one look:
 // 'sign-in-page' (on the identity provider), 'elsewhere' (left the site), 'signed-out' (the site's
 // own sign-in link is shown) or 'signed-in'.
-export const DEFAULT_SITE_SIGNIN_LINK = 'a[href*="/SignIn" i], a[href*="/Account/Login" i]';
+// The platform's Sign out is /Account/Login/LogOff: a selector on /Account/Login alone read every
+// signed-in page as signed out (measured on an Entra site), so sign-out links are excluded here and
+// never followed whatever selector a scenario gives.
+const NOT_SIGNOUT = ':not([href*="LogOff" i]):not([href*="SignOut" i]):not([href*="Logout" i])';
+export const DEFAULT_SITE_SIGNIN_LINK = `a[href*="/SignIn" i]${NOT_SIGNOUT}, a[href*="/Account/Login" i]${NOT_SIGNOUT}`;
+export const isSignOutHref = (href) => /log-?off|sign-?out|log-?out/i.test(String(href || ''));
 export function sessionState(url, baseUrl, signInLinks, signInPattern = DEFAULT_SIGNIN) {
   if (new RegExp(signInPattern, 'i').test(url)) return 'sign-in-page';
   let same = false;
@@ -505,6 +514,10 @@ export function navVerdict(here, links, marked) {
   const norm = (p) => { const x = (p || '/').split(/[?#]/)[0]; return x.length > 1 ? x.replace(/\/+$/, '') : '/'; };
   const h = norm(here);
   const matches = (l) => { const q = norm(l); return q === h || (q !== '/' && h.startsWith(q + '/')); };
+  // A page outside the menu (a detail page) may mark the one section it sits under, nested or not: a
+  // site's /project beside /projects is flat. A menu page marking another menu page stays a finding.
+  const inMenu = links.some((l) => norm(l) === h);
+  if (!inMenu && new Set(marked.map(norm)).size === 1) return null;
   const wrong = marked.filter((m) => !matches(m));
   if (wrong.length) return { code: 'SW-NAV-CURRENT', msg: `the menu marks ${wrong.map(norm).join(', ')} as current on ${h}` };
   const exact = links.find((l) => norm(l) === h);
@@ -583,22 +596,43 @@ export async function ensureSiteSession(page, s) {
   const sel = s.signInSelector === undefined ? DEFAULT_SITE_SIGNIN_LINK : s.signInSelector;
   if (sel === false) return { finding: null, note: 'not checked (signInSelector false)' };
   const pattern = s.signInPattern || DEFAULT_SIGNIN;
-  const links = () => page.evaluate((q) => [...document.querySelectorAll(q)].filter((e) => e.getClientRects().length).length, sel).catch(() => 0);
+  const signInLinks = (q) => [...document.querySelectorAll(q)].filter((e) => e.getClientRects().length && !/log-?off|sign-?out|log-?out/i.test(e.getAttribute('href') || ''));
+  const links = () => page.evaluate(`(${signInLinks})(${JSON.stringify(sel)}).length`).catch(() => 0);
   const look = async () => sessionState(page.url(), s.baseUrl, await links(), pattern);
-  await page.goto(abs(s.baseUrl, s.signInPath || '/'), { waitUntil: 'load', timeout: 45000 }).catch(() => {});
+  const end = Date.now() + Number(s.signInTimeout || 60) * 1000;
+  // domcontentloaded, not load: a measured site never reached load (a long poll), so each wait cost 45 s.
+  await page.goto(abs(s.baseUrl, s.signInPath || '/'), { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+  await settle(page, end);
   let state = await look();
   if (state === 'signed-in') return { finding: null, note: 'signed in' };
-  if (state === 'signed-out') {
-    await page.evaluate((q) => { const a = [...document.querySelectorAll(q)].find((e) => e.getClientRects().length); if (a) a.click(); }, sel).catch(() => {});
-    const end = Date.now() + Number(s.signInTimeout || 60) * 1000;
-    do {
-      await page.waitForTimeout(1000);
-      await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {});
-      state = await look();
-    } while (state !== 'signed-in' && Date.now() < end);
-    if (state === 'signed-in') { await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); return { finding: null, note: 'signed in through the site\'s own sign-in link' }; }
+  // Follow the link by navigating to it, and again when the site comes back still signed out. A Private
+  // site's gate makes its own Entra round trip after the first load; a click made during it was
+  // cancelled by the gate's redirect, and one click per walk reported SW-SIGNED-OUT on a signed-in
+  // profile in about half the runs (measured).
+  for (let tries = 0; state === 'signed-out' && tries < 3 && Date.now() < end; tries++) {
+    const href = await page.evaluate(`(() => { const a = (${signInLinks})(${JSON.stringify(sel)})[0]; return a ? (a.href || '') : null; })()`).catch(() => null);
+    if (href === null || isSignOutHref(href)) break;
+    if (href) await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    else await page.locator(sel).first().click({ timeout: 10000 }).catch(() => {});
+    await settle(page, end);
+    state = await look();
+    if (state === 'signed-in') return { finding: null, note: 'signed in through the site\'s own sign-in link' + (tries ? ` (attempt ${tries + 1})` : '') };
   }
   return { finding: signedOutFinding(state, sel, s.baseUrl), note: '' };
+}
+
+// Wait until the main frame has had no document request in flight for quietMs: redirects through the
+// identity provider take seconds each, so a quiet window on navigation events alone ends too early.
+export async function settle(page, end = Date.now() + 30000, quietMs = 1200) {
+  const main = (r) => r.isNavigationRequest() && r.frame() === page.mainFrame();
+  let pending = 0, last = Date.now();
+  const start = (r) => { if (main(r)) { pending++; last = Date.now(); } };
+  const done = (r) => { if (main(r)) { pending = Math.max(0, pending - 1); last = Date.now(); } };
+  page.on('request', start); page.on('requestfinished', done); page.on('requestfailed', done);
+  try {
+    while ((pending > 0 || Date.now() - last < quietMs) && Date.now() < end) await page.waitForTimeout(200);
+    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+  } finally { page.off('request', start); page.off('requestfinished', done); page.off('requestfailed', done); }
 }
 
 // Walk one scenario. ctx is a signed-in context; freshContext() makes a cookie-free one.
@@ -932,7 +966,7 @@ async function cmdShip() {
       await page.goto(abs(s.baseUrl, '/_services/about'), { waitUntil: 'load', timeout: 45000 }).catch(() => {});
       for (const name of [/clear config/i, /clear cache/i]) {
         const b = page.getByRole('button', { name });
-        if (await b.count().catch(() => 0)) { await b.first().click().catch(() => {}); await page.waitForTimeout(3000); done.push(String(name).replace(/[/i]/g, '')); }
+        if (await b.count().catch(() => 0)) { await b.first().click().catch(() => {}); await page.waitForTimeout(3000); done.push(name.source.replace(/\\/g, '')); }
       }
       await ctx.close();
       log(done.length ? `ship clear: ${done.join(' and ')} pressed at /_services/about` : 'ship clear: no Clear buttons at /_services/about (the signed-in contact needs a web role with all website access); permission and setting changes may take minutes to apply');
@@ -950,6 +984,12 @@ async function cmdWalk() {
   if (errs.length) { console.error('Scenario refused:\n  ' + errs.join('\n  ')); process.exit(2); }
   const chromium = await loadPlaywright(); if (!chromium) noBrowser('walk');
   const ctx = await persistent(chromium, !has('headed'));
+  // After an upload the profile still holds the old stylesheet: custom CSS is served with max-age=3600,
+  // so a ship once judged new templates against the previous CSS (measured). ship always clears it.
+  if (cmd === 'ship' || has('clear-browser-cache')) {
+    const pg = ctx.pages()[0] || await ctx.newPage();
+    try { const cdp = await ctx.newCDPSession(pg); await cdp.send('Network.clearBrowserCache'); await cdp.detach(); log('walk: browser cache cleared'); } catch (e) { log('walk: browser cache NOT cleared (' + String(e.message).split('\n')[0] + '): a style change may be judged against the old CSS'); }
+  }
   let plain = null;
   const runStart = Date.now();
   const report = await runWalk(s, {
@@ -1024,6 +1064,14 @@ function fixtureServer() {
     // its cookie is set, and /site/SignIn sets it and returns; /dead/SignIn returns without it.
     if (p === '/site/SignIn') return send(302, 'text/plain', '', { Location: u.searchParams.get('returnUrl') || '/site/home', 'Set-Cookie': 'ss=1; Path=/' });
     if (p === '/dead/SignIn') return send(302, 'text/plain', '', { Location: '/dead/home' });
+    // /flaky/SignIn does not take the first time (the gate's redirect cancelled it), then does.
+    if (p === '/flaky/SignIn') return send(302, 'text/plain', '', { Location: '/flaky/home', 'Set-Cookie': /(^|;\s*)ft=1/.test(req.headers.cookie || '') ? 'fs=1; Path=/' : 'ft=1; Path=/' });
+    if (p === '/flaky/home') {
+      const on = /(^|;\s*)fs=1/.test(req.headers.cookie || '');
+      return send(200, 'text/html', html('home', `<header>${on ? 'Sign out' : '<a href="/flaky/SignIn">Sign in</a>'}</header><p>${on ? 'SCOPED-ITEM' : 'Not found'}</p>`));
+    }
+    // Signed in on a platform site: the only /Account/Login link is Sign out (LogOff).
+    if (p === '/logoff/home') return send(200, 'text/html', html('home', '<header><a href="/Account/Login/LogOff?returnUrl=%2F">Sign out</a></header><p>SCOPED-ITEM</p>'));
     if (p === '/site/home' || p === '/dead/home') {
       const pre = p.split('/')[1], on = pre === 'site' && /(^|;\s*)ss=1/.test(req.headers.cookie || '');
       return send(200, 'text/html', html('home', `<header>${on ? '<a href="/site/signout">Sign out</a>' : `<a href="/${pre}/SignIn?returnUrl=/${pre}/home">Sign in</a>`}</header>`
@@ -1115,6 +1163,8 @@ async function selftest() {
   check('nav: right page marked passes', navVerdict('/my-requests/', ['/', '/shared/', '/my-requests/'], ['/my-requests/']) === null);
   check('nav: wrong page marked -> SW-NAV-CURRENT', navVerdict('/shared/', ['/shared/', '/my-requests/'], ['/my-requests/'])?.code === 'SW-NAV-CURRENT');
   check('nav: a detail page under a section may mark the section', navVerdict('/shared/item/', ['/shared/', '/my-requests/'], ['/shared/']) === null);
+  check('nav: a flat detail page outside the menu may mark its section', navVerdict('/project', ['/', '/projects', '/my-work'], ['/projects']) === null);
+  check('nav: a detail page marking two sections -> SW-NAV-CURRENT', navVerdict('/project', ['/', '/projects', '/my-work'], ['/projects', '/my-work'])?.code === 'SW-NAV-CURRENT');
   check('nav: page in the menu but unmarked while markers are used', /not marked/.test(navVerdict('/request/', ['/shared/', '/request/'], ['/shared/x'])?.msg || '') || navVerdict('/request/', ['/shared/', '/request/'], ['/shared/'])?.code === 'SW-NAV-CURRENT');
   check('nav: no marker anywhere is not judged', navVerdict('/x/', ['/a/'], []) === null);
   check('nav across pages: marked on one, unmarked on another menu page', navConsistency([{ here: '/a/', links: ['/a/', '/b/'], marked: ['/a/'] }, { here: '/b/', links: ['/a/', '/b/'], marked: [] }]).length === 1);
@@ -1266,7 +1316,12 @@ async function selftest() {
   check('signed out of the site: signs in through its own link, then judges pages', codes(sess).size === 0 && /own sign-in link/.test(sess.rows.find((r) => r.step === 'site session')?.note || ''));
   if (codes(sess).size) log(table(sess.rows.filter((r) => r.code)));
   const dead = await run({ baseUrl: base, widths: [1440], signInPath: '/dead/home', signInTimeout: 3, pages: [{ path: '/dead/home', expectText: ['SCOPED-ITEM'] }] });
-  check('a sign-in that does not take -> SW-SIGNED-OUT once, no page-level misses, exit 2', dead.rows.filter((r) => r.code === 'SW-SIGNED-OUT').length === 1 && !codes(dead).has('SW-TEXT') && exitCode(dead) === 2);
+  const lo = await run({ baseUrl: base, widths: [1440], signInPath: '/logoff/home', pages: [{ path: '/logoff/home', expectText: ['SCOPED-ITEM'] }] });
+  check('a page whose only /Account/Login link is Sign out (LogOff) reads as signed in', codes(lo).size === 0 && lo.rows.find((r) => r.step === 'site session')?.note === 'signed in');
+  check('sign-out hrefs are never followed', isSignOutHref('/Account/Login/LogOff?returnUrl=%2F') && isSignOutHref('/signout') && !isSignOutHref('/Account/Login/ExternalLogin?returnUrl=%2F'));
+  const flaky = await run({ baseUrl: base, widths: [1440], signInPath: '/flaky/home', pages: [{ path: '/flaky/home', expectText: ['SCOPED-ITEM'] }] });
+  check('a first sign-in that does not take is followed again, then pages are judged', codes(flaky).size === 0 && /attempt 2/.test(flaky.rows.find((r) => r.step === 'site session')?.note || ''));
+  check('a sign-in that does not take -> SW-SIGNED-OUT once, no page-level misses, exit 2',dead.rows.filter((r) => r.code === 'SW-SIGNED-OUT').length === 1 && !codes(dead).has('SW-TEXT') && exitCode(dead) === 2);
   const upper = await run({ baseUrl: base, widths: [1440], signInSelector: false, pages: [{ path: '/dead/home', expectText: ['Total cost of work'] }, { path: '/dead/home', expectNoText: ['total COST'] }] });
   check('signInSelector false skips the check', /not checked/.test(upper.rows.find((r) => r.step === 'site session')?.note || '') && !codes(upper).has('SW-SIGNED-OUT'));
   check('uppercase heading: expectText holds, expectNoText catches it in any case', upper.rows.filter((r) => r.code === 'SW-TEXT').length === 1 && upper.rows.some((r) => r.code === 'SW-TEXT' && /shows "total COST"/.test(r.msg)));
