@@ -359,6 +359,7 @@ codebase, and push the fixes back upstream as commits in the source repo, not as
 |---|---|---|
 | data connections | every whole-table read, ranked against a **live** row count | the same construct is a finding on a big table and silence on a small one; scan every behaviour property, not just `OnStart` |
 | scale | what breaks at the **planned** size, not today's | see the method below |
+| picker size | every searchable ComboBox or DropDown over a table larger than about 500 rows searches on the typed text in `Items` | `check-drift.py` (`picker-size`, live row counts); a direct-bound modern ComboBox searches only the rows it loaded |
 | permission gates | every write surface is behind a role check | needs a floor and a vocabulary guard; admin testing cannot prove it |
 | write paths | every `Patch` targets columns live has; denormalized copies are set on every create and refreshed on every source change | decided from live metadata, offline |
 | role coverage | every bound table is granted by some role reaching that screen, including tables the app only writes (a change log) | source plus solution `Entity.xml` |
@@ -366,7 +367,7 @@ codebase, and push the fixes back upstream as commits in the source repo, not as
 | schema drift | live vs **solution source**, type-aware (lookups matter, scalar casing does not) | print case-only drift with codepoints - it is invisible in every error message |
 | geometry | overlaps across `Visible` conditions, gallery children vs row bounds, off-canvas edges, dead click spots | a floor; the browser is the authority (`canvas-layout.md`) |
 | navigation | dead `Navigate` targets, orphan screens, app-wide duplicate control names, nav bar drift | see below |
-| `.pa.yaml` traps | colon-space, comments, Tooltip on Button, file ceiling, block-scalar indentation | run at write time by the hook too |
+| `.pa.yaml` traps | colon-space, comments, Tooltip on Button, duplicate keys, values without `=`, file ceiling (once per folder), block-scalar indentation | run at write time by the hook too |
 | control traps | properties that compile and misbehave: a classic enum on a modern input, spin arrows that do not commit, a dropdown fed a projection, row clicks that reach nothing, two colour tokens with one value | `check-canvas-format.mjs`; `canvas-controls-and-patterns.md` |
 | flows | `lint-flows.mjs` set, plus cross-flow cycles, entity set names, repo vs live on/off state | `power-automate.md` |
 | accessibility | interactive controls with no accessible name; actions only a mouse can reach | derived from source, not from the platform checker; see below |

@@ -13,7 +13,7 @@
 //                                                   build-stamp-visible, accessible names)
 //   overlap       check-canvas-overlap.mjs          over the canvas Src
 //   flows         lint-flows.mjs                    over flows/ (or solution/src/Workflows)
-//   drift         check-drift.py --offline          when an artifact and a metadata dump are given
+//   drift         check-drift.py --offline          cache drift and picker size, when an artifact and a metadata dump are given
 //                                                   (--drift <msapp|zip> --drift-dump <json>, or
 //                                                   "driftArtifact"/"driftDump" in canvas-app.json)
 //   seed          seed-data.py check                when a seed file exists AND a token source does

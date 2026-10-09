@@ -206,14 +206,17 @@ copying a working control from the same app.
   from list and search. Store the label as a real column, backfill it idempotently, and re-run the
   backfill after every bulk load that changes its parts (it moves `modifiedon` on every row it
   writes).
-- **How many items a modern ComboBox can search - test it.** With `Items` bound to a large
-  COLLECTION, one app found search reached only about the first 900 items, silently, with no
-  property to raise it: rows past that were unreachable by typing and scrolling alike. Another app
-  bound a ComboBox directly to a delegable Dataverse table (2,282 rows) with `IsSearchable` and
-  concluded that search delegates and row count does not matter - never tested past row 900. Before
-  relying on either, search for an item past row 900 in the browser. Either way, keep everyday
-  pickers small (filter candidates on the server, open items only) and give the rare case its own
-  narrow opt-in read. The classic ComboBox does not delegate `SearchFields` on Dataverse and rendered
+- **A modern ComboBox searches only the rows it has loaded - bound to a collection or straight to
+  a table.** With `Items` bound to a large COLLECTION, one app found search reached only about the
+  first 900 items, silently, with no property to raise it. Bound DIRECTLY to a delegable Dataverse
+  table (`Sort(Filter(Vendors, Assignable <> false), 'Vendor Name')`, 2,283 rows, no delegation
+  warning), the published player's search was a local contains-match over the loaded prefix: row 600
+  was found, rows 1,000 and 1,545 (a vendor added that week) were not, by name or by number. A user
+  reported it as "the new vendor does not show"; no audit had looked at picker size. **Above about
+  500 rows, a picker is a TextInput plus a gallery (next item), or a ComboBox whose `Items` filters on
+  the server by the typed text.** `check-drift.py` fails a searchable picker bound to a table over
+  that size (`picker-size`). Keep everyday pickers small (filter candidates on the server, open items
+  only) and give the rare case its own narrow opt-in read. The classic ComboBox does not delegate `SearchFields` on Dataverse and rendered
   rows blank over a delegated `Items`.
 - **Above the row limit, a picker is a TextInput plus a gallery.** The pattern: a modern TextInput
   with `TriggerOutput` `Delayed`; a gallery with
@@ -595,6 +598,14 @@ relying on `DisplayMode`.
   every co-author; use identity-based gates.
 - **A permission matrix as a four-level ladder** (Hidden / Viewable / Editable / Create new), stored
   as three booleans and mapped in one place, also collapses contradictory combinations.
+- **A way back into an admin screen is a way in.** A shared detail screen with a contextual Back
+  (`If(gblReturnTo = "Governance", Navigate(DataGovernance), Back())`) made an admin-only screen
+  reachable from an ungated one, and through that screen's own Back to the admin hub the
+  permission audit's door inference rated 17 admin writes as ungated. An admin screen gates its own
+  exits (`Visible: =gblIsAdmin` on its onward navigation, a Home button for everyone else) and carries
+  its own access-denied cover: a screen-wide rectangle below the header and a message, both
+  `Visible: =!gblIsAdmin`, declared last (the overlap check exempts that shape). Never rely on the
+  route in.
 - **Testing restrictions without a second account** proves canvas gates only, never Dataverse roles
   (`browser-verification.md`).
 
@@ -716,6 +727,15 @@ relying on `DisplayMode`.
 - **Every rule here is walk-tested, not assumed.** Each bullet in this section that gates an action
   has a refusal or `twice` scenario in the acceptance contract (`browser-verification.md` section
   18); a rule only read in the source is unproven in the published app.
+
+**A data-quality page for the people who fix the data.** One pattern that worked, on an admin
+screen: `OnVisible` builds one collection in a single pass, one row per record per failed rule
+(record, rule, detail); issue tiles show each rule's count and filter the grid when clicked; each
+row's Open deep-links to the record AND the tab where the fix lives. The same rules feed a script
+that writes them to a workbook tab with app deep links (`?id=<id>&tab=<tab>`), and `OnVisible` of
+the target screen checks `tab` against an allow-list before using it. Keep ONE rule list that drives
+both the page and the workbook, so the two cannot disagree, and recount from live data, not from a
+load's findings (`data-migration.md`).
 
 ## 16. Lists: filter, search, group, sort
 

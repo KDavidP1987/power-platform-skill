@@ -20,6 +20,7 @@ Options:
     --dump PATH         write the live metadata this run fetched to PATH (for later --offline)
     --src DIR           .pa.yaml directory to search for references (default: the half of the
                         artifact that runs)
+    --picker-limit N    picker-size threshold in rows (default 500; 0 turns the check off)
     --json              machine-readable report
     --selftest          run the built-in tests on synthetic fixtures and exit
 
@@ -39,6 +40,11 @@ What it compares, for every Dataverse table the app binds:
   lookup        cached navigation property name, lookup schema name and target vs live
   dbrefs        (solution zip) <DatabaseReferences> - what the player initialises - vs the
                 app's DataSources.json - what it binds - by name and by value
+  picker-size   a ComboBox or DropDown whose Items reads a bound table holding more rows than
+                --picker-limit, with no search on the typed text in Items. A modern ComboBox searches
+                only the rows it loaded: bound straight to a 2,283-row table, search found row 600
+                and missed rows 1,000 and 1,545, with no delegation warning. Row counts come from
+                RetrieveTotalRecordCount (a recent snapshot) and are kept in --dump files.
 
 Exit: 0 no drift, 1 drift found, 2 could not read the artifact, could not reach live metadata,
 or some bound tables could not be verified. 2 is NEVER a pass.
@@ -519,6 +525,12 @@ def fetch_table(api, logical):
             t["lookups"].append({"attr": r["ReferencingAttribute"],
                                  "nav": r.get("ReferencingEntityNavigationPropertyName"),
                                  "target": r.get("ReferencedEntity")})
+    try:
+        c = api.get("RetrieveTotalRecordCount(EntityNames=@p)?@p=['%s']" % q) or {}
+        vals = (c.get("EntityRecordCountCollection") or {}).get("Values") or []
+        t["rows"] = int(vals[0]) if vals and vals[0] is not None and int(vals[0]) >= 0 else None
+    except Exception:  # the count is for the picker check only; never fail the metadata read over it
+        t["rows"] = None
     for kind in CHOICE_BUCKETS:
         expand = "OptionSet,GlobalOptionSet" if kind in RECONCILABLE_CHOICES else "OptionSet"
         d = api.get("EntityDefinitions(LogicalName='%s')/Attributes/Microsoft.Dynamics.CRM.%sAttributeMetadata"
@@ -658,7 +670,67 @@ def choice_findings(src, where, kind, cached_opts, live_opts, column, findings):
             "nothing until a user picks one: the write is then rejected by Dataverse"))
 
 
-def compare_app(pkg, live, files, player=None):
+PICKER = re.compile(r"^(Classic/)?(ComboBox|DropDown|Dropdown|ModernCombobox|ModernDropdown)(@|$)", re.I)
+TYPED_SEARCH = re.compile(r"(StartsWith|Search|EndsWith)\s*\(.*?\b\w+\.(Value|Text|SearchText)\b|\b\w+\.(Value|Text|SearchText)\s+in\b", re.S)
+
+
+def pickers(files):
+    """Every ComboBox / DropDown with its Items formula: [{file, line, name, control, items}]."""
+    out = []
+    for fname, text in files:
+        lines = text.split("\n")
+        name = control = None
+        for i, line in enumerate(lines):
+            m = re.match(r"^\s*- ([A-Za-z_]\w*):\s*$", line)
+            if m:
+                name, control = m.group(1), None
+                continue
+            m = re.match(r"^\s*Control:\s*(\S+)", line)
+            if m:
+                control = m.group(1)
+                continue
+            m = re.match(r"^(\s*)Items:\s*(.*)$", line)
+            if not m or not control or not PICKER.match(control):
+                continue
+            items = m.group(2)
+            if re.match(r"^[|>][-+]?\s*$", items):
+                body = []
+                for nxt in lines[i + 1:]:
+                    if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= len(m.group(1)):
+                        break
+                    body.append(nxt.strip())
+                items = " ".join(body)
+            out.append({"file": fname, "line": i + 1, "name": name, "control": control, "items": items})
+    return out
+
+
+def picker_findings(sources, live, files, limit, findings):
+    if not limit:
+        return
+    found = pickers(files)
+    for src in sources:
+        lt = live["tables"].get(src["logical"]) or {}
+        rows = lt.get("rows")
+        if rows is None or lt.get("missing"):
+            continue
+        pat = re.compile(r"(?<![\w'.])%s(?![\w'])|'%s'" % (re.escape(src["name"]), re.escape(src["name"])))
+        for pk in found:
+            if not pat.search(pk["items"]):
+                continue
+            findings.count("pickers")
+            if rows <= limit or TYPED_SEARCH.search(pk["items"]):
+                continue
+            findings.append(finding(
+                "drift", "picker-size", src, "%s (%s): picker %s reads %s, which holds %d rows (limit %d), and its Items does "
+                "not search on the typed text" % (src["name"], src["logical"], pk["name"], src["name"], rows, limit),
+                "a modern ComboBox searches only the rows it loaded: rows past the loaded prefix cannot be found by "
+                "typing, silently, with no delegation warning (a vendor added that week 'did not show')",
+                "a TextInput plus a gallery whose Items filters the table on the typed text "
+                "(canvas-controls-and-patterns.md, section 5), or Items that filter on the server by the typed text",
+                "%s:%d" % (pk["file"], pk["line"])))
+
+
+def compare_app(pkg, live, files, player=None, picker_limit=500):
     """Findings for one app package against a live (or dumped) metadata dict."""
     findings, unverified, checked = Findings(), [], 0
     ldr = pkg.local_db_refs()
@@ -798,6 +870,8 @@ def compare_app(pkg, live, files, player=None):
         choice_findings(src, "OptionSetInfo cache (%s)" % info["name"], info["kind"], info["options"],
                         lch["options"], info["column"], findings)
 
+    picker_findings(sources, live, files, picker_limit, findings)
+
     if player is not None:
         findings.count("player list", len(player))
         bound = {s["name"]: s for s in sources}
@@ -883,6 +957,7 @@ def run(argv):
     ap.add_argument("--offline")
     ap.add_argument("--dump")
     ap.add_argument("--src")
+    ap.add_argument("--picker-limit", type=int, default=500)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
@@ -937,7 +1012,7 @@ def run(argv):
             half, files = "--src " + a.src, src_files(a.src)
         else:
             half, files = pkg.formula_files()
-        findings, unverified, checked, total = compare_app(pkg, live, files, player)
+        findings, unverified, checked, total = compare_app(pkg, live, files, player, a.picker_limit)
         if not files:
             unverified.append("formula references (no .pa.yaml or Controls/*.json to search - a missing "
                               "column cannot be told apart from an unused one)")
@@ -1204,6 +1279,27 @@ def selftest():
         pkg = AppPackage("x", read_zip(fixture_msapp(base, FIXTURE_FORMULAS, load_from_yaml=False)))
         check("LoadFromYaml false -> formulas read from Controls/", pkg.formula_files()[0] == "Controls/")
 
+        # picker-size: a searchable picker bound straight to a large table fails; a small table, a picker
+        # that searches on the typed text, and --picker-limit 0 pass.
+        def picker_app(items, fname):
+            return write(fname, fixture_msapp(base, FIXTURE_FORMULAS + "      - cmbOrder:\n          Control: ComboBox\n"
+                                              "          Properties:\n            Items: |-\n              " + items + "\n"))
+        big = dict(base, rows=2283)
+        direct = picker_app("=Sort(Filter(Orders, 'Order Total' > 0), 'Order Total')", "pk1.msapp")
+        rc, fs, _ = drift_of(big, direct)
+        check("picker-size: a picker over a 2,283-row table without a typed search -> drift with file:line",
+              rc == 1 and any(f["check"] == "picker-size" and "2283 rows" in f["what"] and ":" in f.get("evidence", "") for f in fs))
+        rc, fs, _ = drift_of(dict(base, rows=120), direct)
+        check("picker-size: the same picker over 120 rows passes", rc == 0 and not any(f["check"] == "picker-size" for f in fs))
+        searched = picker_app("=Filter(Orders, StartsWith(Name, txtFind.Value))", "pk2.msapp")
+        rc, fs, _ = drift_of(big, searched)
+        check("picker-size: Items that search on the typed text pass", rc == 0)
+        d = write("pk.json", json.dumps(fixture_dump(big)))
+        rc, out = run_quiet([direct, "--offline", d, "--picker-limit", "0"])
+        check("picker-size: --picker-limit 0 turns it off", rc == 0)
+        rc, fs, _ = drift_of(base, direct)
+        check("picker-size: no row count (an older dump) -> not judged", rc == 0)
+
         msapr = write("app.msapr", fixture_msapp(fixture_table(entity_set="app_orderses"), "", prefix="msapp/"))
         rc, out = run_quiet([msapr, "--offline", dump])
         check(".msapr layout (msapp/References/...) is read", rc == 1 and "entity-set" in out)
@@ -1227,6 +1323,8 @@ def selftest():
               rc_live == 0 and seen and all(m == "GET" for m, _ in seen))
         rc, out = run_quiet([app, "--offline", os.path.join(tmp, "from-live.json")])
         check("--dump written in live mode replays offline with the same result", rc == 0)
+        with open(os.path.join(tmp, "from-live.json"), encoding="utf-8") as f:
+            check("live mode records each table's row count in the dump", json.load(f)["tables"]["app_order"].get("rows") == 42)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1270,6 +1368,8 @@ def _selftest_http(table, app_path, write, run_quiet):
                     return self._send(200, {"value": [{"LogicalName": "core_customer", "EntitySetName": "core_customers"}]})
                 return self._send(200, {"value": [{"LogicalName": "app_order", "EntitySetName": table["set"]}],
                                         "@odata.nextLink": host + API + "EntityDefinitions?$select=LogicalName&page2=1"})
+            if "RetrieveTotalRecordCount" in p and "'app_order'" in p:
+                return self._send(200, {"EntityRecordCountCollection": {"Count": 1, "Keys": ["app_order"], "Values": [42]}})
             if "LogicalName='app_order'" not in p:
                 return self._send(404, {})
             for kind in CHOICE_BUCKETS:
