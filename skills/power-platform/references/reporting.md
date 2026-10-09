@@ -270,6 +270,18 @@ repo's design doc. Keep the Demo source filterable end to end.
 - **An average leaves out the rows it is not about.** A rejected or still-pending request has no
   duration; counting it as zero days pulls an average loan length down. State the rows each average
   covers in the measure's description.
+- **A source schema change needs a dataflow republish, then a refresh.** A Dataflow Gen2 lakehouse
+  destination with automatic settings fixes the table's columns when the dataflow is published. A
+  column added to a Dataverse table (bronze selecting every column) did not land on a plain refresh,
+  and the refresh was green; republishing the unchanged definition (`fabric.py deploy --only
+  <dataflow> --apply`, which sends `updateDefinition`) and refreshing added it. After any column is
+  added to a source table, republish the bronze dataflow before the run, and check the new column is
+  in the bronze table (the SQL endpoint's column list), not only that the row count matches.
+- **A measure cannot share a name with a column of its table.** Names are not case-sensitive: a
+  measure `Budget` beside a column `budget` was refused ("a column with the same name already
+  exists"), and the REST create first returned only a bare 400. When measures take the plain business
+  names, give the fact columns a suffix (`budget_amount`). `fabric.py deploy` refuses a model whose
+  `.tmdl` files have such a pair, in the plan, before anything is sent.
 - **One owner for the refresh.** The reporting lane runs and proves it (`prove-refresh`) while it
   builds. After it hands back, only the lead refreshes, once, after the seed is restored, in the
   background while it writes the hand-back. A measured build refreshed four times at the end, from
@@ -282,7 +294,22 @@ Generate the report theme from the app's tokens with `scripts/pbi-theme.py --tok
 violet, indigo and magenta, contrast under 4.5:1 and unset values), and check it by screenshot. One page reads top to
 bottom: the headline figures in cards, then the trend, then the breakdown, then the detail table;
 titles state the question each visual answers; the same date format as the app. Run impeccable
-`critique` on the report screenshot with the canvas screens. Screenshot the report canvas only
+`critique` on the report screenshot with the canvas screens. The text classes use a heavier face
+only where Power BI has one (Segoe UI Semibold): a made-up face such as "Arial Semibold" is not
+refused, the text silently falls back to the default font, so `pbi-theme.py` keeps any other family
+in its plain face.
+
+**Brand the report with one masthead image, not shapes.** Brand colours alone still read as a
+generic report. One image across the top of each page (a dark frame, the reversed wordmark, a brand
+band), registered as a report resource (`StaticResources/RegisteredResources/`, an `Image` item in
+`report.json`), set as the page background or an image visual, with the title text box and the
+slicers laid over it, brands every page; a stack of rectangles and text boxes shifts with each
+resize. Deploy scripts send an image as its bytes, base64-encoded as they are; reading it as text
+corrupts it (`fabric.py` treats only text extensions as text, and its selftest sends a PNG through
+byte for byte). **Give each kind of card its own format:** money in the display unit the readers
+use (thousands or millions, one decimal), counts as whole numbers with no unit, percentages as a
+percent format with display units off. A percent card left on the page's millions unit showed
+"-0.00M%". Screenshot the report canvas only
 (an element screenshot of the page, or the report in full-screen view): the service's header shows
 the signed-in person's photo and the organisation's logo, and the workspace rail lists other work.
 
@@ -354,9 +381,24 @@ until it exists, this section is the pattern to follow.
   deployed model does not have is ignored with only a warning icon in the filter pane - the report
   shows everything. Verify the filter pane reads "column is value", and test a value that matches
   nothing (every visual blank).
-- **What users will see the first time:** the app asks once for consent to Power BI, and the tile
-  shows "Sign in to view this report" until they select Sign in (a pop-up that closes itself).
-  Neither is an error; say so in the guide. The tile does not render in the Power Apps mobile player.
+- **When the app supplies the navigation, hide the report's own:** add
+  `&filterPaneEnabled=false&navContentPaneEnabled=false` to the embed URL. Inside an app with its own
+  tabs and filters, the report's filter pane and page navigator duplicate that chrome. Because the
+  embed URL sits in a settings row, the change needs no republish.
+- **What users will see the first time - tell the owner before publishing.** Adding the tile has two
+  first-use costs, and Studio preview shows neither (it signs in silently):
+  1. Every user gets the app's consent dialog again on the next open, now listing Power BI among the
+     resources, even users who accepted it before.
+  2. In the published player the tile shows "Sign in to view this report" until they select Sign in
+     once (a pop-up opens and closes itself); after that every page renders.
+
+  Neither is an error. Say so to the owner before the publish that adds the tile, put a one-line hint
+  on the screen beside the tile ("First time: select Sign in on the report"), and say so in the user
+  guide. The tile does not render in the Power Apps mobile player.
+- **Verify it in the published player with a browser.** Accept the consent dialog, then select the
+  tile's Sign in. In Playwright, Sign in sits under a player overlay, so `locator.click()` fails:
+  read the button's box and `page.mouse.click(x, y)` at its centre. Then check the report pages
+  render with data. The player walk itself is in `references/browser-verification.md`.
 - **Always add "Open in Power BI"** (`Launch()` with the same filter on the report URL). It works in
   every player, opens the full report with its pages and filter pane, and is the fallback when the
   tile cannot render.

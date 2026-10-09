@@ -64,6 +64,8 @@ A placeholder that cannot be resolved stops an --apply before the item is sent.
 Safety: items are matched by type and display name INSIDE the folder. An item with the same type and
 name elsewhere in the workspace belongs to someone else: the run refuses (exit 1) instead of taking
 it over. Folders are matched by display name at the workspace root.
+A SemanticModel whose .tmdl files give a measure the name of a column in the same table (case
+ignored) is refused in the plan: the service refuses it too, after a bare 400.
 
 Options:
     --workspace ID|NAME   workspace (or "workspace" in the manifest)
@@ -236,6 +238,42 @@ def resolve(text, fab, vars_, pending, apply):
     return out, missing
 
 
+TMDL_OBJ = re.compile(r"^\s*(table|column|measure)\s+('(?:[^']|'')+'|[^\s=]+)")
+
+
+def tmdl_name_clashes(parts):
+    """A model refuses a measure named like a column of the same table, ignoring case (measure Budget,
+    column budget): 'a column with the same name already exists', after a bare 400 on create. Found
+    here from the .tmdl files, before anything is sent."""
+    found = []
+    for rel, text in sorted(parts.items()):
+        if not rel.lower().endswith(".tmdl") or not isinstance(text, str):
+            continue
+        table, cols, measures = None, {}, []
+
+        def flush():
+            for m in measures:
+                if m.lower() in cols:
+                    found.append("table %s: measure %r has the name of column %r (names are not case-sensitive); "
+                                 "rename the column, for example %s_amount" % (table, m, cols[m.lower()], cols[m.lower()]))
+        for line in text.splitlines():
+            m = TMDL_OBJ.match(line)
+            if not m:
+                continue
+            kind, name = m.group(1), m.group(2)
+            if name.startswith("'"):
+                name = name[1:-1].replace("''", "'")
+            if kind == "table":
+                flush()
+                table, cols, measures = name, {}, []
+            elif kind == "column":
+                cols[name.lower()] = name
+            else:
+                measures.append(name)
+        flush()
+    return found
+
+
 def build_definition(item, root, fab, vars_, pending, apply):
     kind, src = item["type"], item.get("source")
     if not src:
@@ -249,6 +287,10 @@ def build_definition(item, root, fab, vars_, pending, apply):
             parts[rel] = text
         else:
             parts[rel] = data
+    if kind == "SemanticModel":
+        clashes = tmdl_name_clashes(parts)
+        if clashes:
+            raise Finding("; ".join(clashes))
     fmt = None
     if kind == "Notebook":
         (name, body), = parts.items() if len(parts) == 1 else (None, None)
@@ -746,6 +788,38 @@ def selftest():
         check("model keeps folder-relative part paths", set(parts) == {"definition.pbism", "definition/expressions.tmdl"})
         check("SQL endpoint placeholders resolved", "abc.datawarehouse.fabric.microsoft.com" in parts["definition/expressions.tmdl"]
               and "sql-1" in parts["definition/expressions.tmdl"])
+
+        # A measure named like a column of its table (any case) is refused by the service: stop it here.
+        tables = os.path.join(tmp, "fabric", "clash", "definition", "tables")
+        os.makedirs(tables)
+        fact = ("table fact_amount\n\tmeasure Budget = SUM(fact_amount[%s])\n\t\tformatString: 0\n\n"
+                "\tcolumn %s\n\t\tdataType: double\n\t\tsourceColumn: budget\n")
+        with open(os.path.join(tables, "fact_amount.tmdl"), "w") as f:
+            f.write(fact % ("budget", "budget"))
+        clash_item = {"type": "SemanticModel", "name": "APP Clash", "source": "fabric/clash"}
+        try:
+            build_definition(clash_item, tmp, None, {}, set(), False)
+            check("a measure named like a column (any case) is refused offline", False)
+        except Finding as e:
+            check("a measure named like a column (any case) is refused offline", "'Budget'" in str(e) and "'budget'" in str(e))
+        with open(os.path.join(tables, "fact_amount.tmdl"), "w") as f:
+            f.write(fact % ("budget_amount", "budget_amount"))
+        d, _ = build_definition(clash_item, tmp, None, {}, set(), False)
+        check("a suffixed column beside the plain measure passes", len(d["parts"]) == 1)
+        check("the same name in another table is not a clash",
+              tmdl_name_clashes({"a.tmdl": "table t1\n\tcolumn 'Open Records'\n",
+                                 "b.tmdl": "table t2\n\tmeasure 'Open Records' = 1\n"}) == [])
+        check("quoted names are compared unquoted", len(tmdl_name_clashes(
+            {"a.tmdl": "table t1\n\tcolumn 'open records'\n\tmeasure 'Open Records' = 1\n"})) == 1)
+
+        # Report images (a masthead, a logo) are sent as their bytes, never decoded as text.
+        img = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE, 0x80])
+        res = os.path.join(tmp, "fabric", "imgreport", "StaticResources", "RegisteredResources")
+        os.makedirs(res)
+        with open(os.path.join(res, "masthead.png"), "wb") as f:
+            f.write(img)
+        d, _ = build_definition({"type": "Report", "name": "APP Img", "source": "fabric/imgreport"}, tmp, None, {}, set(), False)
+        check("a report image is sent byte for byte", base64.b64decode(d["parts"][0]["payload"]) == img)
 
         n_before = len(state["items"])
         rc, out = go(t, "deploy", "--manifest", mpath, "--apply")

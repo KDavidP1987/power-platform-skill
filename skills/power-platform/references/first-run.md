@@ -172,6 +172,23 @@ The server needs the .NET 10 SDK and authenticates as the person; details and it
 
 None is required: every bundled script works without them.
 
+**Give the design skill's detector its parser modules.** The impeccable skill's detector
+(`scripts/detect.mjs` in its folder) imports `htmlparser2`, `css-select`, `css-tree` and `domutils`.
+They do not come with the skill; without them it falls back to regex matching, prints
+`impeccable detect: DEGRADED` on stderr, and skips custom properties, selector matching and computed
+contrast. A measured machine ran every critique degraded this way, so every finding count was an
+undercount. Install them once into the skill's own folder, where its imports resolve, and again
+after the skill updates:
+
+```sh
+npm i --prefix <impeccable skill folder> htmlparser2 css-select css-tree domutils
+node <impeccable skill folder>/scripts/detect.mjs --json design/prototype.html   # no DEGRADED line
+```
+
+Where they cannot be installed, the critique says so: `docs/design-critique.md` states that the
+detector ran degraded and that its counts are a floor, not a clean result (`project-setup.md`
+section 3, the critique step).
+
 ## 9. The app config file
 
 `scripts/canvas-app.json` names the app and the environment for every bundled tool; nothing about a
