@@ -5,7 +5,8 @@
 // app is the test harness, and a browser is the only way to reach it. This driver makes that
 // repeatable - scenarios are JSON, so a verification can be reviewed, diffed and re-run.
 //
-// Setup:   npm i -D playwright        (drives your installed Chrome via channel 'chrome')
+// Setup:   npm i -D playwright        (drives your installed Chrome via channel 'chrome'; on Windows
+//                                      with your own Chrome open it uses Edge, remembered in <profile>.channel)
 //          No Chrome? use --channel msedge, or `npx playwright install chromium` then --channel chromium.
 // Config:  scripts/canvas-app.json    {"environmentId": "...", "appId": "...", "appName": "...",
 //                                       "environmentUrl": "https://<org>.crm.dynamics.com",
@@ -260,6 +261,37 @@ const REPO = CONFIG_PATH ? (findRepo(dirname(resolve(CONFIG_PATH))) || resolve(d
 
 // Outside the repo on purpose: this directory holds live tenant session cookies.
 const PROFILE = resolve(String(flag('profile', join(homedir(), '.canvas-browser-profile'))));
+
+// Which browser. Chrome is the default, but on Windows a Chrome launch while the person's own Chrome is
+// running is handed to THEIR session: it opens a tab in their browser before Playwright fails with
+// "Opening in existing browser session" and the driver falls back to Edge. One stray tab per command
+// left 20+ tabs in an owner's Chrome in one session, and the driver's tab hygiene never sees them. So
+// with Chrome running, go straight to Edge, and remember the choice beside the profile (a profile is
+// then always opened by the same browser). --channel always wins.
+const CHANNEL_FILE = PROFILE.replace(/[\\/]+$/, '') + '.channel';
+export function pickChannel({ given, requested, platform, sticky, chromeRunning }) {
+  if (given) return { channel: requested, remember: false };
+  if (sticky) return { channel: sticky, remember: false };
+  if (requested === 'chrome' && platform === 'win32' && chromeRunning()) return { channel: 'msedge', remember: true };
+  return { channel: requested, remember: false };
+}
+function chromeRunning() {
+  try {
+    return /chrome\.exe/i.test(execSync('tasklist /FI "IMAGENAME eq chrome.exe" /NH', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 }));
+  } catch { return false; }
+}
+function rememberChannel(ch) { try { writeFileSync(CHANNEL_FILE, ch + '\n'); } catch { /* read-only home: decide again next time */ } }
+let CHANNEL_PICKED = false;
+function resolveChannel() {
+  if (CHANNEL_PICKED) return;
+  CHANNEL_PICKED = true;
+  let sticky = '';
+  try { sticky = readFileSync(CHANNEL_FILE, 'utf8').trim(); } catch { /* first run */ }
+  const d = pickChannel({ given: CHANNEL_GIVEN, requested: CHANNEL, platform: process.platform, sticky, chromeRunning });
+  if (d.channel !== CHANNEL) log(`  Using ${d.channel === 'msedge' ? 'Edge' : d.channel} (${sticky ? CHANNEL_FILE : 'your Chrome is running; a Chrome launch would open a tab in it'}).`);
+  CHANNEL = d.channel;
+  if (d.remember) rememberChannel(CHANNEL);
+}
 const TIMEOUT = Number(flag('timeout', 120000));
 const OUT = resolve(String(flag('out', join(REPO, 'scratchpad', 'browser'))));
 const DEBUG_PORT = Number(flag('port', 9222));
@@ -309,6 +341,7 @@ function copyProfile() {
 }
 
 async function launch(opts, profileDir = PROFILE) {
+  resolveChannel();
   mkdirSync(profileDir, { recursive: true });
   mkdirSync(OUT, { recursive: true });
   // No session restore and no crash-restore bubble: each run starts from one tab, not the last run's.
@@ -331,6 +364,7 @@ async function launch(opts, profileDir = PROFILE) {
     if (!CHANNEL_GIVEN && CHANNEL === 'chrome' && /Opening in existing browser session/i.test(e.message)) {
       log('  Chrome would only open inside the running Chrome session here - using Edge instead (--channel msedge).');
       CHANNEL = 'msedge';
+      rememberChannel(CHANNEL);
       return launch(opts, profileDir);
     }
     // A persistent profile can be held by only one Chrome. `close-studio --keep-browser` (or a
@@ -1205,6 +1239,12 @@ function selftest() {
     ['second-tab closes no tab', !secondTabClosesTabs()],
     // clipcheck reports text cut at the top and the bottom, not only whole hidden lines.
     ['clipcheck measures vertical cuts', /vcut/.test(MEASURE.clipped.toString()) && /createRange/.test(MEASURE.clipped.toString())],
+    // Never launch Chrome on Windows while the person's Chrome runs (it opens a tab in their browser).
+    ['channel: Chrome running on Windows -> Edge, remembered', (() => { const d = pickChannel({ given: false, requested: 'chrome', platform: 'win32', sticky: '', chromeRunning: () => true }); return d.channel === 'msedge' && d.remember; })()],
+    ['channel: no Chrome running -> Chrome', pickChannel({ given: false, requested: 'chrome', platform: 'win32', sticky: '', chromeRunning: () => false }).channel === 'chrome'],
+    ['channel: the remembered browser wins', pickChannel({ given: false, requested: 'chrome', platform: 'win32', sticky: 'msedge', chromeRunning: () => false }).channel === 'msedge'],
+    ['channel: --channel always wins', pickChannel({ given: true, requested: 'chrome', platform: 'win32', sticky: 'msedge', chromeRunning: () => true }).channel === 'chrome'],
+    ['channel: not Windows -> no process check', pickChannel({ given: false, requested: 'chrome', platform: 'darwin', sticky: '', chromeRunning: () => { throw new Error('checked'); } }).channel === 'chrome'],
   ];
   // Playwright from the project: the working folder, then subfolders holding node_modules (portal/).
   try {
@@ -1216,7 +1256,7 @@ function selftest() {
   } catch (e) { S.push(['playwright roots: ' + e.message, false]); }
   tabs.push(...S.filter(([, okc]) => !okc).map(([k]) => 'save/second-tab/clip: ' + k));
   const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0 && tabs.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 23 publish-guard, review-gate, fix-batch, data-source, profile-copy, terms-dialog and auto-tidy cases, ${S.length} save-stamp, second-tab, clipcheck and Playwright-lookup cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 23 publish-guard, review-gate, fix-batch, data-source, profile-copy, terms-dialog and auto-tidy cases, ${S.length} save-stamp, second-tab, clipcheck, channel and Playwright-lookup cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
          : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}], tabs -> [${tabs.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }

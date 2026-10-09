@@ -95,6 +95,10 @@ function hasReport(dir, depth = 0) {
   return false;
 }
 const exists = (root, ...rels) => rels.some((r) => fs.existsSync(path.join(root, r)));
+// A sub-folder with its own .git is another project (an umbrella folder of repos): its site, flows and
+// design records are not this folder's, so the walks below stop there. A live gate at an umbrella
+// folder found a sibling project's site and demanded a design pass for "Power Pages" there.
+const ownRepo = (dir) => fs.existsSync(path.join(dir, '.git'));
 // A Power Pages site in git: a folder holding website.yml (pac pages download --modelVersion 2),
 // up to three levels down, skipping dot folders and node_modules (scratch copies live there).
 export function pagesSites(root, depth = 0) {
@@ -102,7 +106,7 @@ export function pagesSites(root, depth = 0) {
   let entries = [];
   try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
   if (depth > 0 && entries.some((e) => e.isFile() && e.name.toLowerCase() === 'website.yml')) return [root];
-  return entries.filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
+  return entries.filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules' && !ownRepo(path.join(root, e.name)))
     .flatMap((e) => pagesSites(path.join(root, e.name), depth + 1));
 }
 // What a folder builds. Every rule below names the surfaces it applies to (references/rules-and-scope.md)
@@ -117,7 +121,7 @@ export function flowFiles(root) {
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { if (!e.name.startsWith('.') && e.name !== 'node_modules') walk(full, depth + 1); continue; }
+      if (e.isDirectory()) { if (!e.name.startsWith('.') && e.name !== 'node_modules' && !ownRepo(full)) walk(full, depth + 1); continue; }
       const rel = path.relative(root, full).replace(/\\/g, '/');
       if (/\.json$/i.test(e.name) && (/^flows\//i.test(rel) || /\/workflows\//i.test('/' + rel))) out.push(full);
     }
@@ -176,13 +180,60 @@ export function critiqueState(text, floor = CRITIQUE_FLOOR) {
 // they wrote), how wide each table permission reads, the Web API per table, and the refusals.
 export const PAGES_REVIEW_TOPICS = [['identity', /identity|impersonat|spoof/i], ['profile page', /profile/i],
   ['table permission scope', /scope|global read|table permission/i], ['Web API', /web ?api|\/_api/i], ['refusals', /refus|403|404|denied/i]];
-export function reviewText(root) {
-  const one = readFileSafe(path.join(root, 'docs', 'review.md'));
-  if (one) return one;
-  try {
-    return fs.readdirSync(path.join(root, 'docs', 'review')).filter((f) => /\.(md|json)$/i.test(f))
-      .map((f) => readFileSafe(path.join(root, 'docs', 'review', f))).join('\n');
-  } catch { return ''; }
+export function reviewText(root, dirs = [root]) {
+  for (const d of dirs) {
+    const one = readFileSafe(path.join(d, 'docs', 'review.md'));
+    if (one) return one;
+    try {
+      const many = fs.readdirSync(path.join(d, 'docs', 'review')).filter((f) => /\.(md|json)$/i.test(f))
+        .map((f) => readFileSafe(path.join(d, 'docs', 'review', f))).join('\n');
+      if (many) return many;
+    } catch { /* none here */ }
+  }
+  return '';
+}
+// The folders a design record may sit in: the project root, and for each Power Pages site every folder
+// between the site and the root (a project holding an app and a site keeps the site's records beside it,
+// portal/DESIGN.md and portal/docs/). Nearest the site first.
+export function recordDirs(root) {
+  const out = [];
+  for (const site of pagesSites(root)) {
+    for (let d = path.dirname(site); d.length > root.length && d.startsWith(root); d = path.dirname(d)) out.push(d);
+  }
+  return [...new Set([...out, root])];
+}
+const designIn = (dirs) => dirs.some((d) => exists(d, 'DESIGN.md', 'docs/DESIGN.md', 'design/DESIGN.md'));
+const firstFile = (dirs, rel) => { for (const d of dirs) { const t = readFileSafe(path.join(d, rel)); if (t) return t; } return ''; };
+
+// What this session did, read from its transcript: the design-surface files it wrote and whether it ran
+// a build or ship step. The design, critique and review demands apply only to a session that built:
+// live gates blocked a read-only analysis, a user-guide edit and a data report, three times each, in
+// apps that were already live (null: no transcript, so the session cannot be judged and the gate
+// applies as before).
+const SURFACE_FILE = /\.pa\.ya?ml$|\.msapp$|[\\/]website\.yml$|[\\/](web-pages|web-templates|web-files|content-snippets|basic-forms|advanced-forms|lists|server-logics?)[\\/]|\.Report[\\/]|\.pbir$|[\\/]design[\\/]prototype\.html$/i;
+const SHIP_CMD = /canvas-mcp\.py\s+(hold|push|compile)|canvas-browser\.mjs\s+(save|publish)|\bpac\s+(pages\s+upload|canvas\s+pack|solution\s+import)|deploy-report|compile_canvas/i;
+export function sessionWork(transcriptPath) {
+  if (!transcriptPath) return null;
+  let text = '';
+  try { text = fs.readFileSync(transcriptPath, 'utf8'); } catch { return null; }
+  const work = { built: false, files: [] };
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.includes('"tool_use"') || line.includes('"isSidechain":true')) continue;
+    let e; try { e = JSON.parse(line); } catch { continue; }
+    for (const c of e.message?.content || []) {
+      if (c.type !== 'tool_use') continue;
+      const ti = c.input || {};
+      if (/compile_canvas|publish/i.test(c.name || '')) work.built = true;
+      if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(c.name) && SURFACE_FILE.test(String(ti.file_path || ''))) {
+        work.built = true; work.files.push(String(ti.file_path));
+      }
+      if (/^(Bash|PowerShell)$/.test(c.name)) {
+        const cmd = String(ti.command || '');
+        if (SHIP_CMD.test(cmd) || shellScreenWrite(cmd)) { work.built = true; work.files.push(cmd.slice(0, 200)); }
+      }
+    }
+  }
+  return work;
 }
 
 // DOD counts as installed when the plugin list or a skill folder names it.
@@ -244,21 +295,26 @@ export function evaluate(root, input = {}, env = process.env, opts = {}) {
   const designed = hasCanvas || hasBi || hasPages;
   if (!designed && !sf.fabric) return null;
   const tag = [hasCanvas && 'Canvas', hasPages && 'Power Pages', hasBi && 'Power BI'].filter(Boolean).join(', ');
+  const work = sessionWork(input.transcript_path);
+  const building = work === null || work.built;   // read-only, docs and data sessions are not held to the build steps
+  const dirs = recordDirs(root);
 
   let shipped = false;
   try { shipped = fs.readdirSync(path.join(root, app.outDir || 'out')).some((f) => /\.(zip|msapp)$/i.test(f)); } catch { /* nothing packed */ }
   if (hasPages) shipped = true;   // a site in git is uploaded as it is built; its hand-back is a release
   const missing = [];
-  if (designed && !exists(root, 'DESIGN.md', 'docs/DESIGN.md')) {
+  if (designed && building && !designIn(dirs)) {
     missing.push(`[${tag}] DESIGN.md is missing. Invoke the impeccable skill (Skill tool: impeccable) init now: PRODUCT.md, DESIGN.md (create the theme if none was given)` +
       `${hasCanvas ? ', then design/prototype.html per references/project-setup.md section 3' : ''}.`);
   }
-  if (hasCanvas && !exists(root, 'design/prototype.html')) {
+  // The prototype is the new-app step (as the PreToolUse gate): an established app (3+ screens) is maintenance.
+  const newCanvas = canvasSrcDirs(root, cfg.canvasSrcGlob || 'canvas').some((d) => screenCount(d) <= NEW_APP_MAX_SCREENS);
+  if (hasCanvas && building && newCanvas && !dirs.some((d) => exists(d, 'design/prototype.html'))) {
     missing.push('[Canvas] design/prototype.html is missing. Design every screen at 1440 and 390 px (and the report page) in HTML with impeccable, critique it and fix it, ' +
       'before more .pa.yaml is written (references/project-setup.md section 3).');
   }
-  if (shipped) {
-    const critique = readFileSafe(path.join(root, 'docs', 'design-critique.md'));
+  if (shipped && building) {
+    const critique = firstFile(dirs, 'docs/design-critique.md');
     const why = critiqueState(critique, hasPages ? CRITIQUE_FLOOR : null);
     if (why) {
       missing.push(`[${tag}] docs/design-critique.md ${why}. Run impeccable critique on the ${hasPages ? 'live pages' : 'published screens'} at 1440 and 390 px` +
@@ -266,11 +322,14 @@ export function evaluate(root, input = {}, env = process.env, opts = {}) {
         `${hasPages ? `; ${CRITIQUE_FLOOR} or more for a site, or "Below 30 accepted: <reason>"` : ''}).`);
     }
   }
-  const review = reviewText(root);
-  if (shipped && !review) {
+  const review = reviewText(root, dirs);
+  if (shipped && building && !review) {
     missing.push(`[${tag}] docs/review.md is missing. Run the independent reviewer (assets/templates/reviewer-prompt.md, orchestration.md section 7) and record its findings and what was fixed.`);
-  } else if (shipped && hasPages) {
-    const gaps = PAGES_REVIEW_TOPICS.filter(([, re]) => !re.test(review)).map(([t]) => t);
+  } else if (shipped && building && hasPages) {
+    // The profile page is asked about only when this session changed it (a live gate demanded a review of
+    // a built-in profile page that the change never touched).
+    const topics = work && !work.files.some((f) => /profile/i.test(f)) ? PAGES_REVIEW_TOPICS.filter(([t]) => t !== 'profile page') : PAGES_REVIEW_TOPICS;
+    const gaps = topics.filter(([, re]) => !re.test(review)).map(([t]) => t);
     if (gaps.length) {
       missing.push(`[Power Pages] docs/review.md does not cover ${gaps.join(', ')}. A site review works through power-pages.md section 8, "The reviewer's list", ` +
         'and records what it tried and what happened.');
@@ -301,7 +360,26 @@ export function transcriptFacts(transcriptPath) {
   const started = new Map(); const done = new Set();
   for (const line of text.split(/\r?\n/)) {
     if (!facts.entrypoint) { const m = line.match(/"entrypoint":"([^"]+)"/); if (m) facts.entrypoint = m[1]; }
-    if (line.includes('in background with ID')) for (const m of line.matchAll(BG_START)) started.set(m[1], true);
+    if (line.includes('in background with ID')) {
+      for (const m of line.matchAll(BG_START)) {
+        const out = line.slice(m.index).match(/Output is being written to: (.+?)(?=\\n|\\"|"|$)/);
+        started.set(m[1], out ? out[1].replace(/\\\\/g, '\\').trim() : true);
+      }
+    }
+    // A task stopped with TaskStop (or the older KillShell) is finished: a long-lived holder such as a
+    // Studio session never exits on its own, and a live gate kept reporting one as running after it was
+    // stopped and its output ended in [killed].
+    if (line.includes('"tool_use"') && /"name":"(TaskStop|KillShell|KillBash)"/.test(line)) {
+      try {
+        const e = JSON.parse(line);
+        for (const c of e.message?.content || []) {
+          if (c.type === 'tool_use' && /^(TaskStop|KillShell|KillBash)$/.test(c.name)) {
+            const id = c.input?.task_id || c.input?.shell_id || c.input?.id;
+            if (id) done.add(String(id));
+          }
+        }
+      } catch { /* partial line */ }
+    }
     if (line.includes('<task-id>')) for (const m of line.replace(/\\n/g, '\n').matchAll(BG_DONE)) done.add(m[1]);
     if (line.includes('"type":"assistant"') && !line.includes('"isSidechain":true')) {
       try {
@@ -311,7 +389,8 @@ export function transcriptFacts(transcriptPath) {
       } catch { /* partial line */ }
     }
   }
-  facts.pending = [...started.keys()].filter((id) => !done.has(id));
+  const killed = (out) => typeof out === 'string' && /\[killed\]\s*$/.test(readFileSafe(out).slice(-200));
+  facts.pending = [...started.entries()].filter(([id, out]) => !done.has(id) && !killed(out)).map(([id]) => id);
   return facts;
 }
 export function unattended(root, facts, env = process.env) {
@@ -804,6 +883,49 @@ function selftest() {
     check('unrelated write stays silent', evaluatePre(tmp, { tool_name: 'Write', tool_input: { file_path: 'notes/readme.md' } }, env), silent);
     put('fabric/report/App.Report/definition.pbir', '{}');
     check('report only, no DESIGN.md blocks (no prototype demand)', evaluate(tmp, {}, env), (g) => blocks('DESIGN.md is missing')(g) && !g.includes('prototype.html is missing'));
+    rm('fabric');
+    // Session scope, record folders, nested repos and stopped tasks (0.27.1: four live misfires)
+    {
+      const sx = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-gate-sess-'));
+      const xp = (rel, text = 'x') => put(rel, text, sx);
+      const T = path.join(sx, 't.jsonl');
+      const J = (o) => JSON.stringify(o);
+      const use = (name, input) => J({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
+      const ev = (lines) => { fs.writeFileSync(T, lines.join('\n')); return evaluate(sx, { transcript_path: T }, env); };
+      xp('canvas/app/Src/Screen1.pa.yaml', 'Screens: {}');
+      check('session: a docs and data session in a canvas project is not held to the design steps',
+        ev([use('Edit', { file_path: path.join(sx, 'docs/user-guide.md') }), use('Bash', { command: 'python scripts/report.py --read-only' })]), silent);
+      check('session: writing a screen is a build', ev([use('Write', { file_path: path.join(sx, 'canvas/app/Src/Screen1.pa.yaml') })]), blocks('DESIGN.md is missing'));
+      check('session: a push is a build', ev([use('Bash', { command: 'python scripts/canvas-mcp.py hold' })]), blocks('DESIGN.md is missing'));
+      check('session: no transcript keeps the old rule', evaluate(sx, {}, env), blocks('DESIGN.md is missing'));
+      xp('design/DESIGN.md', '# d');
+      for (const n of ['A', 'B']) xp(`canvas/app/Src/${n}.pa.yaml`, 'Screens: {}');
+      check('records: design/DESIGN.md counts; an established app is not asked for a prototype',
+        ev([use('Write', { file_path: path.join(sx, 'canvas/app/Src/A.pa.yaml') })]), silent);
+      xp('portal/site/p---x/website.yml', 'adx_name: P'); xp('portal/DESIGN.md', '# d');
+      xp('portal/docs/design-critique.md', 'Score 33/40. home-1440.png home-390.png');
+      xp('docs/review.md', 'Identity held. Table permission scope: global read off. Web API 404. Refusals held.');
+      check('records: a site\'s records beside it count, and an untouched profile page is not demanded',
+        ev([use('Edit', { file_path: path.join(sx, 'portal/site/p---x/web-pages/home/Home.webpage.copy.html') })]), silent);
+      check('records: editing the profile page asks for it in the review',
+        ev([use('Edit', { file_path: path.join(sx, 'portal/site/p---x/web-pages/profile/Profile.webpage.copy.html') })]), blocks('profile page'));
+      // an umbrella folder of repos: a sibling repo's site is not this folder's build
+      const um = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-gate-umbrella-'));
+      put('PROJ/.git/HEAD', 'ref: refs/heads/main', um); put('PROJ/site/s---y/website.yml', 'adx_name: Y', um);
+      check('nested repo: an umbrella folder does not take a sibling project\'s site', pagesSites(um), (g) => g.length === 0);
+      check('nested repo: the project itself still finds its site', pagesSites(path.join(um, 'PROJ')), (g) => g.length === 1);
+      fs.rmSync(um, { recursive: true, force: true });
+      // R1: a stopped or killed task is finished
+      const res = (t) => J({ type: 'user', message: { content: [{ type: 'tool_result', content: t }] } });
+      const outF = path.join(sx, 'studio.out');
+      const facts = (lines) => { fs.writeFileSync(T, lines.join('\n')); return transcriptFacts(T).pending; };
+      check('R1: TaskStop finishes a background task', facts([res('Command running in background with ID: hold1. Output is being written to: x'), use('TaskStop', { task_id: 'hold1' })]), (g) => g.length === 0);
+      fs.writeFileSync(outF, 'studio ready\n[killed]\n');
+      check('R1: output ending in [killed] is finished', facts([res(`Command running in background with ID: hold2. Output is being written to: ${outF}`)]), (g) => g.length === 0);
+      fs.writeFileSync(outF, 'studio ready\n');
+      check('R1: a live holder is still running', facts([res(`Command running in background with ID: hold3. Output is being written to: ${outF}`)]), (g) => g.join() === 'hold3');
+      fs.rmSync(sx, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(cfgHome, { recursive: true, force: true });
@@ -811,7 +933,7 @@ function selftest() {
   if (fails.length) { console.log('selftest FAILED:\n  ' + fails.join('\n  ')); process.exit(1); }
   console.log(`selftest ok: ${CASES} plugin-gate cases (Stop: unrelated silent, design missing, three blocks per session then a note, per-session count, ` +
     'no-id fallback, harness present, two opt-outs, designed, shipped without critique/review, complete, dod opt-in, background shell pending and done, unattended question, attended question, unattended hand-back, unattended flag, sidechain, run-check cap, run checks with harness, token to ' +
-    'lakehouse, token file over REST, non-token write, report-only; Scope: R1 silent outside, R1 inside, Dataverse/model-driven silent, solution is a project, Fabric no design rule, Fabric token rule, canvas no floor, no-floor state, labelled messages, harness stands aside, harness same rules; C: no flows, no lint, partial lint, lint errors, clean lint, stale lint, other pac; Pages: dot folder ignored, bare site, critique floor and review topics, full pass, stated reason, unjudged score, budget folder; R3: silent, write without check, stale check, clean after write, drift, as a run check, seed found, no seed asks for test rows, no seed listed; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, design cap silent, design cap once, design note once only, design cap stops at the prototype, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
+    'lakehouse, token file over REST, non-token write, report-only; Scope: R1 silent outside, R1 inside, Dataverse/model-driven silent, solution is a project, Fabric no design rule, Fabric token rule, canvas no floor, no-floor state, labelled messages, harness stands aside, harness same rules; C: no flows, no lint, partial lint, lint errors, clean lint, stale lint, other pac; Pages: dot folder ignored, bare site, critique floor and review topics, full pass, stated reason, unjudged score, budget folder; R3: silent, write without check, stale check, clean after write, drift, as a run check, seed found, no seed asks for test rows, no seed listed; Session (0.27.1): docs/data session silent, screen write, push, no transcript, design/DESIGN.md + established app, site records beside it, profile only when touched, umbrella nested repo, project finds its site, TaskStop, [killed] output, live holder; PostToolUse: Read ignored, 39 silent, 40th note, next after 40, 45-minute mark once, no repeat, jump past marks, design cap silent, design cap once, design note once only, design cap stops at the prototype, outside a build; PreToolUse: screen write before design by file, cmdlet and redirect, glob read with a stderr redirect, read to elsewhere, established app, ' +
     'App.pa.yaml, _EditorState, shell read, other tools, prototype missing, designed, deploy-tables with and without --plan, bare template, ' +
     'filled contract, dod plan, opt-out, unrelated write)');
   process.exit(0);

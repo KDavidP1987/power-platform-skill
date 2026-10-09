@@ -11,6 +11,32 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-08
+
+The Stop gate misfired in four live sessions across three projects, and two owners turned it off. Each
+time it judged the folder, not the session: it demanded a full design pass after read-only analysis, a
+user-guide edit and a data report in apps already live. Separately, the browser driver opened a stray
+tab in the person's own Chrome on every command.
+
+### Fixed
+
+- `plugin-gate.mjs`: the design record, prototype, critique and review are demanded only of a session
+  that built - wrote a canvas screen, a site file, a report or the prototype, or ran a push, save,
+  publish, pack, upload or import (read from the transcript; with no transcript the rule applies as
+  before). Docs, data and read-only sessions in a live app are no longer held.
+- `plugin-gate.mjs`: a sub-folder with its own `.git` is another project. A session opened at an
+  umbrella folder of repos no longer takes a sibling project's site as its own build.
+- `plugin-gate.mjs`: design records are found where projects keep them - `design/DESIGN.md`, and for a
+  Power Pages site the folders between the site and the root (`portal/DESIGN.md`, `portal/docs/`).
+- `plugin-gate.mjs`: `design/prototype.html` is asked of a new app only (two screens or fewer), as the
+  before-tools rule already did; an established app is maintenance.
+- `plugin-gate.mjs`: the site review is asked to cover the profile page only when the session changed it.
+- `plugin-gate.mjs` R1: a background task stopped with TaskStop, or whose output ends in `[killed]`, is
+  finished. A held Studio session never exits on its own and was reported as running after it was stopped.
+- `canvas-browser.mjs`: on Windows, with the person's Chrome running, the driver goes straight to Edge
+  instead of launching Chrome (which opened a tab in their browser before failing over), and remembers
+  the browser in `<profile>.channel` so the profile is always opened by the same one. `--channel` wins.
+
 ## [0.27.0] - 2026-10-07
 
 Labels whose text is centred and cut at the top and the bottom, and controls drawn over each other,
