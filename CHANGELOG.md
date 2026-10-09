@@ -11,6 +11,14 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-10-08
+
+### Fixed
+
+- `hooks/check-pa-yaml.mjs --plugin` stands down only where the project holds the skill's own harness copy
+  of the check. A project with its own, older hook of the same name silenced every check added since
+  (four projects on one machine ran none of the 0.28.0 formula checks); the plugin now runs beside it.
+
 ## [0.28.0] - 2026-10-08
 
 Eighty-odd lessons from four apps, a portal and a Power BI report, analysed and folded in. The biggest

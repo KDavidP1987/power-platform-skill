@@ -389,23 +389,25 @@ function selftest() {
     { input: JSON.stringify({ cwd: tmp, tool_input: { file_path: f } }), encoding: 'utf8' }).status;
   const bare = run();
   fs.mkdirSync(path.join(tmp, '.claude', 'hooks'), { recursive: true });
-  fs.writeFileSync(path.join(tmp, '.claude', 'hooks', 'check-pa-yaml.mjs'), '');
+  fs.writeFileSync(path.join(tmp, '.claude', 'hooks', 'check-pa-yaml.mjs'), "// a project's own, older hook");
+  const withOwnHook = run();
+  fs.writeFileSync(path.join(tmp, '.claude', 'hooks', 'check-pa-yaml.mjs'), fs.readFileSync(fileURLToPath(import.meta.url)));
   const withHarness = run();
   // A file with notes only does not block: exit 0 with the notes as context.
   fs.writeFileSync(f, ['Screens:', '  Home:', '    Children:', '      - conMain:', '          Control: GroupContainer', noteBad].join('\n'));
   const noteRun = spawnSync(process.execPath, [fileURLToPath(import.meta.url)],
     { input: JSON.stringify({ cwd: tmp, tool_input: { file_path: f } }), encoding: 'utf8' });
   fs.rmSync(tmp, { recursive: true, force: true });
-  const pluginOk = bare === 2 && withHarness === 0;
+  const pluginOk = bare === 2 && withOwnHook === 2 && withHarness === 0;
   const noteHookOk = noteRun.status === 0 && /additionalContext/.test(noteRun.stdout) && /Select\(\)/.test(noteRun.stdout);
   const ok = missing.length === 0 && pg.length === 0 && pluginOk && notesOk && fixOk && noteHookOk;
   console.log(ok ? `selftest ok: bad fixture -> ${pb.length} findings, good fixture -> 0, notes 2 on bad and 0 on good, --fix converts and skips " #", ` +
-                   `plugin mode runs without a harness and stands down with one, notes do not block the hook`
+                   `plugin mode runs without a harness or beside a project's own hook and stands down only for its harness copy, notes do not block the hook`
                  : `selftest FAILED: missing [${missing.join(', ')}] on bad; ${pg.length} false finding(s) on good:\n  ${pg.join('\n  ')}` +
                    (notesOk ? '' : `\n  notes: ${nb.length} on bad (want 2), ${ng.length} on good (want 0):\n  ${[...nb, ...ng].join('\n  ')}`) +
                    (fixOk ? '' : `\n  --fix: fixed ${fx.fixed}, skipped [${fx.skipped}]:\n${fx.text}`) +
                    (noteHookOk ? '' : `\n  notes in hook mode: exit ${noteRun.status}, stdout ${noteRun.stdout.slice(0, 200)}`) +
-                   (pluginOk ? '' : `\n  plugin mode: exit ${bare} without a harness (want 2), ${withHarness} with one (want 0)`));
+                   (pluginOk ? '' : `\n  plugin mode: exit ${bare} without a harness (want 2), ${withOwnHook} beside a project's own hook (want 2), ${withHarness} with the harness copy (want 0)`));
   process.exit(ok ? 0 : 1);
 }
 
@@ -437,8 +439,12 @@ function direct(paths, { fix = false } = {}) {
   process.exit(bad ? 1 : 0);
 }
 
+// The harness copy runs this same check, so the plugin stands down - but only for THIS script. A project
+// whose own, older hook has the same name would otherwise silence every newer check here.
 export function harnessRuns(cwd) {
-  return fs.existsSync(path.join(cwd, '.claude', 'hooks', 'check-pa-yaml.mjs'));
+  const norm = (t) => String(t || '').replace(/\r\n/g, '\n');
+  const copy = readFileSafe(path.join(cwd, '.claude', 'hooks', 'check-pa-yaml.mjs'));
+  return !!copy && norm(copy) === norm(readFileSafe(fileURLToPath(import.meta.url)));
 }
 
 const pathArgs = process.argv.slice(2).filter((a) => !a.startsWith('--'));
