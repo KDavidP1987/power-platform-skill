@@ -70,7 +70,8 @@
 //        --skip-writes    skip those scenarios instead (a read-only pass, e.g. the reviewer's)
 //   publish: refused when the source is unchanged (--again), and from the third publish until
 //        docs/design-critique.md and docs/review/findings.json exist (--unreviewed "<reason>"; exit 8),
-//        and after the fix batch has shipped until a new batch is declared (--batch "<what>"; exit 10)
+//        and after the fix batch has shipped until a new batch is declared (--batch "<what>"; exit 10);
+//        exit 11 when "Publish this version" is still open in any Studio tab after the wait
 //   create: reopens the saved app and reads its Data pane; re-adds a missing table once, then fails
 //        (exit 4) naming it. --no-verify-sources skips the check.
 //        --keep-browser   close-studio: release the edit lock but leave the browser running
@@ -144,6 +145,20 @@ const flag = (name, fallback = null) => {
   return i === -1 ? fallback : (argv[i + 1] ?? true);
 };
 const has = (name) => argv.includes('--' + name);
+// The flags that take a value. A positional filter that drops "--x" tokens but keeps their values
+// read `walk a.json --config cfg.json` as two scenarios, the second being the config file.
+export const VALUED_FLAGS = new Set(['after', 'batch', 'channel', 'config', 'connector', 'expect', 'form-factor', 'hold', 'layout', 'name',
+  'out', 'port', 'profile', 'screen', 'selectors', 'settle', 'settle-dv', 'since', 'solution-id', 'tables', 'timeout', 'toggle',
+  'unreviewed', 'wait-for']);
+export function positionals(args, valued = VALUED_FLAGS) {
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = String(args[i]);
+    if (a.startsWith('--')) { if (valued.has(a.slice(2)) && i + 1 < args.length && !String(args[i + 1]).startsWith('--')) i++; continue; }
+    out.push(a);
+  }
+  return out;
+}
 let CHANNEL = String(flag('channel', 'chrome'));
 const CHANNEL_GIVEN = has('channel');
 const log = (...a) => console.log(...a);
@@ -817,6 +832,16 @@ export const exactRx = (text) => new RegExp('^\\s*' + escapeRx(norm(text)).repla
 // A chunked collection shows a PART-loaded total while it fills (a tile read 34.6M before 45.8M, a
 // dashboard read blank and "$0" for about 3 minutes). samples: [{ t: ms since start, text }]. Stable
 // = the same non-empty text on `reads` consecutive samples; `at` is when it first read that value.
+// What a dropdown shows, read from its opener (aria-label and text both carry the control's name), against
+// the value a step expects: the name is removed first, so a dropdown named "Status" is not "Status: Active"
+// by accident, then the value must stand as a whole word.
+export function selectedMatches(shown, want, from = '') {
+  let t = String(shown || '').replace(/\s+/g, ' ');
+  if (from) t = t.split(String(from)).join(' ');
+  const esc = String(want).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('(^|[^\\w])' + esc + '($|[^\\w])').test(t.trim());
+}
+
 export function settleVerdict(samples, { reads = 2 } = {}) {
   let run = 0;
   for (let k = 0; k < samples.length; k++) {
@@ -935,6 +960,10 @@ async function typeTarget(frame, into, nth, exactOnly) {
 //                                           load shows part totals while it fills); logs time-to-stable,
 //                                           FAILS past "within", notes a fill over a minute
 //   {"select": "Closed", "nth": 1}          choose an option in the nth <select> (DropDown)
+//   {"selected": "Active", "from": "Status"} FAIL unless that dropdown/combo box shows that value. A
+//                                           selected value is not on-screen text to "expect" (measured:
+//                                           expect failed on a correct default). Without "from": the
+//                                           nth <select>
 //   {"fillCell": 3, "value": "7.5"}         fill the nth text input in the frame, then Tab
 //   {"expect": "Saved"}                     FAIL unless that text is visibly on screen
 //   {"absent": "Delete"}                    FAIL if that text IS visibly on screen (gates)
@@ -1053,6 +1082,31 @@ async function runSteps(page, frameRef, steps, results) {
         await page.waitForTimeout(Number(step.settle || 3000));
       }
 
+      if (step.selected !== undefined) {
+        // A dropdown's selected value is not visible text inside the canvas, so "expect" cannot see a
+        // correct default. Read the control: the named combo box or dropdown opener, else the nth <select>.
+        let shown = null, how = '';
+        if (step.from) {
+          for (const role of ['combobox', 'button']) {
+            const el = frame.getByRole(role, { name: String(step.from), exact: false }).first();
+            if (await el.count() === 0) continue;
+            const v = await el.inputValue().catch(() => '');
+            shown = [v, await el.getAttribute('aria-label').catch(() => ''), await el.innerText().catch(() => '')].filter(Boolean).join(' | ');
+            how = role; break;
+          }
+          if (shown === null) throw new Error('no combo box or dropdown named "' + step.from + '"');
+        } else {
+          const idx = Number(step.nth ?? 0);
+          const dd = frame.locator('select').nth(idx);
+          await dd.waitFor({ state: 'attached', timeout: 30000 });
+          shown = await dd.evaluate((el) => (el.options[el.selectedIndex] ? el.options[el.selectedIndex].text : ''));
+          how = 'select[' + idx + ']';
+        }
+        if (!selectedMatches(shown, step.selected, step.from)) throw new Error((step.from ? '"' + step.from + '"' : how) + ' shows "' + shown + '", not "' + step.selected + '"');
+        log(tag + 'selected "' + step.selected + '"' + (step.from ? ' in "' + step.from + '"' : '') + '  OK (' + how + ')');
+        results.passed.push('selected:' + step.selected);
+      }
+
       if (step.radio !== undefined) {
         const r = frame.getByRole('radio', { name: String(step.radio), exact: true }).first();
         await r.waitFor({ state: 'visible', timeout: 30000 });
@@ -1159,7 +1213,7 @@ async function runSteps(page, frameRef, steps, results) {
 }
 
 // --- scenario lint (no browser) ---------------------------------------------------------------
-const VERBS = new Set(['wait', 'viewport', 'radio', 'pick', 'from', 'click', 'nth', 'exact', 'type', 'into', 'blur', 'stable', 'within', 'every', 'reads', 'select', 'fillCell', 'value', 'expect', 'absent',
+const VERBS = new Set(['wait', 'viewport', 'radio', 'pick', 'selected', 'from', 'click', 'nth', 'exact', 'type', 'into', 'blur', 'stable', 'within', 'every', 'reads', 'select', 'fillCell', 'value', 'expect', 'absent',
   'scroll', 'clipcheck', 'deadclick', 'overlapcheck', 'measurefont', 'capture', 'mustBeClean', 'settle', 'note']);
 export function lintScenario(sc) {
   const errs = [];
@@ -1176,14 +1230,15 @@ export function lintScenario(sc) {
       errs.push(`step ${i + 1}: "viewport" is [width, height] in pixels, for example [390, 844]`);
     }
     if ('pick' in st && !st.from) errs.push(`step ${i + 1}: "pick" needs "from" (the dropdown's accessible name)`);
-    if ('from' in st && !('pick' in st)) errs.push(`step ${i + 1}: "from" is only used with "pick"`);
+    if ('from' in st && !('pick' in st || 'selected' in st)) errs.push(`step ${i + 1}: "from" is only used with "pick" or "selected"`);
+    if ('selected' in st && !(typeof st.selected === 'string' && st.selected.trim())) errs.push(`step ${i + 1}: "selected" is the value the dropdown must show`);
     if ('radio' in st && !(typeof st.radio === 'string' && st.radio.trim())) errs.push(`step ${i + 1}: "radio" is the option's visible label`);
     if ('exact' in st && !('click' in st || 'type' in st)) errs.push(`step ${i + 1}: "exact" is only used with "click" or "type"`);
     for (const k of ['within', 'every', 'reads']) if (k in st && !('stable' in st)) errs.push(`step ${i + 1}: "${k}" is only used with "stable"`);
     if ('stable' in st && !(typeof st.stable === 'string' && /^[A-Za-z_][\w]*$/.test(st.stable))) errs.push(`step ${i + 1}: "stable" is the control's name (data-control-name), for example lblTotal`);
     if (!keys.some((k) => !['nth', 'exact', 'into', 'from', 'blur', 'value', 'within', 'every', 'reads', 'mustBeClean', 'settle', 'note'].includes(k))) errs.push(`step ${i + 1}: no action or assertion`);
   });
-  if (!(sc.steps || []).some((st) => st.expect || st.absent || st.stable || st.deadclick || st.clipcheck || st.overlapcheck)) {
+  if (!(sc.steps || []).some((st) => st.expect || st.absent || st.selected || st.stable || st.deadclick || st.clipcheck || st.overlapcheck)) {
     errs.push('scenario asserts nothing (no expect/absent/deadclick/clipcheck/overlapcheck) - it would pass vacuously');
   }
   // Every write is production data. A scenario that saves must say so ("writes": true) and say
@@ -1330,8 +1385,8 @@ function selectorTableProblems() {
 function selftest() {
   const good = { name: 'ok', steps: [{ click: 'Approvals', settle: 3000 }, { type: 'x', into: 'Search' }, { expect: 'Saved' }, { deadclick: 'scr' }] };
   const bad = { name: 'a/b', steps: [{ clik: 'Approvals' }, { type: 'x' }, { nth: 1 }, { click: 'Open', nth: -1 },
-    { viewport: [390] }, { pick: 'Laptop' }, { from: 'Type' }, { radio: '' }, { expect: 'x', exact: true }, { stable: 'lbl Total' }, { expect: 'y', within: 1000 }] };
-  const goodPhone = { name: 'phone', steps: [{ viewport: [390, 844] }, { pick: 'Laptop', from: 'Asset type' }, { radio: 'Approved' }, { clipcheck: 'scr' },
+    { viewport: [390] }, { pick: 'Laptop' }, { from: 'Type' }, { selected: '' }, { radio: '' }, { expect: 'x', exact: true }, { stable: 'lbl Total' }, { expect: 'y', within: 1000 }] };
+  const goodPhone = { name: 'phone', steps: [{ viewport: [390, 844] }, { pick: 'Laptop', from: 'Asset type' }, { selected: 'Laptop', from: 'Asset type' }, { selected: 'Open', nth: 1 }, { radio: 'Approved' }, { clipcheck: 'scr' },
     { click: 'Close', exact: true }, { type: 'Leeds', into: 'City', exact: true }, { stable: 'lblTotal', within: 300000, every: 10000, reads: 3 }] };
   const goodWrite = { name: 'edit-then-revert', writes: true, restore: 'revert-edit', steps: [{ fillCell: 0, value: '7.5' }, { expect: 'Saved' }],
     confirm: [{ entitySet: 'app_timeentries', filter: "app_name eq 'TEST-1'", expect: { app_hours: 7.5 }, count: 1 }] };
@@ -1343,7 +1398,7 @@ function selftest() {
   const b = [...lintScenario(bad), ...lintScenario(badWrite), ...lintScenario(badConfirm), ...lintScenario(absentOnly)];
   const want = ['file-name safe', 'unknown verb', 'needs "into"', 'no action', '0-based', 'asserts nothing', 'no "restore"', 'no "confirm"',
     'entity set name', '"filter" is required', 'unknown key', 'object of column', 'asserts nothing: give', 'cannot be combined',
-    '[width, height]', '"pick" needs "from"', 'only used with "pick"', 'visible label', '"exact" is only used', '(data-control-name)', 'only used with "stable"'];
+    '[width, height]', '"pick" needs "from"', 'only used with "pick" or "selected"', 'value the dropdown must show', 'visible label', '"exact" is only used', '(data-control-name)', 'only used with "stable"'];
   // Tab hygiene: what tidy treats as blank, as the Studio editor, and as anything else.
   const T = [['about:blank', 'blank'], ['chrome-error://chromewebdata/', 'blank'], ['edge://newtab/', 'blank'],
     ['https://make.powerapps.com/e/E/canvas/?action=edit&app-id=x', 'studio'], ['https://make.powerapps.com/e/E/apps', 'other'],
@@ -1429,6 +1484,11 @@ function selftest() {
     ['publish hash: the last clean push', publishHash({ hash: 'p1', at: 't' }, 'd2').hash === 'p1'],
     ['publish hash: no push record -> source', publishHash(null, 'd2').hash === 'd2'],
     ['after a failed push the publish is refused', publishRefused(publishHash({ hash: 'p1' }, 'd2').hash, { hash: 'p1' }, false)],
+    ['publish: a confirm left open anywhere fails the publish', publishDialogLeftOpen([2]) && !publishDialogLeftOpen([])],
+    ['walk: a flag value is not a scenario', positionals(['a.json', '--config', 'cfg.json', 'b.json', '--headless', 'c.json']).join() === 'a.json,b.json,c.json'],
+    ['walk: a boolean flag keeps the next positional', positionals(['--allow-writes', 'walks', '--settle', '5000']).join() === 'walks'],
+    ['selected: the value after the name', selectedMatches('Status | Active', 'Active', 'Status') && selectedMatches('Asset type Laptop', 'Laptop', 'Asset type')],
+    ['selected: another value fails', !selectedMatches('Status | Inactive', 'Active', 'Status') && !selectedMatches('Status', 'Status', 'Status')],
     ['close-studio: editor gone is closable', editorGone({ stillEditing: true, back: false, leave: false, preview: false }) && !editorGone({ stillEditing: true, back: true })],
     ['dirty: formula text normalised', formulaText('clrWhite  \n') === 'clrWhite'],
     ['dirty: toggle never types (auto-close)', /insertText/.test(cmdDirty.toString()) && /ControlOrMeta\+A/.test(cmdDirty.toString())],
@@ -1562,7 +1622,7 @@ async function cmdPlay() {
 // separate walk calls; each one re-sent the whole conversation. One call runs them in order (writes
 // still need --allow-writes) and ends with a one-line-per-scenario summary.
 async function cmdWalk() {
-  const args = argv.slice(1).filter((a) => !a.startsWith('--') && !/^\d+$/.test(a));
+  const args = positionals(argv.slice(1)).filter((a) => !/^\d+$/.test(a));
   let files = [];
   for (const a of args) {
     let st = null; try { st = statSync(resolve(a)); } catch { /* missing */ }
@@ -1980,7 +2040,7 @@ const secondTabClosesTabs = () => /\.close\(/.test(cmdSecondTab.toString().repla
 
 // Is a pushed control actually in the editor? Read the held tab's tree view and canvas text.
 async function cmdStudioHas() {
-  const names = argv.slice(1).filter((a, i, all) => !a.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--')));
+  const names = positionals(argv.slice(1));
   if (!names.length) { log('usage: canvas-browser.mjs studio-has <controlName...>'); process.exitCode = 1; return; }
   const { browser, ctx } = await attach();
   const studio = studioPage(ctx);
@@ -2170,6 +2230,7 @@ function srcHash() {
 const PUBLISH_LOG = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'publish-log.json');
 const LAST_PUSH = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'last-push.json');
 // Which hash a publish ships: the last clean push's when there is one, else the source on disk.
+export function publishDialogLeftOpen(openFrames) { return Array.isArray(openFrames) && openFrames.length > 0; }
 export function publishHash(push, disk) { return push && push.hash ? { hash: push.hash, from: 'push' } : { hash: disk, from: 'source' }; }
 export function publishRefused(h, last, again) { return !!(h && last && last.hash === h && !again); }
 // One fix batch. The first publish ships the build and the second may repair what the first walks
@@ -2256,12 +2317,30 @@ async function cmdPublish() {
   await hit.ctl.click({ timeout: 20000 });
   log('  clicked Publish');
   await studio.waitForTimeout(5000);
-  for (const c of locsOf(hit.frame, 'studio.publishConfirm')) {
-    try { if (await c.first().count() === 0) continue; await c.first().click({ timeout: 15000 }); log('  confirmed "Publish this version"'); break; }
-    catch { /* next shape */ }
+  // The confirm can open in another Studio tab's frame: measured with three tabs open, the click
+  // landed, "Publish this version" stayed open elsewhere, every later click timed out behind it, and
+  // the old toast made it look done. Look in the clicked frame first, then every Studio tab.
+  const studioFrames = () => [hit.frame, ...ctx.pages().filter(isStudioTab).flatMap((p) => p.frames().filter((f) => rx('studio.authoringFrameUrl').test(f.url()))).filter((f) => f !== hit.frame)];
+  let confirmed = false;
+  for (const f of studioFrames()) {
+    for (const c of locsOf(f, 'studio.publishConfirm')) {
+      try { if (await c.first().count() === 0) continue; await c.first().click({ timeout: 15000 }); log('  confirmed "Publish this version"' + (f === hit.frame ? '' : ' (in another Studio tab)')); confirmed = true; break; }
+      catch { /* next shape */ }
+    }
+    if (confirmed) break;
   }
+  if (!confirmed) log('  !! no "Publish this version" button in any Studio tab - the dialog may not have opened.');
   await studio.waitForTimeout(Number(flag('after', 30000)));
   await capture(studio, 'publish-done');
+  const stillOpen = [];
+  for (const [n, f] of studioFrames().entries()) {
+    for (const c of locsOf(f, 'studio.publishConfirm')) { if (await c.first().isVisible().catch(() => false)) { stillOpen.push(n); break; } }
+  }
+  if (publishDialogLeftOpen(stillOpen)) {
+    log('  !! "Publish this version" is still open in ' + stillOpen.length + ' authoring frame(s): this publish did not start, and every');
+    log('     later click lands behind the dialog. Close the extra Studio tabs (`tidy --studio`), then publish again.');
+    await browser.close(); process.exitCode = 11; return;
+  }
   log('  Do NOT read success from the "Publish successful" toast: it stays pinned showing a PREVIOUS');
   log('  publish\'s time. Proof is the app\'s Dataverse row (solution-aware apps):');
   log('    GET canvasapps?$filter=displayname eq \'' + (APP.appName || '<app display name>') + '\'&$select=lastpublishtime');

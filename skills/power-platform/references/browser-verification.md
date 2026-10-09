@@ -363,6 +363,10 @@ evidence. Design each one so the broken version gives a different answer.
   `role=option` text) can differ from the rendered list. Drive it with `selectOption({ label })` on
   the hidden native `<select>` that carries the options, and confirm the choice with a screenshot of
   the opened list, not by option text alone.
+- **A selected value is not on-screen text, so `expect` cannot prove a default.** A check that a
+  dropdown opened on the right value failed on a correct screen: the value is not visible text inside
+  the canvas. Use the walk step `{"selected": "Active", "from": "Status"}`, which reads the named combo
+  box or dropdown opener (or, without `from`, the nth `<select>`), or prove the default by capture.
 - **Choosing the option a ComboBox already holds can leave its list open**, and the open list
   swallows the next click (a row's Open button did nothing, then timed out). Press `Escape` after
   choosing, or check the list closed, before clicking anything else on the screen.

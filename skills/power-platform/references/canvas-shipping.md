@@ -333,6 +333,13 @@ preconditions change.
 7. Confirm the save from a fresh session (`canvas-mcp.py sync <scratch> --diff` after the reload:
    0 differences), the publish from the `canvasapps` record, then the player and its build stamp.
 
+**For a data-bound change, walk Studio's Preview between the save proof and Publish.** In the
+reloaded, saved session, Preview (F5) runs against live data: one build proved its new screens there
+(counts equal to Dataverse, a navigation round trip, a picker search past row 1,000) before its one
+Publish, cheaper than publish, walk, fix, publish. Preview cannot prove player-only behaviour
+(cached metadata, consent, the published package), so the player walk after Publish still runs.
+Never push while in Preview (below).
+
 ### Step gates: each step waits for the previous one's result
 
 Never issue the next step in the same batch as the one before it. Measured: Save and Publish ran
@@ -467,6 +474,12 @@ save, and diff a fresh sync before trusting the clean push; a re-push of the fix
   kills the session holding the push.
 - **The hold has a timer, and expiry discards the push.** A 60-minute default expired while waiting
   on a person. Make the cap configurable and generous.
+- **With several Studio tabs open, the Publish dialog can open in another tab.** `publish`
+  reported "clicked Publish" while "Publish this version" sat open in a different tab of three; every
+  later click timed out behind it, and the previous publish's toast made it look done. `publish`
+  looks for the confirm in every Studio tab, then fails (exit 11) when the dialog is still open in any
+  of them after the wait. Close the tabs nothing uses (`tidy --studio`) before publishing, and prove
+  the publish by `lastpublishtime`, never by the toast.
 - **Publish can be inert in a tab that carried a push.** With real clicks, Publish failed three
   times (dialog opened, confirm clicked, `lastpublishtime` unmoved) although the Save had landed; it
   published first try after a page reload. Hence step 5.
@@ -505,9 +518,9 @@ one sync client), build in a local temp directory, compile from there, and copy 
   pinned showing a PREVIOUS publish's timestamp through three attempts that never landed - actively
   confirming a lie.
 - **Read `canvasapps` for the publish.** `canvasapps?$filter=displayname eq '<app>'&$select=
-  lastpublishtime,lastmodifiedtime,appversion`. In one measurement none of these moved on Save -
-  only on Publish - so the row proves a publish, not a save (an earlier note assumed Save moves
-  `lastmodifiedtime`; possibly version-dependent). The same row settles "is the tracker behind the
+  lastpublishtime,lastmodifiedtime,appversion`. None of these moves on Save - only on Publish -
+  so the row proves a publish, never a save (measured three times, two of them saves later proved by
+  a reloaded session and a 0-difference sync; an earlier note assumed Save moves `lastmodifiedtime`). The same row settles "is the tracker behind the
   environment": a state file said "saved, not published" two and a half hours after the app had
   been published.
 - **Use trusted input events for every Studio command.** A keyboard Ctrl+S works only if the
