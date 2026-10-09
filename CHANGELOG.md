@@ -11,6 +11,53 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-09
+
+Thirty-three lessons from three apps, a portal and a medallion workspace, plus what a live portal
+redesign found in the site walk. The walk now signs in on an Entra site it had read as signed out, and
+judges a fresh upload with the new stylesheet rather than the hour-cached old one.
+
+### Added
+
+- `fabric.py probe`: runs each loaded dataflow query (`--mashup` for a custom mashup document) and shows
+  the error the refresh hid; deploy refuses `[DataDestinations]` that name undefined queries, a
+  `each [flag] = true` / `<> false` filter over a lakehouse column (with the `List.Contains` form), and a
+  description over 256 characters.
+- Walk verb `selected` (with `from`) reads a dropdown's chosen value, which `expect` cannot see.
+- `check-drift.py picker-size`: a searchable picker bound to a table with more rows than its search reaches
+  (`--picker-limit`).
+- `lint-flows.mjs update-only-state-trigger`: a flow that triggers on Update only never fires for a row
+  created already in the target state.
+- `check-pa-yaml`: duplicate keys and property values without `=` are faults (they came from parallel
+  edits that no single editor saw); notes for a month label taken from a period's start date, a currency
+  sign before a sum that can be blank, and a `With()` alias inside a search filter (not delegable).
+- `site-walk.mjs walk --clear-browser-cache`; `ship` always clears the walk profile's cache before walking.
+- References: the data-quality page pattern; an admin screen gates its own exits; Preview walk between
+  the save proof and Publish; share masks need Append, and shares reach child rows only through the
+  cascade; recount accepted gaps from live data; a dataflow takes new columns only when its query text
+  changes; bringing a plain branded site up to its sibling's level; scope component rules under the
+  site's wrapper (blue text on green buttons otherwise).
+
+### Changed
+
+- The `.pa.yaml` file ceiling is reported once per `Src` folder: a warning at or near the ceiling, a
+  fault only above it (at exactly the ceiling every file had printed FAIL).
+- `check-canvas-overlap.mjs` exempts an access-denied cover and its message.
+- `canvas-browser.mjs publish` exits 11 when the "Publish this version" dialog is still open in another
+  Studio tab; `save` explains an editor torn down after a push.
+- The plugin gate's Stop rule names the process holding Studio and points to `close-studio`.
+- `site-walk.mjs` SW-NAV-CURRENT accepts a detail page outside the menu marking the one section it sits
+  under (`/project` beside `/projects`).
+
+### Fixed
+
+- `site-walk.mjs` read every signed-in page of an Entra site as signed out: the default sign-in selector
+  matched the platform's Sign out (`/Account/Login/LogOff`). Sign-out links are excluded and never
+  followed; the sign-in waits for a private site's gate redirects to settle and follows the link again
+  when it does not take.
+- `canvas-browser.mjs walk a.json --config cfg.json` no longer runs the config file as a scenario.
+- `site-walk.mjs ship` printed "clear confg".
+
 ## [0.28.1] - 2026-10-08
 
 ### Fixed
