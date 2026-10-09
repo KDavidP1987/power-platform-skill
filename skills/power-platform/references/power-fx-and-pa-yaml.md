@@ -439,7 +439,12 @@ duplicate**.
 8. **`Lower()` in a predicate is not delegable and is unnecessary** - Dataverse string comparison
    is already case-insensitive.
 9. **`StartsWith`'s second argument must be a literal or a simple value to delegate** - not an
-   expression built inside the predicate (section 7).
+   expression built inside the predicate (section 7), and not a `With()` alias.
+   `With({q: Trim(txtFind.Value)}, Filter(Vendors, StartsWith('Vendor Name', q)))` compiles clean
+   and does not delegate: the compiler reads `q` as a field name ("The StartsWith function cannot be
+   delegated if a field name appears in the second argument"). Referencing `txtFind.Value` directly
+   delegated; the warning count fell from 146 to 123 with that change alone. `check-pa-yaml.mjs`
+   notes the alias shape.
 10. **Dataverse `ne` includes the null rows, so `<>` is the delegable spelling of "blank or anything
     else".** `IsBlank()` on a choice column is not delegable, and the obvious workaround looks unsafe,
     but `Status ne 'Submitted'` returned all 27 of 27 rows whose status was blank. So
@@ -510,6 +515,11 @@ duplicate**.
 - **`Switch()` and `If()` take their result type from the first branch** and coerce the rest:
   `Switch(tab, "a", CountRows(x), "b", Text(total, "0.0"))` is a number, so "264.0" prints as "264".
   When any branch is text, wrap every branch in `Text()`.
+- **Label a fiscal period with the calendar's own label, never a month taken from its start
+  date.** `Text(Begins, "mmm")` labelled the first period of a fiscal year starting in October
+  "Sep": a 4-4-5 period can begin in the last days of the previous month. Read the period row's
+  label column (`'Month Year'`, the period name). `check-pa-yaml.mjs` notes a month-only format over
+  a value named like a start or begin date.
 - **`Sum()` of nothing is Blank, and Blank renders as nothing.** `Sum` over an empty filter (or the
   `.AllItems` of an empty gallery) returns Blank, not 0; `CountRows` returns 0. `Text(Blank(),
   "$#,##0")` is the empty string, so tiles showed a heading with no number beside tiles reading "0",
@@ -625,7 +635,7 @@ duplicate**.
 
 The compile is all-or-nothing across every file: one bad character fails the app, and the error
 rarely points at the responsible line. The bundled hook (`check-pa-yaml.mjs`) catches the first
-five at write time.
+seven at write time, and the continuation-indent fault below.
 
 - **A colon followed by a space inside a single-line value** breaks the YAML scanner even inside
   a quoted string: `Text: ="Total: " & x` fails. Build it as `"Total:" & " " & x`, or use a block
@@ -651,7 +661,15 @@ five at write time.
 - **`AccessibleLabel` on a classic `Label`** - "Unknown property", although the same Label takes
   `Tooltip`. Its `Text` is its accessible name. A clickable tab built from a Label therefore cannot
   be given a name for walks or screen readers: build tabs as Buttons.
-- **The ~50 file ceiling** - see `canvas-shipping.md`.
+- **A key twice in one control, or a property value without `=`.** Three parallel helpers editing
+  screens of one app each produced a fault none of them saw: a second `AccessibleLabel` line on a
+  control (the YAML parser refuses a duplicate key), and a property written `Visible: true` instead of
+  `Visible: =true` (every property value is a formula and starts with `=`, including the first line
+  of a block scalar). A helper that edits `.pa.yaml` runs `node check-pa-yaml.mjs <the files it
+  touched>` before it reports done (`orchestration.md`).
+- **The ~50 file ceiling** - see `canvas-shipping.md`. The check reports it once per `Src` folder:
+  a warning at or near the ceiling (at exactly the ceiling the app compiles, with no headroom), a
+  failure only above it.
 - **A base64 data-URI image costs file size.** `Image: ="data:image/png;base64,..."` works, but a
   logo added roughly 49 KB to every `.pa.yaml` that carried it - pressure on file-size limits, and
   copying it per screen pushes toward the file ceiling. Put it in one place (a named formula) at

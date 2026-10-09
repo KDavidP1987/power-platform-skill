@@ -11,7 +11,13 @@
 // Two tiers. Faults block (exit 2): the compile killers, and a zero guard on an aggregate, which
 // compiles and cannot catch the case it was written for. Notes do not block (formulaNotes): a
 // pattern that is wrong in the shapes seen so far but right in others - a Yes/No read through
-// Coalesce, two queued Select() calls. The hook passes them back as context; a direct run prints WARN.
+// Coalesce, two queued Select() calls, a month name taken from a period's start date, a currency
+// sign in front of a value that can be blank, a With() alias in a delegated search. The hook passes
+// them back as context; a direct run prints WARN.
+//
+// The file ceiling is a property of the Src folder, not of a file (ceilingCheck): a direct run
+// reports it once per folder - FAIL above the ceiling, WARN at or near it - and the hook blocks only
+// above it. At the ceiling exactly, every file used to print FAIL and a clean tree read as broken.
 //
 // --fix (direct mode) rewrites each single-line formula that contains ": " (rule 1) into a block
 // scalar, which is lossless: `Text: ="a: b"` becomes `Text: |-` with `="a: b"` on the next line.
@@ -29,10 +35,12 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readStdinJson, readFileSafe, hookFilePath, loadConfig } from './lib.mjs';
 
-export function checkPaYaml(text, { fileCount = null, ceiling = 50, warnAt = 45 } = {}) {
+export function checkPaYaml(text) {
   const problems = [];
   const lines = text.split(/\r?\n/);
-  let block = null; // { keyIndent, baseIndent } while inside a block scalar
+  let block = null; // { keyIndent, baseIndent, key, props, first } while inside a block scalar
+  const seen = new Map(); // indent -> keys of the mapping open at that indent (duplicate keys)
+  let props = null; // indent of the open `Properties:` key, while inside its mapping
 
   lines.forEach((line, i) => {
     const n = i + 1;
@@ -57,6 +65,13 @@ export function checkPaYaml(text, { fileCount = null, ceiling = 50, warnAt = 45 
         return;
       }
       if (block.baseIndent === null) block.baseIndent = indent;
+      // A property formula's first line must start with '=': without it the value is a plain string
+      // the compiler cannot bind ("property without =" broke a compile assembled by parallel edits).
+      if (block.props && block.first && indent > block.keyIndent) {
+        block.first = false;
+        if (!/^\s*=/.test(line)) problems.push(`${n}: ${block.key}'s formula does not start with "=" - a property value in .pa.yaml is a ` +
+          `Power Fx formula and must begin with =. Write ${block.key}: |- with "=" + the formula on the next line.`);
+      }
       if (indent > block.keyIndent && indent < block.baseIndent) {
         problems.push(`${n}: line is indented ${indent} but its block scalar started at ${block.baseIndent} - ` +
           `this ends the formula early and the parser will report "invalid mapping" somewhere below. ` +
@@ -64,6 +79,27 @@ export function checkPaYaml(text, { fileCount = null, ceiling = 50, warnAt = 45 
       }
       if (indent > block.keyIndent) return; // still inside the formula
       block = null;
+    }
+
+    // 7. A key twice in one mapping (two AccessibleLabel lines on a control): the YAML parser refuses
+    //    the file. Seen when parallel edits each added the same property to one control.
+    const key = line.match(/^(\s*)(?:- )?([A-Za-z0-9_]+):(?:\s|$)/);
+    if (key && !/^\s*#/.test(line)) {
+      const listItem = /^\s*- /.test(line);
+      const at = listItem ? indent + 2 : indent;
+      for (const k of [...seen.keys()]) if (k > (listItem ? indent : at) || (listItem && k === at)) seen.delete(k);
+      if (!seen.has(at)) seen.set(at, new Set());
+      if (seen.get(at).has(key[2])) problems.push(`${n}: duplicate key "${key[2]}" in the same mapping - the YAML parser refuses the file. ` +
+        `Keep one ${key[2]} line on this control.`);
+      seen.get(at).add(key[2]);
+      if (props !== null && indent <= props) props = null;
+      if (key[2] === 'Properties' && !listItem) props = indent;
+    } else if (!blank && !/^\s*#/.test(line) && props !== null && indent <= props) props = null;
+    // 8. A property value that is not a formula: `Text: "Save"` or `Visible: true`.
+    const pv = line.match(/^(\s+)([A-Za-z0-9_]+): (.+)$/);
+    if (pv && props !== null && pv[1].length > props && !/^[=|>]/.test(pv[3].trim()) && !/^#/.test(pv[3].trim())) {
+      problems.push(`${n}: ${pv[2]}: ${pv[3].slice(0, 40)} has no leading "=" - every property value in .pa.yaml is a Power Fx ` +
+        `formula. Write ${pv[2]}: =${pv[3].trim().slice(0, 40)}.`);
     }
 
     // 1. Colon-space inside a single-line Power Fx value - breaks the YAML scanner even inside
@@ -99,8 +135,8 @@ export function checkPaYaml(text, { fileCount = null, ceiling = 50, warnAt = 45 
     }
 
     // Enter a block scalar: `Key: |`, `|-`, `|+`, `>`, `>-` ...
-    const b = line.match(/^(\s*)[A-Za-z0-9_]+:\s*[|>][-+]?\s*$/);
-    if (b) block = { keyIndent: b[1].length, baseIndent: null };
+    const b = line.match(/^(\s*)([A-Za-z0-9_]+):\s*[|>][-+]?\s*$/);
+    if (b) block = { keyIndent: b[1].length, baseIndent: null, key: b[2], props: props !== null && b[1].length > props, first: true };
   });
 
   // 6. A zero guard on an aggregate. Sum, Average, Min and Max over an empty (or not yet loaded)
@@ -115,18 +151,19 @@ export function checkPaYaml(text, { fileCount = null, ceiling = 50, warnAt = 45 
     }
   }
 
-  // 4. File ceiling: over it the compile is refused, and a subset compile EVICTS the excluded
-  //    screens from the session, so publishing ships an app with screens missing.
-  if (fileCount !== null) {
-    if (fileCount > ceiling) {
-      problems.push(`Src holds ${fileCount} .pa.yaml files - over the ${ceiling}-file ceiling. The compile will be ` +
-        `refused. Fold a screen into a full-screen overlay before adding another.`);
-    } else if (fileCount >= warnAt) {
-      problems.push(`Src holds ${fileCount} .pa.yaml files - approaching the ${ceiling}-file ceiling. Fold an ` +
-        `admin/config screen into an overlay before adding more.`);
-    }
-  }
   return problems;
+}
+
+// 4. File ceiling: over it the compile is refused, and a subset compile EVICTS the excluded screens
+//    from the session, so publishing ships an app with screens missing. One finding per Src folder:
+//    { fail: true } above the ceiling, { fail: false } at or near it (allowed - a warning), else null.
+export function ceilingCheck(fileCount, { ceiling = 50, warnAt = 45 } = {}) {
+  if (fileCount === null || fileCount === undefined) return null;
+  if (fileCount > ceiling) return { fail: true, text: `Src holds ${fileCount} .pa.yaml files - over the ${ceiling}-file ceiling. The compile will be ` +
+    `refused. Fold a screen into a full-screen overlay before adding another.` };
+  if (fileCount >= warnAt) return { fail: false, text: `Src holds ${fileCount} .pa.yaml files - ${fileCount === ceiling ? 'AT' : 'approaching'} the ${ceiling}-file ` +
+    `ceiling${fileCount === ceiling ? ' (allowed; no headroom)' : ''}. Fold an admin/config screen into an overlay before adding more.` };
+  return null;
 }
 
 // The control a property line belongs to: the nearest `Control:` line above it.
@@ -249,6 +286,43 @@ export function formulaNotes(text) {
         `compiles and always reads ${args[1].toLowerCase()} (the column is a two-option set, not a boolean). Compare with the option: ` +
         `<row>.'Flag' = 'Flag (Table)'.Yes, and patch If(x, 'Flag (Table)'.Yes, 'Flag (Table)'.No). A boolean column you built yourself is fine.`);
     }
+    // c. A month name from a period's start date: a 4-4-5 fiscal period can begin in the last days of
+    //    the previous month, so Text(Begins, "mmm") labelled the October period "Sep".
+    for (const m of f.src.matchAll(/(^|[^A-Za-z0-9_.])Text\s*\(\s*([^,()]{0,80}?(?:Begin|Start)[^,()]{0,40}?)\s*,\s*"m{3,4}[^"d]*"/gi)) {
+      notes.push(`${lineAt(f, f.src, m.index)}: ${f.key} names a month from ${m[2].trim().slice(0, 40)}. If this labels a fiscal period, a period ` +
+        `that begins in the last days of the previous month gets that month's name (FY period 1 read "Sep"). Use the calendar's own label column.`);
+    }
+    // d. A currency sign in front of a value that can be blank: Text(Blank(), "#,##0") is "", so a total
+    //    over no rows rendered a bare "$".
+    for (const m of f.src.matchAll(/"[$\u20AC\u00A3]"\s*&\s*Text\s*\(\s*(Sum|Average|Min|Max|LookUp)\s*\(/g)) {
+      notes.push(`${lineAt(f, f.src, m.index)}: ${f.key} puts a currency sign before Text(${m[1]}(...)). Over no rows ${m[1]} is Blank and Text(Blank(), ...) ` +
+        `is "", so the screen shows a bare sign. Wrap it: Text(Coalesce(${m[1]}(...), 0), ...), or show "-" for blank.`);
+    }
+    for (const u of f.src.matchAll(/(^|[\s;=])([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*)\s*:\s*(?:Number|Decimal|Float|Currency)\s*\)\s*:\s*Text\s*=/g)) {
+      const p = u[3];
+      const body = f.src.slice(u.index, u.index + 400);
+      if (new RegExp('"[$\u20AC\u00A3]"\\s*&\\s*Text\\s*\\(\\s*' + p + '\\b').test(body) && !new RegExp('(IsBlank|Coalesce|IsEmpty)\\s*\\(\\s*' + p + '\\b').test(body)) {
+        notes.push(`${lineAt(f, f.src, u.index + u[1].length)}: ${u[2]}() puts a currency sign before Text(${p}) and never tests ${p} for blank: fed a ` +
+          `Sum over no rows it renders a bare sign. Coalesce(${p}, 0) first, or return "-" for blank.`);
+      }
+    }
+    // e. A With() alias as a delegated search value: With({q: Trim(txt.Value)}, Filter(T, StartsWith(Col, q)))
+    //    compiles, but the compiler reads q as a field and does not delegate. Use txt.Value directly.
+    for (const w of code.matchAll(/(^|[^A-Za-z0-9_.])With\s*\(\s*\{/g)) {
+      const open = code.indexOf('(', w.index + w[1].length);
+      const close = closeOf(code, open);
+      if (close < 0) continue;
+      const inner = code.slice(open + 1, close);
+      const rec = inner.slice(0, inner.indexOf('}') + 1);
+      const body = inner.slice(rec.length);
+      if (!/(Filter|Search|LookUp)\s*\(/.test(body)) continue;
+      for (const a of rec.matchAll(/([A-Za-z_]\w*)\s*:/g)) {
+        if (new RegExp('(StartsWith|EndsWith)\\s*\\(\\s*[^,()]+,\\s*' + a[1] + '\\s*\\)').test(body)) {
+          notes.push(`${lineAt(f, code, w.index + w[1].length)}: ${f.key} searches with the With() alias "${a[1]}" inside a Filter. It compiles, but the ` +
+            `compiler reads the alias as a field name and the StartsWith does not delegate (only the first rows are searched). Use the control's value directly.`);
+        }
+      }
+    }
     // b. Two Select() statements in one behaviour formula: Select queues, so the second runs before
     //    the first's data lands - a build selected after a load ran on empty collections.
     if (/^On[A-Z]/.test(f.key)) {
@@ -306,6 +380,15 @@ function selftest() {
     '            Text: =If(Sum(colLines, Amount) = 0, "-", Text(gblSpend / Sum(colLines, Amount)))',
     '            Visible: |-',
     '              =If(Sum(Filter(colLines, Kind = "Budget"), Amount) <> 0, true, false)',
+    '      - btnTwice:',
+    '          Control: Button',
+    '          Properties:',
+    '            AccessibleLabel: ="Approve"',
+    '            Text: ="Approve"',
+    '            AccessibleLabel: ="Approve the request"',
+    '            Visible: true',
+    '            OnSelect: |-',
+    '              Set(locDone, true)',
   ].join('\n');
   const good = [
     'Screens:',
@@ -348,11 +431,17 @@ function selftest() {
     '              =Select(btnLoad)',
     '            Visible: =CountIf(colLines, Amount = 0) = 0 && Sum(colLines, Amount) >= 0',
   ].join('\n');
-  const pb = checkPaYaml(bad, { fileCount: 51 });
-  const pg = checkPaYaml(good, { fileCount: 12 });
-  const want = ['colon-space', 'starts a YAML comment', 'not a Power Fx comment', 'Tooltip', 'indented', 'ceiling', 'classic Label has no AccessibleLabel',
-    'with = 0', 'with <> 0'];
+  const pb = checkPaYaml(bad);
+  const pg = checkPaYaml(good);
+  const want = ['colon-space', 'starts a YAML comment', 'not a Power Fx comment', 'Tooltip', 'indented', 'classic Label has no AccessibleLabel',
+    'with = 0', 'with <> 0', 'duplicate key "AccessibleLabel"', 'Visible: true has no leading', 'OnSelect\'s formula does not start'];
   const missing = want.filter((w) => !pb.some((p) => p.includes(w)));
+  // Same key under different controls, and a control named like a property, are not duplicates.
+  if (pb.filter((p) => p.includes('duplicate key')).length !== 1) missing.push('exactly one duplicate key');
+  // The ceiling: once per folder; over it fails, at it warns, below the warning line nothing.
+  const c51 = ceilingCheck(51), c50 = ceilingCheck(50), c45 = ceilingCheck(45), c12 = ceilingCheck(12);
+  const ceilingOk = c51 && c51.fail && c50 && !c50.fail && /AT the 50-file ceiling/.test(c50.text) && c45 && !c45.fail && c12 === null
+    && ceilingCheck(null) === null && !ceilingCheck(60, { ceiling: 60, warnAt: 55 }).fail;
   // Notes: a Yes/No read through Coalesce, and two queued Selects. Green: the option comparison, a
   // control's own value, one Select after an inline load, and Selects on exclusive branches.
   const noteBad = [
@@ -361,6 +450,12 @@ function selftest() {
     '            OnVisible: |-',
     '              =Select(btnLoad);',
     '              Select(btnBuild)',
+    '            Text: =Text(ThisItem.Begins, "mmm yy")',
+    '            Tooltip: ="$" & Text(Sum(colLines, Amount), "#,##0")',
+    '            Items: |-',
+    '              =With({q: Trim(txtFind.Value)}, Filter(Vendors, StartsWith(\'Vendor Name\', q)))',
+    '            Formulas: |-',
+    '              =MoneyShort(v: Number): Text = "$" & Text(v / 1000, "#,##0") & "K";',
   ].join('\n');
   const noteGood = [
     '          Properties:',
@@ -373,9 +468,18 @@ function selftest() {
     '            OnSelect: =If(gblFull, Select(btnFull), Select(btnQuick))',
     '            Fill: =If(Coalesce(LookUp(colLocks, Period = ThisItem.Name).Locked, false), clrMuted, clrSurface)',
     '            Color: =If(Coalesce(ThisItem.Locked, false), clrMuted, clrText)',
+    "            Text: =ThisItem.'Month Year'",
+    '            Tooltip: =Text(ThisItem.\'Start Date\', "mmm d, yyyy")',
+    '            Tooltip: ="$" & Text(Coalesce(Sum(colLines, Amount), 0), "#,##0")',
+    '            Items: |-',
+    "              =Filter(Vendors, StartsWith('Vendor Name', Trim(txtFind.Value)))",
+    '            Formulas: |-',
+    '              =MoneyShort(v: Number): Text = If(IsBlank(v) || v = 0, "-", "$" & Text(v / 1000, "#,##0") & "K");',
+    '            Width: =With({w: Parent.Width}, w - 24)',
   ].join('\n');
   const nb = formulaNotes(noteBad), ng = formulaNotes(noteGood);
-  const notesOk = nb.length === 2 && nb.some((x) => x.includes('Coalesce')) && nb.some((x) => x.includes('Select()')) && ng.length === 0;
+  const notesOk = nb.length === 6 && ['through Coalesce', 'Select()', 'names a month', 'before Text(Sum', 'MoneyShort()', 'With() alias']
+    .every((w) => nb.some((x) => x.includes(w))) && ng.length === 0;
   // --fix: the colon line becomes a block scalar that passes rule 1; a line with " #" is left alone.
   const fx = fixColons(['    Children:', '          Properties:', '            Text: ="Total: " & gblTotal', '            Tooltip: ="No: " & " #" & n'].join('\r\n'));
   const fixOk = fx.fixed === 1 && fx.skipped.length === 1 && fx.skipped[0] === 4 &&
@@ -400,11 +504,23 @@ function selftest() {
   fs.rmSync(tmp, { recursive: true, force: true });
   const pluginOk = bare === 2 && withOwnHook === 2 && withHarness === 0;
   const noteHookOk = noteRun.status === 0 && /additionalContext/.test(noteRun.stdout) && /Select\(\)/.test(noteRun.stdout);
-  const ok = missing.length === 0 && pg.length === 0 && pluginOk && notesOk && fixOk && noteHookOk;
-  console.log(ok ? `selftest ok: bad fixture -> ${pb.length} findings, good fixture -> 0, notes 2 on bad and 0 on good, --fix converts and skips " #", ` +
+  // Direct mode at exactly the ceiling: no file fails, one WARN line for the folder, exit 0.
+  const dir50 = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-yaml-ceiling-'));
+  fs.mkdirSync(path.join(dir50, 'Src'));
+  for (let k = 0; k < 50; k++) fs.writeFileSync(path.join(dir50, 'Src', `S${k}.pa.yaml`), good);
+  const at50 = spawnSync(process.execPath, [fileURLToPath(import.meta.url), path.join(dir50, 'Src')], { encoding: 'utf8', cwd: dir50 });
+  fs.writeFileSync(path.join(dir50, 'Src', 'S50.pa.yaml'), good);
+  const at51 = spawnSync(process.execPath, [fileURLToPath(import.meta.url), path.join(dir50, 'Src')], { encoding: 'utf8', cwd: dir50 });
+  fs.rmSync(dir50, { recursive: true, force: true });
+  const directOk = at50.status === 0 && (at50.stdout.match(/^WARN .*ceiling/gm) || []).length === 1 && !/^FAIL/m.test(at50.stdout)
+    && at51.status === 1 && (at51.stdout.match(/^FAIL .*ceiling/gm) || []).length === 1 && /0 with faults/.test(at51.stdout);
+  const ok = missing.length === 0 && pg.length === 0 && pluginOk && notesOk && fixOk && noteHookOk && ceilingOk && directOk;
+  console.log(ok ? `selftest ok: bad fixture -> ${pb.length} findings, good fixture -> 0, notes 6 on bad and 0 on good, ceiling once per folder (fail above, warn at), --fix converts and skips " #", ` +
                    `plugin mode runs without a harness or beside a project's own hook and stands down only for its harness copy, notes do not block the hook`
                  : `selftest FAILED: missing [${missing.join(', ')}] on bad; ${pg.length} false finding(s) on good:\n  ${pg.join('\n  ')}` +
-                   (notesOk ? '' : `\n  notes: ${nb.length} on bad (want 2), ${ng.length} on good (want 0):\n  ${[...nb, ...ng].join('\n  ')}`) +
+                   (notesOk ? '' : `\n  notes: ${nb.length} on bad (want 6), ${ng.length} on good (want 0):\n  ${[...nb, ...ng].join('\n  ')}`) +
+                   (ceilingOk ? '' : `\n  ceilingCheck: 51 ${JSON.stringify(c51)}, 50 ${JSON.stringify(c50)}, 45 ${JSON.stringify(c45)}, 12 ${JSON.stringify(c12)}`) +
+                   (directOk ? '' : `\n  direct at 50: exit ${at50.status}\n${at50.stdout}\n  direct at 51: exit ${at51.status}\n${at51.stdout}`) +
                    (fixOk ? '' : `\n  --fix: fixed ${fx.fixed}, skipped [${fx.skipped}]:\n${fx.text}`) +
                    (noteHookOk ? '' : `\n  notes in hook mode: exit ${noteRun.status}, stdout ${noteRun.stdout.slice(0, 200)}`) +
                    (pluginOk ? '' : `\n  plugin mode: exit ${bare} without a harness (want 2), ${withOwnHook} beside a project's own hook (want 2), ${withHarness} with the harness copy (want 0)`));
@@ -421,22 +537,26 @@ function direct(paths, { fix = false } = {}) {
   paths.forEach(visit);
   if (!files.length) { console.error('No .pa.yaml files found under: ' + paths.join(', ') + ' - this is NOT a pass.'); process.exit(2); }
   const cfg = loadConfig();
-  let bad = 0;
+  let bad = 0, folderFails = 0;
+  // The ceiling once per Src folder, before the per-file results.
+  for (const dir of new Set(files.map((f) => path.dirname(f)).filter((d) => path.basename(d) === 'Src'))) {
+    const c = ceilingCheck(fs.readdirSync(dir).filter((x) => x.endsWith('.pa.yaml')).length, { ceiling: cfg.canvasFileCeiling, warnAt: cfg.canvasFileWarnAt });
+    if (c) { console.log(`${c.fail ? 'FAIL' : 'WARN'}  ${dir}: ${c.text}`); if (c.fail) folderFails++; }
+  }
   for (const f of files) {
-    const dir = path.dirname(f);
-    const fileCount = path.basename(dir) === 'Src' ? fs.readdirSync(dir).filter((x) => x.endsWith('.pa.yaml')).length : null;
     let text = readFileSafe(f) || '';
     if (fix) {
       const r = fixColons(text);
       if (r.fixed) { fs.writeFileSync(f, r.text); text = r.text; console.log(`FIXED ${f}: ${r.fixed} single-line formula(s) with ": " moved into a block scalar`); }
       if (r.skipped.length) console.log(`WARN  ${f}: line(s) ${r.skipped.join(', ')} hold ": " and " #" - not rewritten (the # may be a YAML comment); fix by hand`);
     }
-    const problems = checkPaYaml(text, { fileCount, ceiling: cfg.canvasFileCeiling, warnAt: cfg.canvasFileWarnAt });
+    const problems = checkPaYaml(text);
     if (problems.length) { bad++; console.log(`FAIL  ${f}\n  ` + problems.join('\n  ')); }
     for (const w of formulaNotes(text)) console.log(`WARN  ${path.basename(f)}:${w}`);
   }
-  console.log(`${files.length} .pa.yaml file(s) checked, ${bad} with faults that break a compile or a zero guard.`);
-  process.exit(bad ? 1 : 0);
+  console.log(`${files.length} .pa.yaml file(s) checked, ${bad} with faults that break a compile or a zero guard` +
+    (folderFails ? `; ${folderFails} Src folder(s) over the file ceiling.` : '.'));
+  process.exit(bad || folderFails ? 1 : 0);
 }
 
 // The harness copy runs this same check, so the plugin stands down - but only for THIS script. A project
@@ -465,8 +585,11 @@ else {
     const dir = path.dirname(file);
     if (path.basename(dir) === 'Src') fileCount = fs.readdirSync(dir).filter((f) => f.endsWith('.pa.yaml')).length;
   } catch { /* unreadable directory - not this hook's problem */ }
-  const problems = checkPaYaml(text, { fileCount, ceiling: cfg.canvasFileCeiling, warnAt: cfg.canvasFileWarnAt });
+  const problems = checkPaYaml(text);
   const notes = formulaNotes(text);
+  const ceil = ceilingCheck(fileCount, { ceiling: cfg.canvasFileCeiling, warnAt: cfg.canvasFileWarnAt });
+  if (ceil && ceil.fail) problems.push(ceil.text);
+  else if (ceil) notes.push(ceil.text);
   const noteText = notes.length ? `\n\nAlso worth a look (not blocking):\n  ` + notes.join('\n  ') : '';
   if (problems.length === 0) {
     if (notes.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext:

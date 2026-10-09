@@ -92,6 +92,12 @@ and give the lead work while they run.
   create --tables ...` now reopens the saved app from the server, reads its Data pane, re-adds a
   missing table once and saves again, and fails (exit 4) naming the table if it is still missing.
   Do not start the screen helpers until it reports every table present.
+- **Every helper that edits `.pa.yaml` checks its own files before it reports.** Three helpers
+  editing screens in parallel each reported done while the merged source held a duplicate
+  `AccessibleLabel` key, a `Tooltip` on a modern Button and a property without its `=`: faults none
+  of them saw, found only by the lead's compile. Put the line in each helper's prompt: "Before you
+  report, run `node <skill>/scripts/hooks/check-pa-yaml.mjs <each file you changed>` and fix what it
+  reports." The hook does this on Write and Edit only where the plugin's hooks run in that helper.
 - **Ship in batches, walk in one call.** A measured build that met every requirement still took 107
   minutes, mostly in Studio churn: 29 Studio opens, 27 saves, 21 publishes, 81 walk calls and 472
   single shell calls. The driver now refuses a publish when the canvas source has not changed since
