@@ -8,7 +8,12 @@ code does with what its configuration allows:
   Web API settings    Webapi/<table>/enabled, /fields, /UseFieldsFromView, Webapi/error/innererror
   site code           Liquid {% fetchxml %} reads, Pages Web API calls (/_api/<entity set>) with
                       their method, the columns written and the lookups bound (@odata.bind)
+  server logic        server-logic/*.js: Server.Connector.Dataverse calls (direct, or through a helper
+                      that passes its first parameter on) and the lookups they bind (@odata.bind);
+                      /_api/serverlogics/<name> is the endpoint, never a table
   header settings     HTTP/Content-Security-Policy, HTTP/X-Frame-Options, CORS, SameSite
+  Liquid names        LIQUID-CASE-CLASH: variables that differ only by case in a page and the
+                      templates it includes (Liquid names ignore case and includes share scope)
 
 Usage:
     python audit-pages-permissions.py <site folder> [options]
@@ -39,7 +44,8 @@ Webapi/<table>/enabled = false set explicitly it is GLOBAL-READ-GUARDED (info).
 
 Privilege rule used: a lookup the code binds through the Web API needs Append AND Append To on
 both tables (measured on a real site; the documented one-sided rule returned 403), so the audit
-expects both on every table in a bind and flags them only on tables in no bind.
+expects both on every table in a bind and flags them only on tables in no bind. A bind made in
+server logic follows the same rule (measured: CreateRecord with binds returned 403 until it held).
 """
 import argparse
 import json
@@ -159,6 +165,15 @@ def load_site(root):
             for fn in fns:
                 if fn.lower().endswith(CODE_EXT) and not fn.endswith(".min.js"):
                     site["code_files"].append(os.path.join(dp, fn))
+    # web template name -> source file, for {% include '<name>' %}
+    site["templates"] = {}
+    for dp, _, fns in os.walk(os.path.join(root, "web-templates")):
+        src = [os.path.join(dp, fn) for fn in fns if fn.endswith(".webtemplate.source.html")]
+        for fn in fns:
+            if fn.endswith(".webtemplate.yml") and src:
+                for r in read_yaml(os.path.join(dp, fn)):
+                    if r.get("adx_name"):
+                        site["templates"][r["adx_name"].strip().lower()] = src[0]
     for dp, _, fns in os.walk(os.path.join(root, "server-logic")):
         for fn in fns:
             if fn.lower().endswith(".js"):
@@ -182,7 +197,8 @@ ENTITY_RE = re.compile(r"<(link-)?entity\b[^>]*\bname\s*=\s*[\"']([a-z0-9_]+)[\"
 API_RE = re.compile(r"/_api/([A-Za-z0-9_]+)(\(([^)]*)\))?")
 METHOD_RE = re.compile(r"\b(?:type|method)\s*:\s*[\"'](GET|POST|PATCH|PUT|DELETE)[\"']", re.I)
 FETCH_METHOD_RE = re.compile(r"\bmethod\s*:\s*[\"'](GET|POST|PATCH|PUT|DELETE)[\"']", re.I)
-BIND_RE = re.compile(r"[\"']([a-z0-9_]+)@odata\.bind[\"']\s*:\s*[\"'`]?/?([A-Za-z0-9_]+)\(", re.I)
+# both "col@odata.bind": "/set(..." in an object literal and row["col@odata.bind"] = "/set(..." afterwards
+BIND_RE = re.compile(r"[\"']([a-z0-9_]+)@odata\.bind[\"']\s*(?::|\]\s*=)\s*[\"'`]?/?([A-Za-z0-9_]+)\(", re.I)
 KEY_RES = [
     re.compile(r"[{,]\s*[\"']?([a-z][a-z0-9]*_[a-z0-9_]+)[\"']?\s*:(?!:)"),       # object literal key
     re.compile(r"\bput\(\s*[\"']([a-z][a-z0-9]*_[a-z0-9_]+)[\"']"),               # put('col', v)
@@ -198,6 +214,9 @@ SERVER_RE = re.compile(r"Server\.Connector\.Dataverse\.(CreateRecord|UpdateRecor
 SERVER_METHOD = {"CreateRecord": "POST", "UpdateRecord": "PATCH", "DeleteRecord": "DELETE", "RetrieveRecord": "GET",
                  "RetrieveMultipleRecords": "GET"}
 API_NOT_TABLES = {"serverlogics"}
+# A helper that passes its first parameter to a Dataverse call, e.g. function list(set, q) { ...
+# RetrieveMultipleRecords(set, q) ... }: its calls with a literal entity set are that operation too.
+WRAP_RE = re.compile(r"function\s+([A-Za-z_$][\w$]*)\s*\(\s*([A-Za-z_$][\w$]*)[^)]*\)\s*\{")
 
 
 def scan_code(site, set_map):
@@ -262,9 +281,29 @@ def scan_code(site, set_map):
             text = open(path, encoding="utf-8", errors="replace").read()
         except OSError:
             continue
-        for op, es in SERVER_RE.findall(text):
+        calls = [(m.start(), m.group(1), m.group(2)) for m in SERVER_RE.finditer(text)]
+        for w in WRAP_RE.finditer(text):
+            body = text[w.end(): w.end() + 800]
+            inner = re.search(r"Server\.Connector\.Dataverse\.(%s)\(\s*%s\b" % ("|".join(SERVER_METHOD), re.escape(w.group(2))), body)
+            if inner:
+                rx = re.compile(r"(?<![\w$.])%s\(\s*[\"']([A-Za-z0-9_]+)[\"']" % re.escape(w.group(1)))
+                calls += [(m.start(), inner.group(1), m.group(1)) for m in rx.finditer(text)]
+        calls.sort()
+        for _, op, es in calls:
             t = to_logical(es)
             u(t)["server"].add(SERVER_METHOD[op]); u(t)["files"].add(path)
+        # A lookup bound in server logic needs Append and Append To like a Web API bind (measured: a
+        # CreateRecord with binds returned 403 until both tables had both). Each bind belongs to the
+        # next create or update after it in the file (the row is built, then written), else the last one.
+        writes = [(pos, to_logical(es)) for pos, op, es in calls if op in ("CreateRecord", "UpdateRecord")]
+        for m in BIND_RE.finditer(text):
+            if not writes:
+                break
+            after = [w for w in writes if w[0] > m.start()]
+            t = after[0][1] if after else writes[-1][1]
+            tgt = to_logical(m.group(2))
+            u(t)["bind_from"].add(tgt)
+            u(tgt)["bind_to"].add(t); u(tgt)["files"].add(path)
     return use
 
 
@@ -427,11 +466,62 @@ def audit(root, set_map=None, sensitive=DEFAULT_SENSITIVE, live=None):
     if truthy(s.get("Authentication/Registration/OpenRegistrationEnabled", "false")):
         f("info", "OPEN-REGISTRATION", "Authentication/Registration/OpenRegistrationEnabled is true: any visitor who can authenticate gets a contact; on a Private site the visibility list still gates entry")
 
+    liquid_case_findings(site, f)
+
     if live:
         live_findings(live, f)
 
     examined = len(site["permissions"]) + len(site["settings"]) + len(site["code_files"])
     return site, use, findings, examined
+
+
+# Liquid names ignore case, and an included template shares the including page's scope: `aP` in one
+# template and `ap` in the template it includes are one variable (measured: a per-period table read
+# zero while its total was right). Names a template sets: assign, capture, increment, decrement, the
+# variable of a for loop, and a fetchxml result.
+LIQ_SET_RE = re.compile(r"\{%-?\s*(?:(?:assign|capture|increment|decrement)\s+([A-Za-z_][\w-]*)|for\s+([A-Za-z_]\w*)\s+in\b|fetchxml\s+([A-Za-z_]\w*))", re.I)
+LIQ_INCLUDE_RE = re.compile(r"\{%-?\s*include\s+[\"']([^\"']+)[\"']", re.I)
+
+
+def liquid_case_findings(site, f):
+    texts = {}
+
+    def text_of(path):
+        if path not in texts:
+            try:
+                texts[path] = open(path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                texts[path] = ""
+        return texts[path]
+
+    reported = set()
+    for start in site["code_files"]:
+        if start.lower().endswith(".js"):
+            continue
+        names, seen, todo = {}, set(), [start]
+        while todo:
+            p = todo.pop()
+            if p in seen or len(seen) > 50:
+                continue
+            seen.add(p)
+            t = text_of(p)
+            for m in LIQ_SET_RE.finditer(t):
+                n = next(g for g in m.groups() if g)
+                names.setdefault(n.lower(), {}).setdefault(n, set()).add(os.path.basename(p))
+            for inc in LIQ_INCLUDE_RE.findall(t):
+                q = site["templates"].get(inc.strip().lower())
+                if q:
+                    todo.append(q)
+        for low, spellings in sorted(names.items()):
+            if len(spellings) < 2:
+                continue
+            key = frozenset(spellings)
+            if key in reported:
+                continue
+            reported.add(key)
+            where = "; ".join("%s in %s" % (n, ", ".join(sorted(fs))) for n, fs in sorted(spellings.items()))
+            f("warning", "LIQUID-CASE-CLASH", "Liquid variables %s are one variable: names ignore case, and an included template shares the "
+              "page's scope (%s). Rename one so they differ by more than case" % (" and ".join(sorted(spellings)), where))
 
 
 def live_findings(url, f):
@@ -658,6 +748,48 @@ def selftest():
             failures.append("server logic create without the privilege: expected PRIV-MISSING, got %s" % ", ".join(sorted(c2)))
         if "WEBAPI-OFF" in c2:
             failures.append("server logic create: WEBAPI-OFF raised, but server logic needs no Web API setting")
+        # server logic binds (object literal and row["...@odata.bind"] = ...) and reads through a helper
+        sb = os.path.join(tmp, "sb")
+        _site(sb, True)
+        _write(sb, "server-logic/lines.js", """function list(set, q) { return JSON.parse(Server.Connector.Dataverse.RetrieveMultipleRecords(set, q)).value; }
+function post() {
+    var o = list("app_orders", "$top=1")[0];
+    var row = { "app_name": "x", "app_Order@odata.bind": "/app_orders(" + o.app_orderid + ")" };
+    row["app_Customer@odata.bind"] = "/contacts(" + Server.User.contactid + ")";
+    return Server.Connector.Dataverse.CreateRecord("app_orderlines", JSON.stringify(row));
+}
+""")
+        _write(sb, "table-permissions/Line-Create.tablepermission.yml",
+               _perm("Line - create", "app_orderline", "756150001", ["read", "create"], [AUTH], pid="22222222-0000-0000-0000-000000000007",
+                     rel="app_orderline_contact"))
+        _, ub, fb3, _ = audit(sb)
+        miss = sorted(x["message"].split(" needs ")[1].split(" on ")[0] for x in fb3 if x["code"] == "PRIV-MISSING" and x["message"].startswith("app_orderline:"))
+        if miss != ["append", "appendto"]:
+            failures.append("server logic bind without Append/Append To: expected PRIV-MISSING append and appendto on app_orderline, got %s" % miss)
+        if "app_orderline" not in ub.get("contact", {}).get("bind_to", set()):
+            failures.append("server logic: the row[...@odata.bind] = form was not read as a bind to contact")
+        if "GET" not in ub.get("app_order", {}).get("server", set()):
+            failures.append("server logic: a read through a helper (list(\"app_orders\", ...)) was not counted")
+        _write(sb, "table-permissions/Line-Create.tablepermission.yml",
+               _perm("Line - create", "app_orderline", "756150001", ["read", "create", "append", "appendto"], [AUTH],
+                     pid="22222222-0000-0000-0000-000000000007", rel="app_orderline_contact"))
+        _, _, fb4, _ = audit(sb)
+        for x in fb4:
+            if x["severity"] in ("critical", "warning") or (x["code"] == "APPEND-UNUSED" and "app_orderline" in x["message"]):
+                failures.append("server logic bind with both privileges: unexpected %s %s" % (x["code"], x["message"]))
+        # Liquid names that differ only by case, across a page and the template it includes
+        lq = os.path.join(tmp, "lq")
+        _site(lq, True)
+        _write(lq, "web-templates/money/Money.webtemplate.yml", "adx_name: Money\nadx_webtemplateid: 33333333-0000-0000-0000-000000000001\n")
+        _write(lq, "web-templates/money/Money.webtemplate.source.html", "{% for aP in periods %}{% assign t = t | plus: aP.value %}{% endfor %}\n")
+        _write(lq, "web-pages/money/content-pages/Money.en-US.webpage.copy.html", "{% assign ap = 0 %}{% include 'Money' %}{{ ap }}\n")
+        _, _, fl, _ = audit(lq)
+        if not any(x["code"] == "LIQUID-CASE-CLASH" and "aP and ap" in x["message"] for x in fl):
+            failures.append("Liquid: aP in an included template and ap in the page: expected LIQUID-CASE-CLASH")
+        _write(lq, "web-pages/money/content-pages/Money.en-US.webpage.copy.html", "{% assign total_p = 0 %}{% include 'Money' %}{{ total_p }}\n")
+        _, _, fl2, _ = audit(lq)
+        if any(x["code"] == "LIQUID-CASE-CLASH" for x in fl2):
+            failures.append("Liquid: distinct names raised LIQUID-CASE-CLASH")
         _, _, fe, ne = audit(empty)
         if ne != 0:
             failures.append("empty folder: examined %d, expected 0" % ne)
@@ -670,6 +802,8 @@ def selftest():
         print("  bad site:   %d finding(s): %s" % (len(fb), ", ".join(sorted(codes))))
         print("  fixed site: %d critical/warning" % len(serious))
         print("  server logic: serverlogics endpoint ignored, server calls need privileges, no Web API setting")
+        print("  server logic binds: Append and Append To on both tables; reads through a helper counted")
+        print("  Liquid: names that differ only by case across a page and its includes")
         print("  empty:      examined %d" % ne)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
