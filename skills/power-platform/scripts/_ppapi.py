@@ -18,6 +18,7 @@ Python 3 standard library only.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -105,6 +106,11 @@ def urllib_transport(method, url, body, headers, timeout=120):
         parsed = json.loads(raw) if raw.strip() else None
     except ValueError:
         parsed = {"_text": raw[:2000]}
+        # A binary answer (the dataflow executeQuery API returns an Arrow stream) can carry an
+        # evaluation error as {"Error":"..."} anywhere in it, often past the first 2,000 characters.
+        m = re.search(r'\{"Error":"((?:[^"\\]|\\.)*)"', raw)
+        if m:
+            parsed["_error"] = m.group(1)
     return status, hdrs, parsed
 
 

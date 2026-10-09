@@ -10,6 +10,9 @@ Usage:
     python fabric.py run     --manifest fabric.json TYPE NAME [--apply]
     python fabric.py prove-refresh --manifest fabric.json --checks report-checks.json --check NAME
                              --touch TABLE/KEYCOL=KEY/COLUMN=VALUE [--pipeline NAME] [--apply]
+    python fabric.py probe   --manifest fabric.json NAME [--query Q ...] [--mashup FILE]
+                             read-only: evaluate each loaded query of a deployed Dataflow and print
+                             its M error (a refresh that "failed without detail error" names nothing)
     python fabric.py teardown-plan --workspace WS --folder NAME
                              read-only: the folder's items in the order the owner deletes them
                              (reports and models first, Dataflows BEFORE lakehouses, SQL endpoints
@@ -37,7 +40,7 @@ The manifest (assets/templates/fabric-medallion/fabric.example.json):
       "folder": "<folder display name: the lane; created when missing>",
       "vars": { "prefix": "app", "orgHost": "yourorg.crm.dynamics.com" },
       "items": [
-        { "type": "Lakehouse",    "name": "APP_Bronze" },
+        { "type": "Lakehouse",    "name": "APP_Bronze", "description": "<optional, at most 256 characters>" },
         { "type": "Dataflow",     "name": "APP_Bronze_Dataverse", "source": "fabric/dataflow-bronze" },
         { "type": "Environment",  "name": "APP_Spark", "source": "fabric/environment" },
         { "type": "Notebook",     "name": "APP_Silver", "source": "fabric/notebooks/silver.py",
@@ -66,6 +69,17 @@ name elsewhere in the workspace belongs to someone else: the run refuses (exit 1
 it over. Folders are matched by display name at the workspace root.
 A SemanticModel whose .tmdl files give a measure the name of a column in the same table (case
 ignored) is refused in the plan: the service refuses it too, after a bare 400.
+An item "description" over 256 characters is refused in the plan: the create returns a bare 400.
+A Dataflow's mashup is refused in the plan when [DataDestinations] names a query the document does
+not define (the refresh then "failed without detail error"), or when a query reading a lakehouse
+filters rows with each [flag] = true / <> false: on a nullable Yes/No column that fails "We cannot
+apply operator < to types Null and Logical"; write List.Contains({true}, [flag]) or
+not List.Contains({false}, [flag]).
+
+probe sends POST .../dataflows/{id}/executeQuery for each loaded query (each query with a
+<name>_DataDestination partner in the item's mashup.pq, or --query) and prints the error the job API
+hides. --mashup FILE sends that document as customMashupDocument instead of the published one, to
+bisect a failing query without republishing. It reads; it never changes the dataflow.
 
 Options:
     --workspace ID|NAME   workspace (or "workspace" in the manifest)
@@ -274,6 +288,52 @@ def tmdl_name_clashes(parts):
     return found
 
 
+DEST_REF = re.compile(r'QueryName\s*=\s*"([^"]+)"')
+SHARED = re.compile(r'(?m)^\s*shared\s+(#"(?:[^"]|"")+"|[A-Za-z_][\w.]*)\s*=')
+FLAG_CMP = re.compile(r'each\s+\[([^\]]+)\]\s*(=|<>)\s*(true|false)\b', re.I)
+FLAG_FIX = {("=", "true"): "List.Contains({true}, [%s])", ("<>", "false"): "not List.Contains({false}, [%s])",
+            ("=", "false"): "List.Contains({false}, [%s])", ("<>", "true"): "not List.Contains({true}, [%s])"}
+
+
+def shared_queries(text):
+    """{name: body} for every `shared <name> = ...;` query of a section document."""
+    out, marks = {}, list(SHARED.finditer(text))
+    for i, m in enumerate(marks):
+        name = m.group(1)
+        if name.startswith('#"'):
+            name = name[2:-1].replace('""', '"')
+        out[name] = text[m.end():marks[i + 1].start() if i + 1 < len(marks) else len(text)]
+    return out
+
+
+def mashup_findings(parts):
+    """Faults in a Dataflow's Power Query document that the service reports only as a refresh that
+    'failed without detail error'."""
+    found = []
+    for rel, text in sorted(parts.items()):
+        if not rel.lower().endswith((".pq", ".m")) or not isinstance(text, str):
+            continue
+        queries = shared_queries(text)
+        for line in text.splitlines():
+            if "[DataDestinations" not in line:
+                continue
+            for ref in DEST_REF.findall(line):
+                if ref not in queries:
+                    found.append("%s: [DataDestinations] names query %r, which the document does not define (the refresh "
+                                 "fails without detail); add `shared %s = ...` or fix the name" % (rel, ref, ref))
+        for name, body in queries.items():
+            if "Lakehouse.Contents" not in body or name.endswith("_DataDestination"):
+                continue
+            for m in FLAG_CMP.finditer(body):
+                if "SelectRows" not in body[max(0, m.start() - 200):m.start()]:
+                    continue
+                fix = FLAG_FIX[(m.group(2), m.group(3).lower())] % m.group(1)
+                found.append("%s: query %s filters a lakehouse table with `each [%s] %s %s`; on a nullable Yes/No column "
+                             "the refresh fails \"We cannot apply operator < to types Null and Logical\". Write `each %s`"
+                             % (rel, name, m.group(1), m.group(2), m.group(3), fix))
+    return found
+
+
 def build_definition(item, root, fab, vars_, pending, apply):
     kind, src = item["type"], item.get("source")
     if not src:
@@ -291,6 +351,10 @@ def build_definition(item, root, fab, vars_, pending, apply):
         clashes = tmdl_name_clashes(parts)
         if clashes:
             raise Finding("; ".join(clashes))
+    if kind == "Dataflow":
+        faults = mashup_findings(parts)
+        if faults:
+            raise Finding("; ".join(faults))
     fmt = None
     if kind == "Notebook":
         (name, body), = parts.items() if len(parts) == 1 else (None, None)
@@ -330,6 +394,12 @@ def cmd_deploy(fab, man, root, only, apply):
             print("REFUSED %s %r: template token not filled in" % (kind, name))
             bad += 1
             continue
+        desc = item.get("description")
+        if desc is not None and len(str(desc)) > 256:
+            print("REFUSED %s %r: description is %d characters; Fabric allows 256 and answers a longer one with a "
+                  "bare 400" % (kind, name, len(str(desc))))
+            bad += 1
+            continue
         mine, other = fab.find(kind, name)
         if other and not mine:
             print("REFUSED %s %r: an item with this name exists outside folder %r (id %s) - it is not this "
@@ -361,6 +431,8 @@ def cmd_deploy(fab, man, root, only, apply):
                 print("ok %s %r %s" % (kind, name, mine["id"]))
             continue
         body = {"displayName": name, "type": kind}
+        if item.get("description"):
+            body["description"] = str(item["description"])
         if fab.folder_id:
             body["folderId"] = fab.folder_id
         if definition:
@@ -535,6 +607,58 @@ def cmd_prove_refresh(fab, man, a, transport, sleep):
     return rc
 
 
+def query_error(out):
+    """The M error in an executeQuery answer, or None. The answer is an Arrow stream; an evaluation
+    error is embedded in it as {"Error":"..."} (the transport extracts it as _error)."""
+    if isinstance(out, dict):
+        if out.get("_error"):
+            return out["_error"]
+        if isinstance(out.get("Error"), str):
+            return out["Error"]
+        m = re.search(r'\{"Error":"((?:[^"\\]|\\.)*)"', out.get("_text") or "")
+        return m.group(1) if m else None
+    return None
+
+
+def cmd_probe(fab, man, root, name, queries, mashup):
+    mine, other = fab.find("Dataflow", name)
+    if not mine:
+        print("Dataflow %r not found in folder %r%s" % (name, fab.folder_name, " (one exists outside it)" if other else ""))
+        return 2
+    if not queries:
+        item = next((i for i in man.get("items") or [] if i.get("type") == "Dataflow" and i.get("name") == name), None)
+        if not item or not item.get("source"):
+            print("pass --query, or list Dataflow %r with a \"source\" in the manifest" % name)
+            return 2
+        text = "".join(v.decode("utf-8-sig") for k, v in read_parts(root, item["source"]).items() if k.lower().endswith(".pq"))
+        queries = [q[:-len("_DataDestination")] for q in shared_queries(text) if q.endswith("_DataDestination")]
+        if not queries:
+            print("no loaded query (one with a <name>_DataDestination partner) in %s; pass --query" % item["source"])
+            return 2
+    custom = None
+    if mashup:
+        with open(mashup, encoding="utf-8-sig") as f:
+            custom = f.read()
+    bad = 0
+    for q in queries:
+        body = {"queryName": q}
+        if custom is not None:
+            body["customMashupDocument"] = custom
+        try:
+            _, _, out = fab.c.call("POST", "workspaces/%s/dataflows/%s/executeQuery" % (fab.ws, mine["id"]), body, read=True)
+            err = query_error(out)
+        except ApiError as e:
+            err = str(e)
+        if err:
+            bad += 1
+            print("  FAIL  %-32s %s" % (q, err[:600]))
+        else:
+            print("  ok    %s" % q)
+    print("%d of %d quer%s failed%s" % (bad, len(queries), "y" if len(queries) == 1 else "ies",
+                                       " (custom mashup document)" if custom is not None else ""))
+    return 1 if bad else 0
+
+
 def cmd_items(fab, kind):
     rows = [i for i in fab.items() if (not kind or i.get("type") == kind)]
     if fab.folder_name:
@@ -595,13 +719,15 @@ def cmd_teardown_plan(fab):
 def run(argv, transport=None, sleep=None):
     ap = argparse.ArgumentParser(prog="fabric.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
-    ap.add_argument("command", nargs="?", choices=["items", "deploy", "run", "prove-refresh", "teardown-plan"])
+    ap.add_argument("command", nargs="?", choices=["items", "deploy", "run", "prove-refresh", "teardown-plan", "probe"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--manifest")
     ap.add_argument("--workspace")
     ap.add_argument("--folder")
     ap.add_argument("--type")
     ap.add_argument("--only", action="append")
+    ap.add_argument("--query", action="append")
+    ap.add_argument("--mashup")
     ap.add_argument("--job-type")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--timeout", type=int, default=3600)
@@ -651,6 +777,11 @@ def run(argv, transport=None, sleep=None):
             return cmd_items(fab, a.type)
         if a.command == "teardown-plan":
             return cmd_teardown_plan(fab)
+        if a.command == "probe":
+            if len(a.args) != 1:
+                print("probe takes NAME (the Dataflow)")
+                return 2
+            return cmd_probe(fab, man, root, a.args[0], a.query or [], a.mashup)
         if a.command == "prove-refresh":
             return cmd_prove_refresh(fab, man, a, transport, sleep)
         if a.command == "deploy":
@@ -863,6 +994,79 @@ def selftest():
         check("items lists the folder only", rc == 0 and "APP_Silver" in out and "Loose report" not in out)
         rc, out = go(t, "items", "--workspace", "No Such Workspace")
         check("unknown workspace exits 2", rc == 2)
+
+        # Dataflow mashups: a destination query that is not defined, and a Yes/No filter on a lakehouse.
+        good_pq = ('section Section1;\n'
+                   '[DataDestinations = {[Definition = [Kind = "Reference", QueryName = "orders_DataDestination", IsNewTarget = true]]}]\n'
+                   'shared orders = let\n  Source = Lakehouse.Contents([EnableFolding = false]),\n'
+                   '  Rows = Table.SelectRows(Source, each not List.Contains({false}, [is_current]))\nin\n  Rows;\n'
+                   'shared orders_DataDestination = let\n  Pattern = Lakehouse.Contents([]),\n'
+                   '  T = Table.SelectRows(Pattern, each [flag] = true)\nin\n  T;\n')
+        check("a mashup with its destination defined and List.Contains filters passes", mashup_findings({"mashup.pq": good_pq}) == [])
+        no_dest = good_pq.replace("shared orders_DataDestination", "shared orders_Destination")
+        f1 = mashup_findings({"mashup.pq": no_dest})
+        check("a [DataDestinations] query the document never defines is refused",
+              any("names query 'orders_DataDestination'" in x for x in f1))
+        cmp_pq = good_pq.replace("each not List.Contains({false}, [is_current])", "each [is_current] <> false")
+        f2 = mashup_findings({"mashup.pq": cmp_pq})
+        check("each [flag] <> false over a lakehouse is refused with the List.Contains form",
+              len(f2) == 1 and "not List.Contains({false}, [is_current])" in f2[0])
+        check("each [flag] = true over a Dataverse source is left alone", mashup_findings(
+            {"mashup.pq": cmp_pq.replace("Lakehouse.Contents([EnableFolding = false])", 'CommonDataService.Database("x")')}) == [])
+        check("the shipped bronze templates pass the mashup lint", all(
+            mashup_findings({"mashup.pq": open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "templates",
+                                                            "fabric-medallion", d, "mashup.pq"), encoding="utf-8").read()
+                                         .replace("{table}", "orders")}) == []
+            for d in ("dataflow-bronze", "dataflow-bronze-webapi")))
+        os.makedirs(os.path.join(tmp, "fabric", "df"))
+        with open(os.path.join(tmp, "fabric", "df", "mashup.pq"), "w") as f:
+            f.write(cmp_pq)
+        try:
+            build_definition({"type": "Dataflow", "name": "APP_DF", "source": "fabric/df"}, tmp, None, {}, set(), False)
+            check("deploy refuses a Dataflow whose mashup fails the lint", False)
+        except Finding as e:
+            check("deploy refuses a Dataflow whose mashup fails the lint", "List.Contains" in str(e))
+
+        # A description over 256 characters: refused in the plan; one within it is sent on create.
+        with open(mpath, "w") as f:
+            json.dump(dict(man, items=[{"type": "Lakehouse", "name": "APP_Long", "description": "x" * 257},
+                                       {"type": "Lakehouse", "name": "APP_Short", "description": "Bronze landing"}]), f)
+        w0 = len(t.writes())
+        rc, out = go(t, "deploy", "--manifest", mpath, "--apply")
+        short = next((i for i in state["items"] if i["displayName"] == "APP_Short"), None)
+        sent = [b for m, u, b in t.calls if m == "POST" and u.endswith("/items") and (b or {}).get("displayName") == "APP_Short"]
+        check("a description over 256 characters is refused, the item not sent", rc == 1 and "257 characters" in out
+              and not any(i["displayName"] == "APP_Long" for i in state["items"]))
+        check("a description within 256 characters is sent on create", short and sent and sent[0].get("description") == "Bronze landing")
+
+        # probe: every loaded query is evaluated; the embedded M error is printed; reads only.
+        with open(os.path.join(tmp, "fabric", "df", "mashup.pq"), "w") as f:
+            f.write(good_pq + good_pq.split("section Section1;\n", 1)[1].replace("orders", "lines"))
+        state["items"].append({"id": "df-1", "type": "Dataflow", "displayName": "APP_DF", "folderId": lane[0]["id"]})
+        with open(mpath, "w") as f:
+            json.dump(dict(man, items=[{"type": "Dataflow", "name": "APP_DF", "source": "fabric/df"}]), f)
+        asked = []
+
+        def execute(u, b):
+            asked.append(b)
+            if b["queryName"] == "lines":
+                return 200, {}, {"_text": "ARROW1 ...", "_error": "Expression.Error: The column 'is_current' of the table wasn't found."}
+            return 200, {}, {"_text": "ARROW1 rows"}
+        t.on("POST", "/dataflows/df-1/executeQuery", execute)
+        rc, out = go(t, "probe", "--manifest", mpath, "APP_DF")
+        check("probe evaluates every loaded query and prints the M error (exit 1)", rc == 1
+              and sorted(b["queryName"] for b in asked) == ["lines", "orders"] and "wasn't found" in out and "ok    orders" in out)
+        mfile = os.path.join(tmp, "custom.pq")
+        with open(mfile, "w") as f:
+            f.write("section Section1;\nshared orders = 1;\n")
+        asked.clear()
+        rc, out = go(t, "probe", "--manifest", mpath, "APP_DF", "--query", "orders", "--mashup", mfile)
+        check("probe --query --mashup sends one query with the custom document", rc == 0 and len(asked) == 1
+              and asked[0].get("customMashupDocument", "").startswith("section Section1;"))
+        check("the transport lifts an Error embedded past the first 2,000 characters of a binary answer",
+              query_error({"_text": "x" * 2000, "_error": "boom"}) == "boom"
+              and query_error({"_text": 'abc{"Error":"Expression.Error: bad"}'}) == "Expression.Error: bad"
+              and query_error({"_text": "ARROW rows"}) is None)
 
         # teardown-plan: consumers first, Dataflows before lakehouses, SQL endpoints with their lakehouse.
         order, skipped = teardown_order([{"type": "Lakehouse", "displayName": "B"}, {"type": "SQLEndpoint", "displayName": "B"},

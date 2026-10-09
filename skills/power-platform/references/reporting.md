@@ -216,8 +216,12 @@ repo's design doc. Keep the Demo source filterable end to end.
 - **Run order is bronze, silver, gold, then a model refresh.** Without the refresh, Direct Lake keeps
   serving the old frame and the report shows stale numbers after a successful data run.
 - **A new dataflow's first refresh can fail with no detail; retry once.** When a run fails with a
-  real cause, the job API hides the Power Query error: evaluate the failing query through the
-  dataflow's query-execution API to read the actual M error.
+  real cause, the job API hides the Power Query error and does not say which query broke.
+  `fabric.py probe --manifest fabric.json <dataflow>` evaluates every loaded query through the
+  dataflow's `executeQuery` API and prints each one's M error; `--mashup <file>` sends a
+  `customMashupDocument` instead, to bisect without republishing. One measured "failed without
+  detail" had two causes at once: an M error in one query, and a template whose `[DataDestinations]`
+  named `*_DataDestination` queries it never defined. `fabric.py deploy` refuses the second in the plan.
 - **Verify by recomputation, not by status.** A script recomputes each silver and gold table in SQL
   from the layer below and compares counts and sums, then runs a handful of the model's measures in
   DAX and checks they equal the SQL answer.
@@ -270,13 +274,25 @@ repo's design doc. Keep the Demo source filterable end to end.
 - **An average leaves out the rows it is not about.** A rejected or still-pending request has no
   duration; counting it as zero days pulls an average loan length down. State the rows each average
   covers in the measure's description.
-- **A source schema change needs a dataflow republish, then a refresh.** A Dataflow Gen2 lakehouse
-  destination with automatic settings fixes the table's columns when the dataflow is published. A
-  column added to a Dataverse table (bronze selecting every column) did not land on a plain refresh,
-  and the refresh was green; republishing the unchanged definition (`fabric.py deploy --only
-  <dataflow> --apply`, which sends `updateDefinition`) and refreshing added it. After any column is
-  added to a source table, republish the bronze dataflow before the run, and check the new column is
-  in the bronze table (the SQL endpoint's column list), not only that the row count matches.
+- **A source schema change needs a changed query, a republish, then a refresh.** A Dataflow Gen2
+  lakehouse destination with automatic settings fixes the table's columns when the dataflow is
+  published. A column added to a Dataverse table (bronze selecting every column) did not land on a
+  plain refresh, and the refresh was green. In one build republishing the unchanged definition
+  (`fabric.py deploy --only <dataflow> --apply`, which sends `updateDefinition`) and refreshing added
+  it; in another, three new columns stayed missing after a republish and even after the Delta tables
+  were deleted and refreshed: the destination keeps the column list it last saw for a query whose
+  TEXT is unchanged. Changing the query text landed them on the next run. So give each bronze query a
+  schema-revision comment (`// schema revision 2026-01-15`) and bump it whenever its source table
+  gains columns; generate it from the table manifest so it cannot be forgotten. After the run, check
+  the new columns are in the bronze table (the SQL endpoint's `INFORMATION_SCHEMA.COLUMNS`), not only
+  that the row count matches.
+- **Filter a Yes/No column from a lakehouse with `List.Contains`.** `Table.SelectRows(t, each [flag]
+  <> false)` (or `= true`) over a lakehouse table with nullable logical values failed the query "We
+  cannot apply operator < to types Null and Logical", even with `EnableFolding = false`. `each not
+  List.Contains({false}, [flag])` (keeps true and null) and `each List.Contains({true}, [flag])` work.
+  `fabric.py deploy` refuses the comparison form in a Dataflow query that reads `Lakehouse.Contents`.
+- **An item description is at most 256 characters.** A longer one on a semantic model create returned
+  a bare 400 with no body. `fabric.py deploy` refuses it in the plan.
 - **A measure cannot share a name with a column of its table.** Names are not case-sensitive: a
   measure `Budget` beside a column `budget` was refused ("a column with the same name already
   exists"), and the REST create first returned only a bare 400. When measures take the plain business
