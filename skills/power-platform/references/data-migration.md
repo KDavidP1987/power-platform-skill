@@ -197,6 +197,18 @@ row, the original "(workbook)" columns kept beside the corrected ones plus a Loa
 tint on the exact cell, and a reconciliation tab against control totals to the cent. The loader reads
 the reviewed copy, then: dry run, trial load, read-back reconciliation.
 
+**A loader's read-back is not the proof of the load.** It compares live rows to the loader's own
+plan, so a mapping mistake in the plan passes it. The order that held, on a load of 55,131 fields:
+
+1. A dry-run report of every row and field the load would write, shown to the person before anything
+   is written.
+2. Apply.
+3. The loader's read-back against its plan (catches rows the server dropped or changed).
+4. **An independent source-vs-live check** that shares no code with the loader: written separately,
+   reading the source workbook (the reviewed copy) and live Dataverse, with the reviewer's decisions
+   re-typed by hand from the review rather than imported from the loader's mapping. Zero
+   discrepancies here, not in step 3, is what says the load is right.
+
 **Load each row in exactly the shape the app writes**, leaving blank what the app leaves blank, so a
 loaded record behaves like a typed one.
 
@@ -237,8 +249,15 @@ per row (`power-automate.md`, section 8). Beyond senders:
 1. Export every row of every affected table to timestamped JSON **outside git** (it holds personal
    data). That file is the undo. Refuse to delete until export counts equal live counts.
 2. Park the flows that would write a row per delete.
-3. Delete parents first (children cascade), then dependants.
-4. Re-read every table and require 0.
+3. **Read each relationship's delete behaviour live, then delete children explicitly.** Do not
+   assume children cascade. For each parent table read
+   `EntityDefinitions(LogicalName='app_order')/OneToManyRelationships?$select=SchemaName,ReferencingEntity,CascadeConfiguration`
+   and note `CascadeConfiguration.Delete` for every child table. In one reload the children had `RemoveLink`, so deleting the parents would
+   have left 2,400+ orphaned child rows instead of removing them. Delete in dependency order, deepest
+   child first, and delete **only the ids in the export** - never "every row", which takes rows
+   someone created since.
+4. Re-read every table and require 0 (or, when the table also holds rows the purge must keep, exactly
+   those rows) before any create of the reload.
 5. Restore each parked flow to exactly the state it was found in, and re-read.
 
 **Before deleting a table**, print its row count and every known reference - including Power BI

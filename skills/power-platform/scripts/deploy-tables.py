@@ -40,6 +40,14 @@ What it will and will not do:
     copy over the owner's table. After the lookups, every shared table in the solution is removed
     and added back as a reference (DoNotIncludeSubcomponents, behavior 1). Shared tables are the
     manifest's "sharedTables" patterns plus every lookup target that does not carry the prefix.
+  - A yes/no column should carry "default": true or false; without one every new row reads No, and
+    the plan warns. A live default that differs is reported, never changed.
+  - Names Dataverse reserves are refused: <table>id, and the virtual <column>name of a lookup,
+    choice or yes/no column (and <lookup>yominame), both inside the manifest and against the live
+    table, where a lookup created elsewhere already owns <lookup>name. The create would fail with
+    0x80047013 "attribute ... already exists".
+  - A 500 carrying SQL error 40197 is retried: the create was rolled back and a re-run succeeds.
+  - --plan prints, per table, whether it is new and how many items it would add and already has.
   - Security roles are deliberately not created here (references/security-and-access.md).
 
 Exit: 0 applied (or planned) and read back complete; 1 a conflict, a blocked lookup, or something
@@ -196,6 +204,11 @@ def validate(m):
                 _check_len(errs, cw, c.get("maxLength"), 1, 1048576)
             elif ty == "file":
                 _check_len(errs, cw, c.get("maxSizeInKB"), 1, 10485760, key="maxSizeInKB")
+            elif ty == "boolean":
+                # Without a DefaultValue every new row reads No, and nothing says so. A missing default is
+                # warned about in the plan (manifests written before 0.28 stay valid); a wrong one is an error.
+                if "default" in c and not isinstance(c.get("default"), bool):
+                    errs.append("%s: boolean \"default\" must be true or false" % cw)
             elif ty == "autonumber":
                 if not isinstance(c.get("format"), str) or "{SEQNUM:" not in c["format"]:
                     errs.append("%s: autonumber needs a format containing {SEQNUM:n}, e.g. \"REQ-{SEQNUM:5}\"" % cw)
@@ -217,17 +230,22 @@ def validate(m):
                     if rel in rel_names:
                         errs.append("%s: relationship name %s collides with %s" % (cw, rel, rel_names[rel]))
                     rel_names[rel] = cw
-        # Names the platform reserves beside the manifest's own: <table>id, and the virtual
-        # <column>name companion of every lookup, choice and yes/no column. Display names must be
-        # unique too, or the app binds the wrong column by its label.
+        # Names the platform reserves beside the manifest's own: <table>id, the virtual <column>name
+        # companion of every lookup, choice and yes/no column, and a lookup's <column>yominame. A
+        # column (or the primary name) on one of them fails the create with 0x80047013 "attribute
+        # already exists". Display names must be unique too, or the app binds the wrong column.
         named_cols = [c for c in cols if isinstance(c, dict) and isinstance(c.get("schemaName"), str)]
         logicals = {c["schemaName"].lower() for c in named_cols}
+        if isinstance(pn, dict) and isinstance(pn.get("schemaName"), str):
+            logicals.add(pn["schemaName"].lower())
         if tn and tn.lower() + "id" in logicals:
             errs.append("%s: column %sid collides with the table's reserved id column" % (where, tn.lower()))
         for c in named_cols:
-            if c.get("type") in ("lookup", "choice", "boolean") and c["schemaName"].lower() + "name" in logicals:
-                errs.append("%s: column %sname collides with the virtual name column Dataverse creates for %s"
-                            % (where, c["schemaName"].lower(), c["schemaName"].lower()))
+            for suffix in reserved_suffixes(c.get("type")):
+                if c["schemaName"].lower() + suffix in logicals:
+                    errs.append("%s: column %s%s collides with the virtual %s column Dataverse creates for %s - "
+                                "rename one of them" % (where, c["schemaName"].lower(), suffix, suffix,
+                                                        c["schemaName"].lower()))
         labels = [x.get("displayName", "").strip().lower() for x in [pn] + named_cols
                   if isinstance(x, dict) and isinstance(x.get("displayName"), str)]
         for d in sorted({d for d in labels if d and labels.count(d) > 1}):
@@ -243,6 +261,11 @@ def validate(m):
                             "manifest creates is never a reference" % (s, ", ".join(hit)))
     if errs:
         raise ManifestError(errs)
+
+
+def reserved_suffixes(ty):
+    """The virtual companion columns Dataverse adds for a column of this manifest type."""
+    return {"lookup": ("name", "yominame"), "choice": ("name",), "boolean": ("name",)}.get(ty, ())
 
 
 def _check_len(errs, where, v, lo, hi, key="maxLength"):
@@ -324,7 +347,7 @@ def attribute_body(c, base, lcid):
         return body("MoneyAttributeMetadata", Precision=2, PrecisionSource=2,
                     MinValue=-922337203685477, MaxValue=922337203685477)
     if ty == "boolean":
-        return body("BooleanAttributeMetadata", OptionSet={
+        return body("BooleanAttributeMetadata", DefaultValue=bool(c.get("default")), OptionSet={
             "@odata.type": "Microsoft.Dynamics.CRM.BooleanOptionSetMetadata",
             "TrueOption": {"Value": 1, "Label": label("Yes", lcid)},
             "FalseOption": {"Value": 0, "Label": label("No", lcid)}})
@@ -477,10 +500,12 @@ class WebApi:
                 if e.code in (401, 403):
                     raise ApiError("HTTP %d on %s %s - the token is not valid for this org, or the account "
                                    "lacks System Customizer: %s" % (e.code, method, short, detail[:300]))
-                # Retry throttling and gateway errors, and on a metadata create the two
+                # Retry throttling and gateway errors, a 500 carrying SQL error 40197 ("The service
+                # has encountered an error processing your request. Please try again": the create
+                # was rolled back and a re-run succeeds), and on a metadata create the two
                 # eventual-consistency signatures: a spurious 400 straight after a table create,
                 # and 0x80040216. Everything else is rethrown with the server's message.
-                transient = e.code in (429, 502, 503, 504) or (
+                transient = e.code in (429, 502, 503, 504) or (e.code == 500 and "40197" in text) or (
                     metadata_post and (e.code == 400 or "0x80040216" in text))
                 last = "HTTP %d - %s" % (e.code, detail[:500])
                 # 0x80071151: another customization holds the org-wide lock (a solution import, or
@@ -511,16 +536,25 @@ def type_name(a):
     return (a.get("AttributeType") or "") + "Type"
 
 
-def fetch_table(api, logical, choices=False, lookups=False):
-    """None if the table does not exist; otherwise its columns, choice options and lookup targets."""
+def fetch_table(api, logical, choices=False, lookups=False, booleans=False):
+    """None if the table does not exist; otherwise its columns, the virtual companions among them
+    (AttributeOf: <lookup>name and the like), choice options, lookup targets and yes/no defaults."""
     try:
         em = api.get("EntityDefinitions(LogicalName='%s')?$select=LogicalName,MetadataId"
-                     "&$expand=Attributes($select=LogicalName,AttributeType,AttributeTypeName)" % logical)
+                     "&$expand=Attributes($select=LogicalName,AttributeType,AttributeTypeName,AttributeOf)"
+                     % logical)
     except NotFound:
         return None
     st = {"id": em.get("MetadataId"),
           "attrs": {a["LogicalName"]: type_name(a) for a in em.get("Attributes") or [] if a.get("LogicalName")},
-          "options": {}, "targets": {}}
+          "of": {a["LogicalName"]: a["AttributeOf"].lower() for a in em.get("Attributes") or []
+                 if a.get("LogicalName") and a.get("AttributeOf")},
+          "options": {}, "targets": {}, "defaults": {}}
+    if booleans:
+        r = api.get("EntityDefinitions(LogicalName='%s')/Attributes/Microsoft.Dynamics.CRM.BooleanAttributeMetadata"
+                    "?$select=LogicalName,DefaultValue" % logical)
+        for a in r.get("value") or []:
+            st["defaults"][a["LogicalName"]] = a.get("DefaultValue")
     if choices:
         r = api.get("EntityDefinitions(LogicalName='%s')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata"
                     "?$select=LogicalName&$expand=OptionSet($select=Options)" % logical)
@@ -574,9 +608,17 @@ class Plan:
         self.conflicts = []      # refuse to write
         self.warnings = []       # reported, nothing changed
         self.present = 0
+        self.per_table = {}      # logical name -> {"new": bool, "add": n, "present": n}
 
-    def add(self, text, fn):
+    def add(self, text, fn, table=None):
         self.actions.append((text, fn))
+        if table:
+            self.per_table.setdefault(table, {"new": False, "add": 0, "present": 0})["add"] += 1
+
+    def have(self, table=None):
+        self.present += 1
+        if table:
+            self.per_table.setdefault(table, {"new": False, "add": 0, "present": 0})["present"] += 1
 
 
 def build_plan(api, m, ctx):
@@ -628,7 +670,9 @@ def build_plan(api, m, ctx):
         ln = t["schemaName"].lower()
         cols = t.get("columns", [])
         states[ln] = fetch_table(api, ln, choices=any(c["type"] == "choice" for c in cols),
-                                 lookups=any(c["type"] == "lookup" for c in cols))
+                                 lookups=any(c["type"] == "lookup" for c in cols),
+                                 booleans=any(c["type"] == "boolean" for c in cols))
+        p.per_table[ln] = {"new": states[ln] is None, "add": 0, "present": 0}
     target_exists = {}
     for t in m["tables"]:
         for c in t.get("columns", []):
@@ -644,14 +688,16 @@ def build_plan(api, m, ctx):
                 api.post("EntityDefinitions", table_body(t, lcid), solution=sol_name)
                 SLEEP(3)          # let the new table's metadata commit before its first column
             p.add("+ table %s (%s, primary name %s)" % (t["schemaName"], t.get("ownership", "organization"),
-                                                       t["primaryName"]["schemaName"]), mk_table)
+                                                       t["primaryName"]["schemaName"]), mk_table, ln)
         else:
-            p.present += 1
+            p.have(ln)
             pn = t["primaryName"]["schemaName"].lower()
             if pn not in st["attrs"]:
                 p.conflicts.append("%s exists but has no column %s; the primary name is fixed at creation - "
                                    "match the live primary name in the manifest" % (ln, pn))
         for c in t.get("columns", []):
+            if st:
+                reserved_live(p, ln, st, c)
             if c["type"] == "lookup":
                 continue
             cl = c["schemaName"].lower()
@@ -660,11 +706,24 @@ def build_plan(api, m, ctx):
                 desc = c["type"]
                 if c["type"] == "choice":
                     desc += ", %d options %d..%d" % (len(c["options"]), base, base + len(c["options"]) - 1)
+                elif c["type"] == "boolean":
+                    desc += ", default %s" % ("Yes" if c.get("default") else "No")
+                    if "default" not in c:
+                        p.warnings.append("%s.%s has no \"default\" in the manifest: every new row will read No. "
+                                          "Set \"default\": true or false to make it a decision" % (ln, c["schemaName"]))
                 p.add("+ column %s.%s (%s)" % (ln, c["schemaName"], desc),
                       lambda ln=ln, c=c: api.post("EntityDefinitions(LogicalName='%s')/Attributes" % ln,
-                                                  attribute_body(c, base, lcid), solution=sol_name))
+                                                  attribute_body(c, base, lcid), solution=sol_name), ln)
                 continue
-            p.present += 1
+            if cl in st["of"]:
+                continue          # reserved_live has reported it as a conflict
+            p.have(ln)
+            if c["type"] == "boolean" and cl in st["defaults"] and have == TYPES["boolean"] \
+                    and st["defaults"][cl] is not None and bool(st["defaults"][cl]) != bool(c.get("default")):
+                p.warnings.append("%s.%s defaults to %s live and %s in the manifest - not changed (set it with a "
+                                  "full attribute PUT; rows that exist keep their value)"
+                                  % (ln, cl, "Yes" if st["defaults"][cl] else "No",
+                                     "Yes" if c.get("default") else "No"))
             if have != TYPES[c["type"]]:
                 p.conflicts.append("%s.%s exists as %s; the manifest says %s (%s). Dataverse cannot change a "
                                    "column's type - add a new column instead" % (ln, cl, have, c["type"],
@@ -675,7 +734,7 @@ def build_plan(api, m, ctx):
                 for i, lab in enumerate(c["options"]):
                     v = base + i
                     if v in live:
-                        p.present += 1
+                        p.have(ln)
                         if live[v] != lab:
                             p.warnings.append("%s.%s option %d is '%s' live and '%s' in the manifest - not changed "
                                               "(options are append-only)" % (ln, cl, v, live[v], lab))
@@ -683,7 +742,7 @@ def build_plan(api, m, ctx):
                     p.add("+ option %s.%s %d '%s'" % (ln, cl, v, lab),
                           lambda ln=ln, cl=cl, v=v, lab=lab: api.post("InsertOptionValue", {
                               "EntityLogicalName": ln, "AttributeLogicalName": cl, "Value": v,
-                              "Label": label(lab, lcid), "SolutionUniqueName": sol_name}))
+                              "Label": label(lab, lcid), "SolutionUniqueName": sol_name}), ln)
                 extra = sorted(v for v in live if not base <= v < base + len(c["options"]))
                 if extra:
                     p.warnings.append("%s.%s has live option value(s) %s that the manifest does not list - left "
@@ -698,7 +757,9 @@ def build_plan(api, m, ctx):
             cl, tg = c["schemaName"].lower(), c["target"]
             have = st["attrs"].get(cl) if st else None
             if have is not None:
-                p.present += 1
+                if cl in st["of"]:
+                    continue      # reserved_live has reported it as a conflict
+                p.have(ln)
                 if have != "LookupType":
                     p.conflicts.append("%s.%s exists as %s, not a lookup" % (ln, cl, have))
                 elif tg not in st["targets"].get(cl, [tg]):
@@ -712,8 +773,26 @@ def build_plan(api, m, ctx):
             rel = relationship_name(m["publisher"]["prefix"], t["schemaName"], c["schemaName"])
             p.add("+ lookup %s.%s -> %s (relationship %s)" % (ln, cl, tg, rel),
                   lambda t=t, c=c: api.post("RelationshipDefinitions", relationship_body(m, t, c, lcid),
-                                            solution=sol_name))
+                                            solution=sol_name), ln)
     return p
+
+
+def reserved_live(p, ln, st, c):
+    """Conflicts the manifest alone cannot see, read from the live table: a manifest column whose name
+    is a virtual companion of a live column (<lookup>name beside a lookup created outside this
+    manifest), and a new lookup, choice or yes/no column whose companion name a live column already
+    holds. Either one fails the create with 0x80047013 "attribute ... already exists"."""
+    cl = c["schemaName"].lower()
+    if cl in st["of"]:
+        p.conflicts.append("%s.%s is the name Dataverse reserves for %s's virtual column (it exists live as "
+                           "%s's companion) - rename the manifest column" % (ln, cl, st["of"][cl], st["of"][cl]))
+        return
+    if cl in st["attrs"]:
+        return
+    for suffix in reserved_suffixes(c["type"]):
+        if cl + suffix in st["attrs"] and cl + suffix not in st["of"]:
+            p.conflicts.append("%s.%s: a live column %s%s already holds the name Dataverse reserves for this %s's "
+                               "virtual %s column - rename one of them" % (ln, cl, cl, suffix, c["type"], suffix))
 
 
 # --------------------------------------------------------------------------- shared references
@@ -859,6 +938,10 @@ def run(argv):
         if not p.actions:
             print("  none - every publisher, solution, table, column, option and lookup is present")
         print("  (%d item(s) already present and left as they are)" % p.present)
+        print()
+        print("Per table (table, columns, options and lookups):")
+        for ln, k in p.per_table.items():
+            print("  %-40s %s, %d to add, %d present" % (ln, "NEW" if k["new"] else "exists", k["add"], k["present"]))
         for w in p.warnings:
             print("  ! " + w)
         for c in p.conflicts:
@@ -919,7 +1002,8 @@ SELFTEST_MANIFEST = {
     "tables": [
         {"schemaName": "abc_category", "displayName": "Category", "displayCollectionName": "Categories",
          "primaryName": {"schemaName": "abc_name", "displayName": "Name", "maxLength": 100},
-         "columns": [{"schemaName": "abc_active", "displayName": "Active", "type": "boolean"}]},
+         "columns": [{"schemaName": "abc_active", "displayName": "Active", "type": "boolean", "default": True},
+                     {"schemaName": "abc_icon", "displayName": "Icon", "type": "file", "maxSizeInKB": 1024}]},
         {"schemaName": "abc_request", "displayName": "Request", "displayCollectionName": "Requests",
          "description": "A request someone raised.", "hasNotes": True, "ownership": "user",
          "primaryName": {"schemaName": "abc_title", "displayName": "Title", "maxLength": 200},
@@ -944,6 +1028,7 @@ class FakeDataverse:
         self.calls = []
         self.drop = set()            # column logical names whose create is "accepted" but never lands
         self.flaky = set()           # metadata paths that answer 400 once (the post-create race)
+        self.sql40197 = set()        # paths that answer 500 with SQL error 40197 once (rolled back)
         self.publishes = 0
         owner = self.add_solution("core_shared", self.add_publisher("corepublisher", "core", 20000))
         self.add_entity("core_person", owner, {"core_name": "StringType"})
@@ -986,6 +1071,11 @@ class FakeDataverse:
         if method == "POST" and p in self.flaky:
             self.flaky.discard(p)
             return 400, {"error": {"message": "metadata not yet committed"}}
+        if method == "POST" and p in self.sql40197:
+            self.sql40197.discard(p)
+            return 500, {"error": {"message": "Sql error: Generic SQL error. CRM ErrorCode: -2147204784 Sql "
+                                              "ErrorCode: -2146232060 Sql Number: 40197 The service has "
+                                              "encountered an error processing your request. Please try again."}}
         if method == "GET":
             q = re.search(r"uniquename eq '([^']*)'", p)
             if p.startswith("publishers?"):
@@ -1006,7 +1096,7 @@ class FakeDataverse:
             if p.startswith("EntityDefinitions?"):
                 return 200, {"value": [{"LogicalName": k, "MetadataId": e["id"]} for k, e in self.entities.items()]}
             mt = re.match(r"EntityDefinitions\(LogicalName='([^']+)'\)(/Attributes/Microsoft\.Dynamics\.CRM\."
-                          r"(Picklist|Lookup)AttributeMetadata)?", p)
+                          r"(Picklist|Lookup|Boolean)AttributeMetadata)?", p)
             if mt:
                 e = self.entities.get(mt.group(1))
                 if e is None:
@@ -1015,12 +1105,15 @@ class FakeDataverse:
                     return 200, {"value": [{"LogicalName": k, "OptionSet": {"Options": [
                         {"Value": v, "Label": {"UserLocalizedLabel": {"Label": l}}} for v, l in a["options"].items()]}}
                         for k, a in e["attrs"].items() if a["type"] == "PicklistType"]}
+                if mt.group(3) == "Boolean":
+                    return 200, {"value": [{"LogicalName": k, "DefaultValue": a.get("default")}
+                                           for k, a in e["attrs"].items() if a["type"] == "BooleanType"]}
                 if mt.group(3) == "Lookup":
                     return 200, {"value": [{"LogicalName": k, "Targets": a["targets"]}
                                            for k, a in e["attrs"].items() if a["type"] == "LookupType"]}
                 return 200, {"LogicalName": mt.group(1), "MetadataId": e["id"],
-                             "Attributes": [{"LogicalName": k, "AttributeTypeName": {"Value": a["type"]}}
-                                            for k, a in e["attrs"].items()]}
+                             "Attributes": [{"LogicalName": k, "AttributeTypeName": {"Value": a["type"]},
+                                             "AttributeOf": a.get("of")} for k, a in e["attrs"].items()]}
             return 404, {"error": {"message": "no route " + p}}
         # writes
         if p == "publishers":
@@ -1041,6 +1134,9 @@ class FakeDataverse:
             if list(body)[0] != "@odata.type" or not sol:
                 return 400, {"error": {"message": "0x80040216 An unexpected error occurred"}}
             cl = body["SchemaName"].lower()
+            if cl in self.entities[mt.group(1)]["attrs"]:
+                return 400, {"error": {"message": "0x80047013 An attribute with the specified name %s already "
+                                                  "exists" % cl}}
             if cl in self.drop:
                 return 204, None
             ty = {"StringAttributeMetadata": "StringType", "MemoAttributeMetadata": "MemoType",
@@ -1051,14 +1147,21 @@ class FakeDataverse:
             a = {"type": ty, "options": {}, "targets": []}
             if ty == "PicklistType":
                 a["options"] = {o["Value"]: label_of(o["Label"]) for o in body["OptionSet"]["Options"]}
+            if ty == "BooleanType":
+                a["default"] = body.get("DefaultValue", False)
             self.entities[mt.group(1)]["attrs"][cl] = a
             return 204, None
         if p == "RelationshipDefinitions":
             ref, tgt = body["ReferencingEntity"], body["ReferencedEntity"]
             if tgt not in self.entities:
                 return 400, {"error": {"message": "referenced entity does not exist"}}
-            self.entities[ref]["attrs"][body["Lookup"]["SchemaName"].lower()] = {
-                "type": "LookupType", "options": {}, "targets": [tgt]}
+            lk = body["Lookup"]["SchemaName"].lower()
+            if lk + "name" in self.entities[ref]["attrs"]:   # the platform adds <lookup>name itself
+                return 400, {"error": {"message": "0x80047013 An attribute with the specified name %sname "
+                                                  "already exists" % lk}}
+            self.entities[ref]["attrs"][lk] = {"type": "LookupType", "options": {}, "targets": [tgt]}
+            self.entities[ref]["attrs"][lk + "name"] = {"type": "StringType", "options": {}, "targets": [],
+                                                       "of": lk}
             if sol:   # the platform's side effect: the target joins the solution WITH its schema
                 self.include(sol, self.entities[tgt]["id"])
             return 204, None
@@ -1192,6 +1295,12 @@ def selftest():
                 {"schemaName": "abc_categoryname", "displayName": "Category Name", "type": "string"}),
             "two columns with one display name": lambda m: m["tables"][1]["columns"].append(
                 {"schemaName": "abc_status2", "displayName": "Status", "type": "string"}),
+            "a column on a lookup's reserved yominame companion": lambda m: m["tables"][1]["columns"].append(
+                {"schemaName": "abc_categoryyominame", "displayName": "Category Yomi", "type": "string"}),
+            "a primary name on a lookup's reserved name companion": lambda m: m["tables"][1]["primaryName"].update(
+                schemaName="abc_categoryname"),
+            "a boolean default that is not true or false": lambda m: m["tables"][0]["columns"][0].update(
+                default="yes"),
         }
         for name, mutate in bad_cases.items():
             m = copy.deepcopy(base)
@@ -1228,10 +1337,21 @@ def selftest():
                                      "+ lookup abc_request.abc_requester -> core_person")))
         check("plan says the shared table will be turned into a reference", "core_person" in out
               and "reference" in out)
+        check("plan lists a file column and a yes/no column with its default",
+              "+ column abc_category.abc_icon (file)" in out and "+ column abc_category.abc_active (boolean, default Yes)" in out)
+        m = copy.deepcopy(base)
+        m["tables"][0]["columns"][0].pop("default")
+        rc, out2 = go(m, org, "--plan")
+        check("a yes/no column without a default is planned with a warning, not refused",
+              rc == 0 and "has no \"default\" in the manifest: every new row will read No" in out2)
+        check("plan reports counts per table",
+              re.search(r"abc_category\s+NEW, 3 to add, 0 present", out) is not None
+              and re.search(r"abc_request\s+NEW, 8 to add, 0 present", out) is not None)
         check("the token is never printed", "fixture-token" not in out)
 
         # --- apply
         fake.flaky.add("EntityDefinitions(LogicalName='abc_request')/Attributes")
+        fake.sql40197.add("EntityDefinitions")
         n0 = len(fake.calls)
         rc, out = go(base, org)
         check("apply exits 0 with DEPLOYED AND READ BACK", rc == 0 and "DEPLOYED AND READ BACK" in out)
@@ -1246,6 +1366,9 @@ def selftest():
         check("lookups created with their targets", req.get("abc_category", {}).get("targets") == ["abc_category"]
               and req.get("abc_requester", {}).get("targets") == ["core_person"])
         check("the post-create 400 on a column is retried, not fatal", rc == 0 and not fake.flaky)
+        check("a 500 with SQL error 40197 on a table create is retried, not fatal", rc == 0 and not fake.sql40197)
+        check("a yes/no column is created with the manifest's default",
+              fake.entities.get("abc_category", {"attrs": {}})["attrs"].get("abc_active", {}).get("default") is True)
         check("customizations published once", fake.publishes == 1)
         sid = fake.sol_id("abc_requests")
         beh = {c["objectid"]: c["behavior"] for c in fake.components if c["solutionid"] == sid}
@@ -1265,6 +1388,41 @@ def selftest():
         rc, out = go(base, org)
         check("re-run exits 0 and writes nothing", rc == 0 and not writes(fake, n1)
               and "Changes (0)" in out and fake.publishes == 1)
+        check("re-run reports every table as present, nothing to add",
+              re.search(r"abc_category\s+exists, 0 to add, 3 present", out) is not None
+              and re.search(r"abc_request\s+exists, 0 to add, 11 present", out) is not None)
+
+        # --- a live yes/no default that differs is reported, never written
+        m_def = copy.deepcopy(base)
+        m_def["tables"][0]["columns"][0]["default"] = False
+        n_def = len(fake.calls)
+        rc, out = go(m_def, org, "--plan")
+        check("a differing live yes/no default is a warning, not a write",
+              rc == 0 and "abc_category.abc_active defaults to Yes live and No in the manifest" in out
+              and not writes(fake, n_def))
+
+        # --- reserved names the manifest alone cannot see, read from the live table
+        m_res = copy.deepcopy(base)
+        del m_res["tables"][1]["columns"][5]           # the lookup now exists live only
+        m_res["tables"][1]["columns"].append({"schemaName": "abc_categoryname", "displayName": "Category Label",
+                                              "type": "string"})
+        n_res = len(fake.calls)
+        rc, out = go(m_res, org)
+        check("a new column on a live lookup's <lookup>name is a CONFLICT, nothing written",
+              rc == 1 and "CONFLICT abc_request.abc_categoryname is the name Dataverse reserves for abc_category" in out
+              and not writes(fake, n_res))
+        fake.entities["abc_request"]["attrs"]["abc_ownername"] = {"type": "StringType", "options": {}, "targets": []}
+        m_own = copy.deepcopy(base)
+        m_own["tables"][1]["columns"].append({"schemaName": "abc_owner", "displayName": "Owner", "type": "lookup",
+                                              "target": "abc_category"})
+        n_own = len(fake.calls)
+        rc, out = go(m_own, org)
+        check("a new lookup whose <lookup>name a live column holds is a CONFLICT, nothing written",
+              rc == 1 and "a live column abc_ownername already holds the name" in out and not writes(fake, n_own))
+        m_own["tables"][1]["columns"][-1]["schemaName"] = "abc_ownercategory"
+        rc, out = go(m_own, org)
+        check("the renamed lookup deploys clean beside the live column",
+              rc == 0 and fake.entities["abc_request"]["attrs"].get("abc_ownercategory", {}).get("type") == "LookupType")
 
         # --- choice append
         m2 = copy.deepcopy(base)

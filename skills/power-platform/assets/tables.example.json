@@ -17,7 +17,7 @@
       "primaryName": { "schemaName": "abc_name", "displayName": "Name", "maxLength": 100 },
       "columns": [
         { "schemaName": "abc_code", "displayName": "Code", "type": "string", "maxLength": 10 },
-        { "schemaName": "abc_active", "displayName": "Active", "type": "boolean" }
+        { "schemaName": "abc_active", "displayName": "Active", "type": "boolean", "default": true }
       ]
     },
     {
@@ -53,7 +53,7 @@
       "columns": [
         { "schemaName": "abc_request", "displayName": "Request", "type": "lookup", "target": "abc_request" },
         { "schemaName": "abc_body", "displayName": "Comment", "type": "memotext", "maxLength": 10000 },
-        { "schemaName": "abc_internal", "displayName": "Internal Only", "type": "boolean" }
+        { "schemaName": "abc_internal", "displayName": "Internal Only", "type": "boolean", "default": false }
       ]
     }
   ]

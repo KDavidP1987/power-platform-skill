@@ -206,8 +206,10 @@ import **overwrites**. Three consequences, each paid for:
   carries with `RemoveSolutionComponent` (which unlinks, never deletes data). The payloads are not
   symmetric - see `dataverse-web-api.md`, section 10.
 - **Check membership after you build lookups.** A lookup created into a shared table adds that table
-  to your solution with every subcomponent (behavior 0), silently. Query `solutioncomponents` for
-  `componenttype 1` and `rootcomponentbehavior`, and expect 1 for every table you do not own.
+  to your solution with every subcomponent (behavior 0), silently - and so does a script that
+  re-ensures existing lookups on every run. Query `solutioncomponents` for `componenttype 1` and
+  `rootcomponentbehavior`, and expect 1 for every table you do not own, after **every** schema
+  deploy (`shared-environments.md`, section 2).
 
 Around any import that touches shared tables:
 
@@ -568,8 +570,11 @@ python scripts/deploy-tables.py --manifest tables.json --org https://<org>.crm.d
 ```
 
 **Plan first, every time.** `--plan` issues GET requests only and prints every publisher, solution,
-table, column, choice option and lookup it would create, the shared tables it would turn into
-references, and any conflict. Show the person the plan before the apply. Without `--plan` it runs,
+table, column (file columns included), choice option and lookup it would create, a count per table
+of what is new and what is already there, the shared tables it would turn into references, and any
+conflict. Show the person the plan before the apply. Before a production deploy the plan is the
+proof that it is additive: one plan listed 424 components ahead of a deploy and showed nothing would
+be changed or removed. Without `--plan` it runs,
 in order: publisher, solution, tables (the primary name column inside the create), scalar columns,
 appended choice options, lookups once every table exists, `PublishAllXml`, shared tables as
 references, then a read-back. The token comes from `--token-env`, `--token-cmd` or the Azure CLI, as
@@ -595,9 +600,22 @@ What it holds to, and why:
   the publisher prefix, is removed and added back with `DoNotIncludeSubcomponents`, then checked for
   `rootcomponentbehavior` 1.
 - **Manifest errors are refused before any call** (exit 2): an unknown type, a name without the
-  prefix, duplicate tables, columns or display names, a column on a reserved `<lookup>name` or
-  `<table>id`, a mixed-case lookup, an empty choice, a `sharedTables` pattern that matches the
-  manifest's own table.
+  prefix, duplicate tables, columns or display names, a column on a reserved `<lookup>name`,
+  `<lookup>yominame` or `<table>id`, a yes/no column without `"default"`, a mixed-case lookup, an
+  empty choice, a `sharedTables` pattern that matches the manifest's own table.
+- **Reserved names are checked against live too.** A lookup creates a hidden `<lookup>name`
+  attribute, so a text column `app_scenarioname` beside lookup `app_scenario` fails the create with
+  `0x80047013` "attribute ... already exists" - in either order. One manifest held four such pairs;
+  the fix is to rename one side (`app_scenariolabel`), on that table only: other tables may own the
+  name legitimately, and a bulk rename hit them. The plan reports a conflict when the manifest names a
+  column after a live lookup's companion, or adds a lookup whose companion name a live column holds.
+- **Yes/No columns carry an explicit default.** A Boolean column without `DefaultValue` makes every
+  new row read No, which nobody notices until a filter on `= true` comes back empty. The manifest
+  needs `"default": true` or `false`; a live default that differs is reported, never changed. Rows
+  that already exist get no default either way (section 10).
+- **SQL error 40197 is retried.** A table create can fail with HTTP 500 and SQL 40197 "The service
+  has encountered an error processing your request. Please try again"; the create is rolled back and
+  a re-run succeeds, so the tool retries it like a throttle.
 
 **What a green run proves**, and what it does not. Exit 0 means every table, column (with its type),
 choice option and lookup target in the manifest was read back live after the apply, and every shared
