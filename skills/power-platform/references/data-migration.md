@@ -117,6 +117,11 @@ What "migrate the history" means is a measurement, not an assumption.
   harmless for a picker, but data later keyed by number arrives as unattributed amounts, not as an
   error. Load one row per business key with the name as a non-unique label, count source rows against
   loaded rows, and explain every gap.
+- **Recount every accepted gap from live data before reporting it.** An open-items list taken from
+  the load's own findings said 5 contracts lacked dates (file cells holding several dates); the
+  same rule run against the live table found 47 active contracts with no end date. A load's issue list
+  describes the file; the report describes the table. Run each accepted gap as a query on the
+  environment, and keep the rule list in one place that the report and any in-app check both read.
 - **Never rename or reformat a natural key after seeding** - every consumer's backfill matches on it.
 - **Never match with `contains()`.** A `contains(name,'X')` filter overwrote the wrong record during a
   live migration; the verification pass caught it.

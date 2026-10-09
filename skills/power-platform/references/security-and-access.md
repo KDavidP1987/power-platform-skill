@@ -169,6 +169,26 @@ emailed about, and showed the addressee nothing.
 - **Share outside any notification branch**, so turning notification channels off cannot remove
   access.
 - **Verify with `RetrieveSharedPrincipalsAndAccess` and impersonation**, not by reading the flow.
+  For "the approver sees nothing", start from the row: `RetrievePrincipalAccess` for that user on it
+  (an answer of `None` means no role, owner or share reaches them), then
+  `RetrieveSharedPrincipalsAndAccess` on the row. Both together named a share flow that never ran in
+  minutes.
+- **The share mask follows what the person will do.** Read alone lets them see the row; Write lets
+  them change plain columns; a save that sets a LOOKUP on the row (Approve writing "Decision By")
+  also needs `AppendAccess` on the row and AppendTo on the target table. With Read and Write only,
+  every approval by a non-admin failed and the app showed its generic error. Grant
+  `ReadAccess, WriteAccess, AppendAccess, AppendToAccess` to whoever edits, and re-grant existing
+  shares after changing the mask. Prove it in seconds on a throwaway row by impersonation: the Web
+  API header `CallerObjectId: <the user's Entra object id>` (or `MSCRMCallerID` with the systemuser
+  id, section 3) answers 403 "does not have AppendAccess right(s)" before the fix and 204 after,
+  without that user's sign-in.
+- **Sharing a parent does not share its children** unless the 1:N relationship cascades Share and
+  Unshare - and children created AFTER the share need Reparent = Cascade too. With user-owned
+  child lines at Basic depth, an approver opened the shared header and saw no lines. Set Share,
+  Unshare and Reparent to Cascade on the relationship (a metadata update; leave Assign at NoCascade
+  so the relationship stays configurable rather than parental), then GrantAccess the existing
+  parents again so the cascade reaches their children. When a flow shares a parent, check its child
+  relationships' cascade in the same change (`dataverse.md`, section 12).
 - **Costs:** every share writes a principal-object-access row, and until the flow runs the addressee
   sees nothing. Do not paper over that with Org-level read - not even as a "temporary" placeholder.
 - **"My team" when hierarchy security does not fit.** Manager hierarchy security follows the Entra

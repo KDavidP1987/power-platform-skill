@@ -801,6 +801,27 @@ function checkUpdateFilter(t, add) {
     `whose change means "do the work" (subscriptionRequest/filteringattributes), and keep a trigger condition as well.`);
 }
 
+// An Update-only trigger (message 3) that waits for a state never sees a row CREATED in that state: a
+// canvas Patch(T, Defaults(T), {Status: Submitted}) is one Create. A flow that locked, shared and
+// notified on submit never ran for any first submission; approvers saw empty queues while rows
+// submitted after a save worked, so it hid behind mixed results. Message 4 (Create or Update) covers it,
+// and the flow's own write-back is an Update, so its loop guard still applies.
+function checkCreateInState(t, add) {
+  if (!t.isDataverse || Number(t.message) !== 3) return;
+  const filtered = new Set(String(t.filtering || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean));
+  for (const c of t.conditions || []) {
+    const src = String((c && c.expression) || '');
+    for (const m of src.matchAll(/equals\(\s*triggerOutputs\(\)\?\['body\/([A-Za-z0-9_]+)'\]\s*,\s*([^,)]+?)\s*\)/g)) {
+      if (/not\(\s*$/.test(src.slice(0, m.index))) continue;
+      if (filtered.size && !filtered.has(m[1].toLowerCase())) continue;
+      add('warn', 'update-only-state-trigger', `trigger '${t.tname}' starts only on an UPDATE of ${t.table} that leaves ${m[1]} = ${m[2]}. ` +
+        `A row CREATED already in that state (an app Patch(T, Defaults(T), {...}) that sets it, an import) is one Create and never starts it. ` +
+        `If anything can create the row in this state, use message 4 (Create or Update); the flow's own write-back is an Update, so its guard still applies.`);
+      return;
+    }
+  }
+}
+
 // --require-safe-recipients: every address a message can go to is the output of a Compose named
 // Safe_to_<x>, built as if(outputs('Is_live'), <real>, outputs('Allowlist')) (or '' for a
 // channel), and no HTTP action exists (it can reach anything). "In test, only the allowlist is
@@ -854,6 +875,7 @@ export function lint(flows, { entitySets = null, dateOnly = null, safeRecipients
     checkRuntimeSource(flow, t, add);
     checkMessageCode(t, add);
     checkUpdateFilter(t, add);
+    checkCreateInState(t, add);
     checkSelfWrite(flow, t, add);
     if (safeRecipients) checkSafeRecipients(flow, add);
     checkApostrophes(flow, add);
@@ -1053,6 +1075,11 @@ function selftest() {
   // The bad fixture fires on Delete, so the unfiltered-Update rule is proven on a guard fixture.
   const unf = lint([guardFixture('unfiltered', { wrap: ifYes({ not: { equals: ["@triggerOutputs()?['body/app_locked']", true] } }) })]).results[0].items.some((i) => i.code === 'update-trigger-unfiltered');
   if (!unf) graphFails.push('update-trigger-unfiltered: not raised on an Update trigger without filteringattributes');
+  // A state trigger on Update only: warned; on Create or Update, or with the state negated, not.
+  const inState = (message, conditions) => lint([graphFlow('state', { message, filtering: 'app_state', conditions, actions: {} })]).results[0].items.some((i) => i.code === 'update-only-state-trigger');
+  if (!inState(3, STATE_IS(2))) graphFails.push('update-only-state-trigger: not raised on message 3 waiting for app_state = 2');
+  if (inState(4, STATE_IS(2))) graphFails.push('update-only-state-trigger: raised on message 4 (Create or Update)');
+  if (inState(3, [{ expression: "@not(equals(triggerOutputs()?['body/app_state'], 2))" }])) graphFails.push('update-only-state-trigger: raised on a negated state test');
   {
     const os = process.env.TEMP || process.env.TMPDIR || '/tmp';
     const wd = fs.mkdtempSync(path.join(os, 'lint-rec-'));

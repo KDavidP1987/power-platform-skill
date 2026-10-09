@@ -149,6 +149,19 @@ to Update" did the opposite. **Prove it from a run**: the trigger payload carrie
 1 = user, 2 = business unit, 3 = parent-child BU, 4 = organisation. Old notes written before the
 codes were understood will say otherwise; trust the run payload.
 
+**A state trigger must cover Create when the row can be created already in that state.** An
+Update trigger (message 3) waiting for `Status = Submitted` never fires for a row whose first write
+already sets Submitted: a canvas `Patch(T, Defaults(T), {Status: Submitted})` is one Create. A flow
+that locked the row, shared it with the approver and notified them never ran for any first
+submission; drafts saved first and submitted later worked, so approvers' empty queues hid behind
+mixed results (15 records stuck, 13 approvers blind). Message 4 (Create or Update) fixed it, and the
+flow's own write-back is an Update, so its loop guard still stopped the second run. Pair each
+Update-only state trigger with the app's `Patch(Defaults(...))` writes of that column;
+`lint-flows.mjs` warns on an Update-only trigger whose condition waits for a state
+(`update-only-state-trigger`). Diagnose "the approver cannot see it" from the row, not the flow:
+`RetrievePrincipalAccess` as that user, then `RetrieveSharedPrincipalsAndAccess` on the row
+(`security-and-access.md`, section 7).
+
 **An update payload carries only what changed for the attributes you read** - anything else reads
 null, and `@{null}` interpolates to `""`, which fails conversion on a date or lookup. **Retrieve the
 row (`GetItem`) and read fields from that.** A delete payload carries little more than the id, so a

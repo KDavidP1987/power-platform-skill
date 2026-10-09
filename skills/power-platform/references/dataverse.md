@@ -464,7 +464,10 @@ often more than one row.
 - **Restrict into a shared table stops every app deleting those rows** - which is why shared rows are
   deactivated, not deleted. Record it in the shared change log, and count inbound Restrict links
   before planning any delete of a shared row.
-- **Sharing a parent does not share its children** unless the relationship's share cascade says so.
+- **Sharing a parent does not share its children** unless the relationship's share cascade says so:
+  Share and Unshare = Cascade for the rows that exist, and Reparent = Cascade for children created
+  after the share. Existing parents need a fresh GrantAccess once the cascade is set
+  (`security-and-access.md`, section 7).
 - Audit and log tables should denormalize their subject (whose record, which week), so the trail
   survives the record's deletion.
 
