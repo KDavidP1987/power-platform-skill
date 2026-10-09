@@ -20,7 +20,9 @@ Tokens (assets/templates/theme.json): "colours" maps clrPrimary, clrAccent, clrT
 clrBorder, clrCanvas, clrSurface, clrSuccess, clrWarning, clrError, clrOnPrimary to {"rgba": [r, g,
 b, a]} or "#rrggbb". Optional "dataColors": a list of hex colours for series, in order; without it
 the series colours start from clrPrimary and clrAccent and continue with a fixed professional set
-(blue, teal, slate, amber, green). Optional "typography.fntBody" picks the font family.
+(blue, teal, slate, amber, green). Optional "typography.fntBody" picks the font family. Callout,
+title and header use the family's Semibold face only where Power BI has one (Segoe UI); any other
+family keeps its plain face, because a made-up face such as "Arial Semibold" falls back silently.
 
 Checks (any failure stops the run with exit 1 and writes nothing):
   - no purple, violet, indigo or magenta in any colour (hue 255-335 degrees with visible saturation)
@@ -46,6 +48,10 @@ REQUIRED = ["clrPrimary", "clrAccent", "clrText", "clrTextMuted", "clrBorder", "
             "clrSuccess", "clrWarning", "clrError", "clrOnPrimary"]
 # Series colours after the brand pair: blue, teal, slate, amber, green, steel, rust, sea.
 FALLBACK_SERIES = ["#2563EB", "#0F766E", "#475569", "#B45309", "#15803D", "#0369A1", "#B91C1C", "#0E7490"]
+# Heavier faces Power BI really has, by family. A face that is not on the service's list (for
+# example "Arial Semibold") is not refused: text silently falls back to the default font. So a
+# family missing here keeps its plain face in every class, and weight comes from size instead.
+SEMIBOLD_FACE = {"Segoe UI": "Segoe UI Semibold"}
 REPORT_VERSION = {"visual": "1.8.95", "report": "2.0.95", "page": "1.3.95"}
 
 
@@ -116,6 +122,7 @@ def build(tokens, name):
         raise CheckFailed("; ".join(problems))
     font = str(((tokens.get("typography") or {}).get("fntBody") or "Segoe UI"))
     font = font.replace("Font.", "").strip("'\" ") or "Segoe UI"
+    strong = SEMIBOLD_FACE.get(font, font)
     solid = lambda h: {"solid": {"color": h}}  # noqa: E731
     return {
         "name": name,
@@ -124,9 +131,9 @@ def build(tokens, name):
         "good": c["clrSuccess"], "neutral": c["clrWarning"], "bad": c["clrError"],
         "maximum": c["clrPrimary"], "center": c["clrBorder"], "minimum": c["clrSurface"],
         "textClasses": {
-            "callout": {"fontSize": 28, "fontFace": font + " Semibold", "color": c["clrText"]},
-            "title": {"fontSize": 13, "fontFace": font + " Semibold", "color": c["clrText"]},
-            "header": {"fontSize": 12, "fontFace": font + " Semibold", "color": c["clrText"]},
+            "callout": {"fontSize": 28, "fontFace": strong, "color": c["clrText"]},
+            "title": {"fontSize": 13, "fontFace": strong, "color": c["clrText"]},
+            "header": {"fontSize": 12, "fontFace": strong, "color": c["clrText"]},
             "label": {"fontSize": 10, "fontFace": font, "color": c["clrTextMuted"]},
         },
         "visualStyles": {
@@ -140,7 +147,7 @@ def build(tokens, name):
             "page": {"*": {"background": [{"color": solid(c["clrCanvas"]), "transparency": 0}],
                            "outspace": [{"color": solid(c["clrCanvas"])}]}},
             "tableEx": {"*": {"columnHeaders": [{"fontColor": solid(c["clrText"]), "backColor": solid(c["clrCanvas"]),
-                                                 "fontFamily": font + " Semibold"}],
+                                                 "fontFamily": strong}],
                               "values": [{"fontColor": solid(c["clrText"]), "backColor": solid(c["clrSurface"]),
                                           "backColorSecondary": solid(c["clrCanvas"])}]}},
         },
@@ -257,6 +264,14 @@ def selftest():
         check("a good palette builds a theme", rc == 0 and th["dataColors"][0] == "#005493")
         check("no default purple in the series", not any(is_purple(x) for x in th["dataColors"]))
         check("font taken from the tokens", th["textClasses"]["label"]["fontFace"] == "Segoe UI")
+        check("Segoe UI headings use the real Semibold face",
+              th["textClasses"]["title"]["fontFace"] == "Segoe UI Semibold")
+        arial = json.loads(json.dumps(good))
+        arial["typography"]["fntBody"] = "Font.Arial"
+        rc, out = go("--tokens", tok(arial))
+        faces = [v["fontFace"] for v in json.loads(out)["textClasses"].values()] +             [json.loads(out)["visualStyles"]["tableEx"]["*"]["columnHeaders"][0]["fontFamily"]]
+        check("Arial is never given a made-up 'Arial Semibold' face",
+              rc == 0 and set(faces) == {"Arial"} and "Semibold" not in out)
         check("the fallback series has no purple", not any(is_purple(x) for x in FALLBACK_SERIES))
         check("the default Power BI purple is detected", is_purple("#744EC2") and is_purple("#B845A7")
               and not is_purple("#118DFF") and not is_purple("#0F766E"))
