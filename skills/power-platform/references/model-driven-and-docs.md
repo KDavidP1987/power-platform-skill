@@ -48,23 +48,40 @@ A field control is one line:
 </cell>
 ```
 
-The `classid` depends on the column type. The values one project used successfully (platform
-constants; **verify each against a form exported from your own environment before relying on it**):
+The `classid` depends on the column type. These are platform constants, checked against the
+forms of system tables (account, contact) and of custom tables in one environment, and against
+Microsoft's form XML control list:
 
 | Column type | classid |
 |---|---|
 | single-line text | `{4273EDBD-AC1D-40d3-9FB2-095C621B552D}` |
 | multi-line text (memo) | `{E0DECE4B-6FC8-4a8f-A065-082708572369}` |
-| whole number | `{C6D124CA-7EDA-4a60-AA9D-787E6A8D8C7B}` |
-| decimal | `{0D2C745A-E5A8-4c8f-BA63-C6D3BB604660}` |
+| whole number | `{C6D124CA-7EDA-4a60-AEA9-7FB8D318B68F}` |
+| decimal | `{C3EFE0C3-0EC6-42be-8349-CBD9079DFD8E}` |
+| floating point | `{0D2C745A-E5A8-4c8f-BA63-C6D3BB604660}` |
 | currency | `{533B9E00-756B-4312-95A0-DC888637AC78}` |
 | date and time | `{5B773807-9FB2-42db-97C3-7A91EFF8ADFF}` |
 | Yes/No | `{67FAC785-CD58-4f9f-ABB3-4B7DDC6ED5ED}` |
 | choice | `{3EF39988-22BB-4f0b-BBBE-64B5A3748AEE}` |
 | lookup | `{270BD3DB-D9AF-4782-9025-509E298DEC0A}` |
 
-The cheapest way to check: export the solution, find a form with a column of that type, and copy
-its `classid`.
+An earlier version of this table gave a wrong id for whole number and the floating-point id for
+decimal. Two habits keep that from recurring:
+
+- **Read the map from the environment rather than a table.** `GET systemforms?$filter=type eq 2
+  and (objecttypecode eq 'account' or objecttypecode eq 'contact')&$select=objecttypecode,formxml`,
+  take each `<control datafieldname=... classid=...>`, and join `datafieldname` to the table's
+  `Attributes` (`AttributeTypeName`). Every type that appears on a system form gets its classid from
+  the platform itself; a type that disagrees with the table above is the one to distrust.
+- **A file column has no entry.** No form in a measured environment showed one, so its classid could
+  not be read from a form. Add a file column to a form in the maker portal once, then read that form,
+  before scripting it.
+
+**Read-only fields on a scripted form.** For a calculated or system-maintained value, put
+`disabled="true"` on the `<control>`: the form shows the lock and blocks typing. Cells in a
+two-column section read **row-wise** (left, right, then the next row), so when the form mirrors a
+paper form, order the field list as left/right pairs; a list in reading order down one column comes
+out interleaved.
 
 **A subgrid turns a parent form into a hub** where related rows are edited in context:
 
@@ -379,6 +396,40 @@ None of these change because the app is model-driven:
   project's solution, or a later export ships without them (`alm-pipelines.md`).
 - **Forms by script, append-only** (section 1), and every form and view in the dependency register.
 
+### Creating the app module by script
+
+The order that worked: find or create the app module, find or create its sitemap, `AddAppComponents`
+(the sitemap, each table, its forms and its public views), `ValidateApp`, set the header theme, then
+one `PublishXml` naming the web resource, the app module and the sitemap. Three traps:
+
+- **A new app module is unpublished, and a plain query does not return it.** `GET appmodules?$filter=
+  uniquename eq 'app_backoffice'` finds only published apps; until the first publish the module is
+  visible only through `GET appmodules/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()`. An
+  idempotent script must look in both, or a re-run after a failure before the publish creates a
+  second app with the same name.
+- **Sitemap ids are identifiers.** `Area`, `Group` and `SubArea` `Id` values must match the schema
+  type `CRM_Identifier_SiteMap` - letters, digits and underscores, no spaces - so derive them from the
+  label by keeping only letters and digits (`grp_referencedata`, not `grp_Reference Data`).
+- **A new app gets the platform's default purple header.** Theme each app, not the environment:
+  the app setting `CustomThemeDefinition` points one app at an XML web resource, and the
+  environment's other apps keep theirs. This skill's no-purple rule makes it part of every app it
+  builds. Create or update the web resource (`webresourcetype` 4, XML, content base64):
+
+  ```xml
+  <CustomTheme>
+    <AppHeaderColors background="#1E3A5F" foreground="#FFFFFF" backgroundHover="#2B4C7E"
+      foregroundHover="#FFFFFF" backgroundPressed="#0F6CBD" foregroundPressed="#FFFFFF"
+      backgroundSelected="#0F6CBD" foregroundSelected="#FFFFFF" />
+  </CustomTheme>
+  ```
+
+  then read `settingdefinitions?$filter=uniquename eq 'CustomThemeDefinition'` for its id, and
+  create (or `PATCH` with `If-Match: *`) the `appsettings` row: `value` = the web resource's name,
+  `parentappmoduleid@odata.bind` = `/appmodules(<app id>)`, `settingdefinitionid@odata.bind` =
+  `/settingdefinitions(<id>)`, a `uniquename` with your prefix. Publish the web resource with the
+  app. Take the colours from the project's design standard; check the header in the browser after a
+  cache clear (below).
+
 ### Microsoft's app builder (not measured here)
 
 Microsoft's official `model-apps` plugin (`microsoft/power-platform-skills`) builds a whole
@@ -406,6 +457,15 @@ Dataverse. What differs:
   `&pagetype=entityrecord&etn=app_order&id=<row id>` for one record, or
   `&pagetype=entityrecord&etn=app_order` for a new one. Read the app id from the `appmodules` table
   (`appmoduleid`, filtered by `uniquename`).
+- **Add nothing else to the URL.** An unknown query parameter on `main.aspx` - a cache-buster such
+  as `&v=2` - returns the generic "An error has occurred" page, which reads like a broken app.
+- **Clear the metadata cache before judging a change.** Unified Interface caches form, sitemap and
+  app metadata in the browser (IndexedDB and Cache Storage for the org's origin), so a published
+  change can stay invisible in a profile that has opened the app before. Clear the origin's storage
+  (in Playwright, delete every `indexedDB.databases()` entry and every `caches.keys()` entry on the
+  org's page, then reload) before checking a form, sitemap or theme change.
+- **Subgrids do not render on an unsaved record.** A related-rows section on a new form is empty
+  until the parent is saved; that is the platform, not a defect. Check subgrids on a saved record.
 - **No player iframe.** Unlike a canvas app, list and form controls are in the page itself;
   generative pages and embedded canvas or Power BI content are in frames of their own.
 - **Wait for the form, not the page.** The shell renders before the record loads. Wait for a named

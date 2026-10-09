@@ -54,6 +54,15 @@ from PowerShell or Python. What to build and why is in `dataverse.md`; who may r
   (still read back to verify; section 3).
 - Keep a tiny read-only query helper in every repo (`dv-query`) that resolves entity set names from
   metadata. It settles "what does the data actually say" instead of inferring it from a seed script.
+- **For a Python loader, start from the bundled client rather than hand-rolling one.**
+  `scripts/_ppapi.py` is standard library only: `dataverse(org, token, read_only=...)` gives the OData
+  headers and formatted values, percent-encodes the URL while keeping OData syntax
+  (`quote(url, safe=":/?&=$,()'@.%-_~*+;!")`), follows `@odata.nextLink`, honours `Retry-After` on
+  429, and refuses writes structurally in plan mode. The two hand-rolled failures it avoids: `urllib`
+  rejects an OData URL with an unencoded space ("URL can't contain control characters"), and Windows
+  PowerShell 5.1 `Invoke-RestMethod` mangled metadata casts
+  (`/Microsoft.Dynamics.CRM.PicklistAttributeMetadata`). Take the token from `dv-token.ps1` through
+  `--token-cmd`, as the bundled scripts do.
 
 ## 2. Names: entity sets, navigation properties, logical vs schema names
 
@@ -190,6 +199,7 @@ these was observed and cleared on retry:
 | "IsGlobal is not specified" | Binding a choice column before its global set has committed |
 | "NavigationPropertyName ... is not unique" | Recreating a relationship just deleted |
 | Read-back says the attribute does not exist; a renamed label reads old | Verifying immediately (labels change only after publish) |
+| HTTP 500, SQL error 40197 "The service has encountered an error processing your request. Please try again" | A table create; the create was rolled back and a re-run succeeded |
 | 429 `0x80071151` "Cannot start another [EntityCustomization]" | Another customization holds the org-wide lock: a solution import, or a new Power Pages site still provisioning. It lasts minutes - give it its own budget (20 s x 13 in `deploy-tables.py`), not the few seconds an ordinary 429 gets |
 
 Retry **only** these, with bounded backoff and a publish between attempts, and rethrow everything

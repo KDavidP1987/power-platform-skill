@@ -57,6 +57,15 @@ distinction is the whole of this section.
   `AddSolutionComponent` and `DoNotIncludeSubcomponents = true` - a reference without the schema -
   and remove any full copies (`RemoveSolutionComponent` unlinks; it never deletes the table or its
   data). The Web API shape of `RemoveSolutionComponent` is unusual; see `dataverse.md`.
+- **Every schema deploy runs the re-reference check, not only the first.** Re-creating or
+  re-ensuring a lookup into a shared table with the solution header pulls that table back in with
+  its whole schema. One project's own deploy script re-ensured every lookup on each run; adding a
+  single column put six shared tables back into the app's solution as full copies, undoing an
+  earlier clean-up, and only a dependency audit run later showed it. `scripts/deploy-tables.py` turns
+  such tables back into references after its lookups and fails its read-back if any still carries
+  schema (`dataverse.md`, section 16), so prefer it over a hand-rolled script. Whatever deploys the
+  schema, finish with its `--plan`: a `~ reference <table>` line means a shared table carries schema
+  again, and the next apply fixes it.
 - **Create a shared column in the owner's solution, never the consumer's.** When a consuming app's
   migration adds a column to a shared table, it passes the shared solution's unique name
   (`MSCRM.SolutionUniqueName`) so the column lands there. One project's provisioning script had its
