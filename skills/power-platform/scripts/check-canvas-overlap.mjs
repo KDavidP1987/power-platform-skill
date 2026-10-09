@@ -40,7 +40,8 @@
 //   node check-canvas-overlap.mjs --hook           PostToolUse hook: file path from stdin JSON
 //   node check-canvas-overlap.mjs --selftest
 //
-// Exit: 0 clean, 1 findings (errors; warnings too with --warnings-fail), 2 nothing examined.
+// Exit: 0 clean, 1 findings (errors; warnings too with --warnings-fail), 2 nothing examined, or a
+// screen file with under half its drawn controls resolved (errors anywhere still exit 1 first).
 // The rules and their history: references/canvas-layout.md, sections 4 and 7.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -221,7 +222,7 @@ export function show(n) {
 
 export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) {
   const findings = [];
-  const stats = { files: 0, controls: 0, compared: 0, resolved: 0, skipped: 0, skipReasons: {}, skippedControls: [], alwaysHidden: 0, pairs: 0, exempt: { exclusive: 0, modal: 0, linked: 0, clickpad: 0 }, exempted: [] };
+  const stats = { files: 0, controls: 0, compared: 0, resolved: 0, skipped: 0, skipReasons: {}, skippedControls: [], perFile: {}, alwaysHidden: 0, pairs: 0, exempt: { exclusive: 0, modal: 0, linked: 0, clickpad: 0 }, exempted: [] };
   const appFile = files.find((f) => /(^|[\\/])App\.pa\.yaml$/i.test(f.path));
   const appText = appFile ? appFile.text : '';
   const consts = evalFormulaConstants(appText, readConstants(appText), screenWidth, screenHeight);
@@ -362,6 +363,8 @@ export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) 
     let inAuto = false;
     for (let p = c.parent; p && p.control !== 'Screen'; p = p.parent) if ((CONTAINER.test(p.control)) && isAuto(p)) inAuto = true;
     stats.compared++;
+    const pf = stats.perFile[c.file] || (stats.perFile[c.file] = { compared: 0, resolved: 0 });
+    pf.compared++;
     // Visible: own AND every ancestor's.
     const terms = [];
     for (let p = c; p && p.control !== 'Screen'; p = p.parent) {
@@ -391,6 +394,7 @@ export function analyse(files, { screenWidth = 1366, screenHeight = 768 } = {}) 
     }
     if (c.skip) { stats.skipped++; stats.skipReasons[c.skip] = (stats.skipReasons[c.skip] || 0) + 1; stats.skippedControls.push({ name: c.name, file: c.file, line: c.line, why: c.skip }); continue; }
     stats.resolved++;
+    pf.resolved++;
     boxes.push(c);
   }
 
@@ -530,6 +534,12 @@ function collect(paths) {
   }
   return out;
 }
+// Screens the check mostly could not read. A whole-app share hides a new screen at 0 of 113 among
+// screens that resolve, and "0 errors" then reads as a pass for the one screen just written.
+export function thinFiles(stats) {
+  return Object.entries(stats.perFile).filter(([, n]) => n.compared && n.resolved * 2 < n.compared)
+    .map(([file, n]) => ({ file, ...n }));
+}
 function report(res, json, explain = false) {
   if (json) { console.log(JSON.stringify(res, null, 2)); return; }
   const { findings, stats } = res;
@@ -541,6 +551,7 @@ function report(res, json, explain = false) {
   for (const k of stats.skippedControls) console.log(`    ${k.name}  ${k.file ? path.basename(k.file) : ''}${k.line ? ':' + k.line : ''}  (${k.why})`);
   if (explain) { console.log('\nExempted pairs (audit these: an exemption that hides a real overlap is a bug in this check):'); stats.exempted.forEach((x) => console.log('  ' + x)); }
   console.log(`${findings.filter((f) => f.level === 'error').length} error(s), ${findings.filter((f) => f.level === 'warn').length} warning(s). A skipped control was NOT checked; the published app is the authority (canvas-browser.mjs overlapcheck / deadclick).`);
+  for (const t of thinFiles(stats)) console.log(`!! ${path.basename(t.file)}: only ${t.resolved} of ${t.compared} drawn control(s) resolved - this screen was NOT checked (exit 2 unless there are errors).`);
   if (stats.compared && stats.resolved * 2 < stats.compared) console.log(`\n!! WARNING: only ${stats.resolved} of ${stats.compared} drawn controls were resolved - most of this app was NOT checked, whatever the error count says. Make the skipped geometry resolvable (layout constants in App.Formulas) before trusting a clean result.`);
 }
 function hookMode() {
@@ -647,8 +658,16 @@ function selftest() {
   // The floor: unresolvable geometry is counted, not passed silently.
   const r = analyse([{ path: 's.pa.yaml', text: scr(L('lblA', { X: '=Rand() * 10' })) }]);
   if (r.stats.resolved !== 0 || r.stats.skipped !== 1 || r.stats.skippedControls.length !== 1) fails.push('an unresolvable X must be counted as skipped and named');
+  // The per-file floor: one unreadable screen among readable ones is named, so the run does not pass
+  // on the screen just written (a 113-control screen at 0 resolved once read as "0 errors").
+  const rt = analyse([{ path: 'App.pa.yaml', text: APP }, { path: 'good.pa.yaml', text: scr(L('lblA'), B('btnB', { Y: '=200' }), L('lblC', { Y: '=300' })) },
+    { path: 'new.pa.yaml', text: scr(L('lblN', { X: '=Rand() * 10' }), L('lblM', { X: '=Rand() * 20', Y: '=200' })) }]);
+  const thin = thinFiles(rt.stats);
+  if (rt.stats.resolved * 2 < rt.stats.compared || thin.length !== 1 || thin[0].file !== 'new.pa.yaml') fails.push(`per-file floor: expected new.pa.yaml alone under half, got [${thin.map((t) => t.file).join(', ')}]`);
+  const rh = analyse([{ path: 'App.pa.yaml', text: APP }, { path: 'half.pa.yaml', text: scr(L('lblA'), L('lblN', { X: '=Rand() * 10', Y: '=200' })) }]);
+  if (thinFiles(rh.stats).length) fails.push('per-file floor: exactly half resolved is not under half');
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} layouts decided as expected (overlaps, exclusive conditions, modal (clickable backdrops too), card and row backgrounds, text over a clickable shape, click pad, empty state, gallery rows, edges), layout constants after a comment, and the skip floor`
+  console.log(ok ? `selftest ok: ${CASES.length} layouts decided as expected (overlaps, exclusive conditions, modal (clickable backdrops too), card and row backgrounds, text over a clickable shape, click pad, empty state, gallery rows, edges), layout constants after a comment, the skip floor and the per-file floor`
     : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }
@@ -670,6 +689,9 @@ if (isMain) {
     report(res, argv.includes('--json'), argv.includes('--explain'));
     if (res.stats.resolved === 0) { console.error('No control geometry was resolved - this is NOT a pass.'); process.exit(2); }
     const fail = res.findings.some((f) => f.level === 'error' || (argv.includes('--warnings-fail') && f.level === 'warn'));
-    process.exit(fail ? 1 : 0);
+    if (fail) process.exit(1);
+    const thin = thinFiles(res.stats);
+    if (thin.length) { console.error(`${thin.length} screen file(s) had under half their drawn controls resolved - this is NOT a pass for them.`); process.exit(2); }
+    process.exit(0);
   }
 }

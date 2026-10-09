@@ -82,6 +82,17 @@ overlaps at once. Print coverage ("read 353 of 367 controls") every run, surface
 runner, and give coverage its own floor. Report counts even when clean: "0 dead targets across 41
 screens" is evidence; silence is not.
 
+- **Give coverage a floor per file, not only per app.** A new 113-control screen written in fluid
+  geometry (`X: =lyX + n * lyK`) resolved none of its controls, and the overlap check said "0 errors"
+  because the app's other screens kept the whole-app share above half. Both canvas checks now name
+  every screen file with under half its controls resolved (`check-canvas-overlap.mjs`) or its bound
+  text measured (`check-canvas-format.mjs`), and exit 2 - not a pass - unless they found errors.
+- **A rewrite of geometry expressions must leave the skip count where it was.** Converting an app to
+  fluid layout took a project's own geometry audit from 72 skipped controls to 246; its finding
+  count fell, and it passed. Teaching it the layout constants brought the count back. Record the
+  skip count before a restyle or a layout conversion and compare it after: a drop in findings with a
+  rise in skips is the audit going blind, not the app getting better.
+
 **A zero-row read is a broken query, not a clean bill.** Any audit over live rows must treat zero
 rows from a table known to be populated as a failure to read. An API helper that paged on a
 `value` array returned an empty set for a single metadata entity and the check passed; make such
@@ -356,6 +367,7 @@ codebase, and push the fixes back upstream as commits in the source repo, not as
 | geometry | overlaps across `Visible` conditions, gallery children vs row bounds, off-canvas edges, dead click spots | a floor; the browser is the authority (`canvas-layout.md`) |
 | navigation | dead `Navigate` targets, orphan screens, app-wide duplicate control names, nav bar drift | see below |
 | `.pa.yaml` traps | colon-space, comments, Tooltip on Button, file ceiling, block-scalar indentation | run at write time by the hook too |
+| control traps | properties that compile and misbehave: a classic enum on a modern input, spin arrows that do not commit, a dropdown fed a projection, row clicks that reach nothing, two colour tokens with one value | `check-canvas-format.mjs`; `canvas-controls-and-patterns.md` |
 | flows | `lint-flows.mjs` set, plus cross-flow cycles, entity set names, repo vs live on/off state | `power-automate.md` |
 | accessibility | interactive controls with no accessible name; actions only a mouse can reach | derived from source, not from the platform checker; see below |
 | picker bindings | every ComboBox `FieldName` exists on the table its `Items` binds; no partial default records | see below |
@@ -406,7 +418,9 @@ Details that made several of these worth running:
   not in the tab order, so mouse-only; fix B with `TabIndex: =0` plus a visible
   `FocusedBorderThickness` on that control alone. Exempt full-screen dismiss scrims (sized off
   `Parent`, `OnSelect` only closes the dialog): they duplicate the Close button, and a tab stop there
-  is a dead stop in front of every dialog. Do not add an `AccessibleLabel` to a control whose literal
+  is a dead stop in front of every dialog. Exempt a gallery template child whose `OnSelect` is
+  exactly `Select(Parent)` too: it hands the click to the row, and the row itself stays reachable
+  by keyboard (`canvas-controls-and-patterns.md` section 7). Do not add an `AccessibleLabel` to a control whose literal
   `Text` already names it - screen readers announce the name twice. A scripted fix-up derives a
   missing label from `Text`, then the placeholder, then the control name split into words
   (`btnSubmitOrder` -> "Submit order"). These rules took one app from 1,829 checker findings to 12

@@ -142,7 +142,9 @@ and text that wraps in a box that holds one line. Measured in a published player
   used a text-less full-row button declared last in the template successfully, and a text-less
   Subtle-appearance button drawn last over a KPI tile is a deliberate pattern in a fourth. The safe
   default is a visible per-row button ("Open"); if you overlay, give the button a real (even subtle)
-  fill, declare it last, and prove it by clicking it in the published app.
+  fill, declare it last, and prove it by clicking it in the published app. Where the row's own
+  `OnSelect` is used, every template child written in source needs `OnSelect: =Select(Parent)`, or a
+  click on it reaches nothing (`canvas-controls-and-patterns.md` section 7).
 - **A gallery keeps every row in the DOM well past its viewport.** Automation that counts DOM hits
   or compares rectangles is fooled; use `elementFromPoint` and viewport bounds.
 
@@ -303,7 +305,9 @@ but no `Visible` said so - the fix was to write the rule into `Visible`, which m
 - **Read the resolved count before the finding count.** `check-canvas-overlap.mjs` prints how many
   controls it resolved and warns when under half; a run that resolved nothing exits 2. Layout
   constants after a comment in `App.Formulas` were once lost, nothing resolved, and "0 errors" hid
-  real overlaps users could see.
+  real overlaps users could see. The share is also judged per screen file: a new 113-control screen
+  that resolved nothing passed while the rest of the app resolved, so any file under half is named
+  and the run exits 2 unless it found errors (`check-canvas-format.mjs` does the same for bound text).
 - **Check every control against the design surface**, not only against each other: read
   `DocumentLayoutWidth`/`DocumentLayoutHeight` from the live app's `Properties.json` and flag any
   screen-level control extending past it ("runs 775 px past the right edge"). A uniform shift
@@ -511,6 +515,17 @@ Controls read only these: `X: =lyX`, `Width: =lyMainW`, `Height: =If(lyPhone, 58
 
 - **Subtract the scrollbar.** Without the 18 px allowance a scrolling screen showed a horizontal
   scroll bar at every width.
+- **A screen that grows taller than the window needs the same allowance on its own `Width`.** A
+  report or print screen whose `Height` exceeds `App.Height` gets a vertical scrollbar of about 17 px,
+  and a screen `Width` of `App.Width` (or a layout width floored without the allowance) then also
+  scrolls sideways. Three published screens were fixed with:
+
+  ```yaml
+  Width: =If(Self.Height > App.Height, lyW - 18, lyW)
+  ```
+
+  Walk a growing screen at desktop width too, and check for sideways scroll there, not only at phone
+  width (`viewport` step, below).
 - **A phone branch is a second design, not a squeeze.** Rows that hold three facts side by side
   need a taller phone template with the facts stacked (a ranked list's phone rows grew to 104 px; a
   capacity cell's detail went from one line to three). Filter chips on a phone need their own row
@@ -637,6 +652,14 @@ App:
 `check-canvas-format.mjs` reports an app with an `App.Width <` breakpoint and no `MinScreenWidth`
 of 400 or less, and the walk driver measures horizontal scroll after every `viewport` step.
 
+- **Read-only at phone width means values drawn as text, not disabled inputs.** A "read-only on a
+  phone" rule built as disabled inputs still looked editable, and a design review scored the fix
+  unresolved. Showing each value as a label (no box, a hairline rule under it) closed it.
+- **A fixed-width app does not become a phone app by a fix.** A canvas laid out at a fixed 1366
+  showed its left 375 px at 390, with sideways scroll. Meeting a 390 px requirement on such an app is
+  a scoped redesign of the reading screens into computed geometry (above), not a property change;
+  plan and estimate it as one.
+
 ### Verifying a responsive app (either route)
 
 Measure in the **published player** at each size the app claims, by performing the task at that
@@ -709,3 +732,24 @@ App:
   no hover on a phone). Give the row a flexible height or a second line for the name.
 - **One date format across the app**, defined once as a token (`fmtDate = "dd mmm yyyy"`), used by
   every label, gallery and email.
+
+### Restyling an existing app
+
+A restyle (a new palette, a new font, a layout conversion) changes values every screen reads, so
+its faults appear on screens nobody edited. Three measured on one app:
+
+- **A wider font clips text that fitted.** Moving the body face from Lato to Arial clipped text in 4
+  places over about 30 screen states, and only a walk of the published player found them; the static
+  fit model uses one character width for every face. After a font change, run the walk's
+  `clipcheck` over every reachable screen and state, at desktop and phone width.
+- **A layout conversion can blind the geometry checks.** Converting literal geometry to fluid
+  expressions took one project's own geometry audit from 72 skipped controls to 246, and it passed.
+  Record the skipped and unresolved counts of every geometry check before the restyle and show them
+  unchanged after (`audits.md` section 2); the bundled checks fail a screen file under half
+  resolved.
+- **Two tokens mapped to one value erase a distinction.** Mapping a new palette onto the existing
+  token names gave `clrInfo` and `clrAccent` the same value, and two pairs the app told apart by
+  colour (resource or purchase, employee or contractor) became one colour. `check-canvas-format.mjs`
+  warns `same-colour-branches` where an `If` or `Switch` in a colour property chooses between tokens
+  that resolve to the same value. When a new palette has fewer colours than the old token set,
+  decide which distinctions survive before mapping, not after.

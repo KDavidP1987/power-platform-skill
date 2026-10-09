@@ -39,9 +39,9 @@ copying a working control from the same app.
 |---|---|---|
 | Modern Button | `Tooltip` (hard bind error), `Size`, `TabIndex`, `Weight` | `AccessibleLabel`; text scales with `Height`; focusable by default |
 | Modern Button, `Appearance` Secondary | honours `BasePaletteColor` (computed colours identical for two palettes) | switch `Appearance` (Primary honours the palette) to signal state |
-| Modern TextInput | `Default`, `HintText`, `Format`, `Size`, `VerticalAlign`, `DelayOutput` | `Value`, `Placeholder`, read back as `.Value`; `TriggerOutput` (section 2); pad instead of aligning |
-| NumberInput | `Size` | `FontSize` |
-| Modern DropDown | `Tooltip`, `Value`, `DisplayFields` | shape `Items` to one `Value` column |
+| Modern TextInput | `Default`, `HintText`, `Format`, `Size`, `VerticalAlign`, `DelayOutput`; `Mode: =TextMode.MultiLine` compiles and is ignored (one line) | `Value`, `Placeholder`, read back as `.Value`; `TriggerOutput` (section 2); pad instead of aligning; `Mode: ='TextInputCanvas.Mode'.Multiline` |
+| NumberInput | `Size` | `FontSize`; `Step: =0` to remove the spin arrows (section 3) |
+| Modern DropDown | `Tooltip`, `Value`, `DisplayFields` | shape `Items` to one `Value` column with `Distinct()` or a literal `Table`, not a `ForAll` projection (section 6) |
 | Fluent Text | `FontWeight`, `Radius*` | `Weight`, `BorderRadius*` - the way to draw a rounded pill (a classic Rectangle has no radius) |
 | Modern DatePicker | - | `SelectedDate`; the control is `DatePicker`, not `DatePickerCanvas` |
 | ComboBoxDataField | `DisplayName`, `Value` | `FieldName`, `FieldType`, `FieldDisplayName`; the control is not `ComboBoxField` |
@@ -89,6 +89,23 @@ copying a working control from the same app.
   read -> `.Text` - scoped **by control name**, because sibling checkboxes and number inputs
   legitimately keep `.Value`. Add `Clear: =true`. Prove it with real keystrokes, not a fill.
 - **A search test must target a record that is not row 1** - see `browser-verification.md`.
+- **Do not gate a Save button's `DisplayMode` on a modern TextInput.** The box publishes `.Value`
+  when it loses focus, so a button disabled until `Len(Trim(txtUrl.Value)) > 0` is still disabled at
+  the moment a person types and reaches for it (a test that fills without `Tab` sees the same). Keep
+  the button enabled and validate in its `OnSelect`:
+
+  ```
+  If(IsBlank(Trim(txtUrl.Value)),
+     Notify("Enter the link before saving.", NotificationType.Warning),
+     Patch(...))
+  ```
+
+  The click itself blurs the box, so `OnSelect` reads the committed value. This is the form of
+  "a disabled control must say why" (section 15) for inputs.
+- **Multi-line on a modern TextInput is `Mode: ='TextInputCanvas.Mode'.Multiline`.** The classic
+  `TextMode.MultiLine` compiles with no diagnostic and the box renders on one line; it was seen in the
+  player on two screens. `check-canvas-format.mjs` reports `textmode-on-modern-input` (an error, so
+  the write hook refuses it).
 
 ## 3. Inputs: Default, Reset and OnChange
 
@@ -115,6 +132,13 @@ copying a working control from the same app.
   queued `Select(btnLoad)` - the boxes drop back to the old values, and the reload's change is then a
   real change they apply. Opening a different record first hides the bug, so test it by saving a
   change and reading the box, in both directions.
+- **NumberInput spin arrows change the box, not `.Value`.** A click on an arrow moved the display
+  from 38888 to 38889 while `.Value` stayed 38888; Save pressed next wrote 38888 (pressing `Tab`
+  first commits). No property hides the arrows, but `Step: =0` makes the player draw none - one app
+  set it on 67 inputs and a typed save then wrote the typed number. Set `Step: =0` on every amount
+  input; `check-canvas-format.mjs` warns `number-spin-arrows` where it is missing. A browser test of
+  a NumberInput must drive the real mouse on the real control, because a `fill()` never meets the
+  arrows (`browser-verification.md`).
 - **`Reset()` cannot reach a control that is not rendered**, and a control hidden at load never
   applies its Default (section 4).
 - **An input fires `OnChange` when its bound value RESOLVES, not only when a person types.** A
@@ -246,6 +270,12 @@ copying a working control from the same app.
 - **DropDowns over small text collections, resolved back to a record by name in `Patch`**
   (`LookUp(Teams, 'Team Name (app_name)' = ddTeam.Selected.Value)`) sidestep display-column
   ambiguity - but only while names are unique in the target table (section 15).
+- **Feed a modern DropDown `Distinct()` or a literal `Table`, not a `ForAll` projection.** A person
+  picker with `Items: =ForAll(Sort(colRoster, Name) As r, {Value: r.Name})` listed numeric keys
+  (4998, 5009 ...) in the published player, both with the full record and after projecting to one
+  `Value` column. `Sort(Distinct(colRoster, Name), Value)` showed the names and the assignment saved.
+  `check-canvas-format.mjs` warns `dropdown-forall-items`; resolve the pick back to a record by name
+  as above, so the names must be unique.
 - **A DatePicker cannot exclude days.** Where a value must be, say, a week start, offer a dropdown of
   valid dates ("Week beginning 6 Oct 2025") rather than a DatePicker that can only be corrected after
   the fact.
@@ -264,6 +294,27 @@ copying a working control from the same app.
 - **Gallery-level `OnSelect` may not fire on a row click in the player.** Give each row a visible
   "Open" button; the overlay alternative and why transparent buttons fail are in `canvas-layout.md`
   section 3.
+- **A template child written in `.pa.yaml` does not pass its click to the row.** Studio gives a
+  control it inserts into a gallery `OnSelect: =Select(Parent)`; a control written in source has no
+  `OnSelect`, so a click on a row's label did nothing and the gallery's `OnSelect` never ran. Give
+  every label, image and shape in the template that a person can click on `OnSelect: =Select(Parent)`:
+
+  ```yaml
+  - galPeople:
+      Control: Gallery
+      Properties:
+        OnSelect: =Set(locSel, ThisItem)
+      Children:
+        - lblName:
+            Control: Label
+            Properties:
+              Text: =ThisItem.Name
+              OnSelect: =Select(Parent)
+  ```
+
+  `check-canvas-format.mjs` warns `row-click-lost` on a gallery with an `OnSelect` whose template
+  text or shapes have none. An accessibility audit should not flag those children as mouse-only: the
+  row itself stays keyboard-selectable (`audits.md` section 11).
 - **Use `AllItemsCount`** for counts and empty states (`power-fx-and-pa-yaml.md`, section 9).
 - **Guards built on a control's state die with the control.** A duplicate check counting
   `Grid.AllItems` could never fire while the grid was broken (empty AllItems), so it silently allowed
@@ -379,6 +430,21 @@ copying a working control from the same app.
   `OnStart`.** One app's first build ran on sample rows; rebinding to Dataverse projected the live
   tables into the same shapes with no screen edits, isolating choice coercion and lookup navigation
   in one place. The cost: whole-table collection reads that later had to be scoped.
+- **Group once, load once, invalidate on write, never show a part total.** A per-row
+  `Filter(colLines, Key = r.Key)` inside `ForAll(colParents As r, ...)` is O(parents x lines): at 269
+  parents and 3,228 lines a screen took about 3 minutes to open. One `GroupBy` pass over the lines
+  and a `LookUp` per parent did the same work in about a second:
+
+  ```
+  ClearCollect(colByParent, AddColumns(GroupBy(colLines, Key, grp), Total, Sum(grp, Amount)));
+  ClearCollect(colRows, ForAll(colParents As p, {Key: p.Key, Name: p.Name, Total: Coalesce(LookUp(colByParent, Key = p.Key).Total, 0)}))
+  ```
+
+  Pair it with a load-once cache: keep the key it was built for (`Set(gblRowsFor, gblSelectedYear)`)
+  and rebuild only when the key differs, and have every save that touches the lines clear that key,
+  so the next visit rebuilds. While it builds, show a Loading state in place of the figures: a total
+  drawn from half-loaded collections is a wrong number that looks right. The per-cell form of the same
+  cost is in `power-fx-and-pa-yaml.md` section 9.
 - **A "who is missing" list needs its own query.** A not-submitted list computed as roster minus
   whatever the filter bar had loaded made everyone else "missing" when one person was selected. Any
   whole-population question (missing, overdue) issues its own query, independent of the view.
@@ -413,6 +479,24 @@ copying a working control from the same app.
   table, not existing fact rows; skip blank-and-absent cells so Save does not manufacture empty rows;
   guard against a blank period. `ForAll(Table({p: ..., v: ...}, ...) As r, ...)` writes twelve periods
   in one formula.
+- **Recompute derived child rows in place; do not delete and recreate them.** A header's frozen
+  cost grid, month grid or approval rows are recomputed when the header changes. Deleting them and
+  writing new ones loses columns people entered on the children and signatures already given. Load
+  the existing children into a collection, then upsert each key and retire the ones that dropped out:
+
+  ```
+  ClearCollect(colEx, Filter(app_OrderLines, Order.Order = gblOrderId));
+  ForAll(colNew As n,
+    Patch(app_OrderLines,
+          Coalesce(LookUp(colEx, Key = n.Key), Defaults(app_OrderLines)),
+          {Key: n.Key, Amount: n.Amount, Order: gblOrder}));
+  ForAll(Filter(colEx As e, IsBlank(LookUp(colNew, Key = e.Key))) As gone,
+    Patch(app_OrderLines, gone, {Amount: 0}))
+  ```
+
+  Approval rows no longer needed are set to a "Not Required" status rather than removed. The result
+  is idempotent - run it twice and nothing changes - and it keeps entered columns and signed rows.
+  Measured on one build: 18 cost rows and 4 month rows reconciled to the header after a recompute.
 - **`If(cond, Patch(...))` with no else skips silently.** A copy-forward written as
   `If(!IsBlank(target), Patch(...))` skipped every source row without a target (20% of rows) while its
   toast reported the SOURCE count. Add the create branch, and report what was WRITTEN as a
@@ -552,6 +636,10 @@ relying on `DisplayMode`.
   and three breakdowns summed every scenario at once (Budget + Pipeline + Baseline + Forecast on the
   same lines), overstating several-fold. Add a scope selector or a fixed filter, and say the scope in
   the caption.
+- **A rollup by a classification shows what it could not classify.** A computed figure summed lines
+  by their spend class and silently left out the 18 of 171 lines that had none. Any total grouped by
+  a classification shows the remainder beside it ("18 lines unclassified, $X not counted") on the
+  screen that computes it, so a data gap is a visible number and not a quietly smaller total.
 - **An input that does not save must not look editable.** Period cells were editable inputs whose
   edits went only to an in-memory collection and were silently discarded; users cannot tell that from
   a broken save. Until write-back exists, render them read-only.

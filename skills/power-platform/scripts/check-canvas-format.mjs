@@ -50,7 +50,8 @@
 //    function in App.Formulas is where one mask reaches every screen).
 //
 // Exit: 0 clean, 1 findings, 2 nothing examined (no files, no data-bound text control, or none of the
-// bound text measurable) - NOT a pass. Under half measured prints a loud warning.
+// bound text measurable, or a screen file with under half its bound text measured and no errors) -
+// NOT a pass. Under half measured app-wide prints a loud warning. Control traps: see their block.
 // The formula, its error direction and the four remedies: references/canvas-layout.md, "Long text".
 // Names and contrast: references/canvas-layout.md, "Accessible names and contrast".
 import fs from 'node:fs';
@@ -827,6 +828,7 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
     if (!L.data && !literal) continue;
     if (literal && (!Number.isFinite(L.n) || L.n === 0 || /^=?\s*false\s*$/i.test(c.props.Visible?.v || ''))) continue;
     if (!literal) stats.bound++;
+    if (!literal) perFileOf(stats, c.file).bound++;   // per-file floor
     const d = DEFAULTS[/^Text/i.test(c.control) ? 'Text' : 'Label'];
     const val = (k) => { const v = prop(c, k); return v === null || v === undefined ? d[k] ?? null : v; };
     const W = prop(c, 'Width'), H = prop(c, 'Height');
@@ -852,6 +854,7 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
       continue;
     }
     if (literal) stats.literalMeasured++; else stats.measured++;
+    if (!literal) perFileOf(stats, c.file).measured++;   // per-file floor
     const px = size * MODEL.pxPerPt;
     const innerW = W - val('PaddingLeft') - val('PaddingRight');
     const innerH = H - val('PaddingTop') - val('PaddingBottom');
@@ -922,7 +925,7 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
   for (const c of all) if (c.parent) { if (!kids.has(c.parent)) kids.set(c.parent, []); kids.get(c.parent).push(c); }
   const hidden = (c) => /^=?\s*false\s*$/i.test(c.props.Visible?.v || '');
   const labelOf = (c) => { const v = (c.props.AccessibleLabel?.v || '').trim().replace(/^=/, '').trim(); return v && v !== '""' ? v : ''; };
-  const acts = (c) => { const v = (c.props.OnSelect?.v || '').trim().replace(/^=/, '').trim(); return !!v && !/^(false|true|""|0)$/i.test(v); };
+  const acts = (c) => { const v = (c.props.OnSelect?.v || '').trim().replace(/^=/, '').trim(); return !!v && !/^(false|true|""|0)$/i.test(v) && !/^Select\(\s*Parent\s*\)$/i.test(v); };   // Select(Parent) hands the click to the row (control traps)
   const textOf = (c) => { const v = (c.props.Text?.v || '').trim().replace(/^=/, '').trim(); return v && v !== '""' ? v : ''; };
   for (const c of all) {
     if (c.control === 'Screen' || hidden(c)) continue;
@@ -1097,6 +1100,7 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
         `. Ask whether users need to filter, search or group it; the default is a dropdown with "All" per choice column, ` +
         `a search box on the name, a sort, and section headers for categorised data (references/canvas-controls-and-patterns.md, "Lists").` });
   }
+  findings.push(...controlTrapFindings(all, cmap));   // control traps: its own block below
   findings.sort((a, b) => (b.gallery === true) - (a.gallery === true) || a.file.localeCompare(b.file) || a.line - b.line);
   return { findings, stats };
 }
@@ -1151,6 +1155,70 @@ export function vacuity(stats) {
     'Read the "unmeasured" controls (--json) and make their geometry resolvable before trusting a clean result.' };
   return { level: 'ok', msg: '' };
 }
+// ---------- control traps ----------
+// Properties that compile clean and do the wrong thing in the player, each seen in a published app
+// (references/canvas-controls-and-patterns.md, sections 1, 2, 6 and 7; canvas-layout.md, section 10).
+//   textmode-on-modern-input  error  a modern TextInput's Mode: =TextMode.MultiLine is ignored: one line
+//   dropdown-forall-items     warn   a modern DropDown fed ForAll(...) showed numeric keys as options
+//   row-click-lost            warn   a gallery with OnSelect whose template text or shapes have none
+//   number-spin-arrows        warn   a NumberInput without Step: =0 shows arrows that do not commit Value
+//   same-colour-branches      warn   an If/Switch choosing between colour tokens that hold one value
+const MODERN_TEXT_INPUT = /^(TextInput|ModernTextInput)(@|$)/i;
+const MODERN_DROPDOWN = /^(DropDown|Dropdown|ModernDropdown)(@|$)/;
+const NUMBER_INPUT = /^(NumberInput|ModernNumberInput)(@|$)/i;
+const ROW_PASSIVE = /^(Label|Text|Classic\/Label|ModernText|Image|Classic\/Image|Icon|Classic\/Icon|Rectangle|Classic\/Rectangle)(@|$)/i;
+export function controlTrapFindings(all, cmap = new Map()) {
+  const out = [];
+  const pv = (c, k) => String(c.props[k]?.v ?? '').trim();
+  const push = (level, code, c, k, msg) => out.push({ level, code, file: c.file, line: c.props[k]?.line || c.line, control: c.name, msg });
+  for (const c of all) {
+    if (MODERN_TEXT_INPUT.test(c.control) && /\bTextMode\./.test(pv(c, 'Mode'))) {
+      push('error', 'textmode-on-modern-input', c, 'Mode', `${c.name}.Mode uses ${pv(c, 'Mode').slice(0, 40)}, the classic enum: a modern TextInput compiles it and renders one line. ` +
+        `Write Mode: ='TextInputCanvas.Mode'.Multiline (canvas-controls-and-patterns.md, section 2).`);
+    }
+    if (MODERN_DROPDOWN.test(c.control) && /^=?\s*ForAll\s*\(/i.test(pv(c, 'Items'))) {
+      push('warn', 'dropdown-forall-items', c, 'Items', `${c.name}.Items is a ForAll projection; a modern DropDown fed one showed numeric keys instead of the names. ` +
+        `Feed it Sort(Distinct(col, Name), Value) or a literal Table (canvas-controls-and-patterns.md, section 6).`);
+    }
+    if (NUMBER_INPUT.test(c.control) && !/^=\s*0\s*$/.test(pv(c, 'Step'))) {
+      push('warn', 'number-spin-arrows', c, 'Step', `${c.name} shows spin arrows: a click on them changes the box but not .Value, so a Save pressed next writes the old number. ` +
+        `Set Step: =0, which removes the arrows (canvas-controls-and-patterns.md, section 3).`);
+    }
+    if (/^Gallery/i.test(c.control) && pv(c, 'OnSelect') && !/^=?\s*false\s*$/i.test(pv(c, 'OnSelect'))) {
+      const dead = [];
+      const visit = (p) => { for (const k of all) if (k.parent === p) { if (ROW_PASSIVE.test(k.control) && !pv(k, 'OnSelect')) dead.push(k.name); if (!/^Gallery/i.test(k.control)) visit(k); } };
+      visit(c);
+      if (dead.length) push('warn', 'row-click-lost', c, 'OnSelect', `gallery ${c.name} has an OnSelect, but a click on ${dead.slice(0, 4).join(', ')}${dead.length > 4 ? ` and ${dead.length - 4} more` : ''} ` +
+        `reaches nothing: a template child written in .pa.yaml does not pass its click to the row. Give each OnSelect: =Select(Parent) (canvas-controls-and-patterns.md, section 7).`);
+    }
+    for (const [k, v] of Object.entries(c.props)) {
+      const src = String(v?.v ?? '');
+      if (!COLOUR_PROPS.test(k) || !/\b(If|Switch)\s*\(/.test(src) || !cmap.size) continue;
+      const names = [...new Set((src.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []).filter((n) => cmap.has(n)))];
+      const clash = [];
+      for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
+        if (String(cmap.get(names[i])) === String(cmap.get(names[j]))) clash.push(`${names[i]} = ${names[j]}`);
+      }
+      if (clash.length) push('warn', 'same-colour-branches', c, k, `${c.name}.${k} chooses between colour tokens that hold the same value (${clash.join(', ')}), so the distinction it draws is invisible. ` +
+        `Give each role its own value (canvas-layout.md, section 10, "Restyling").`);
+    }
+  }
+  return out;
+}
+// ---------- end control traps ----------
+
+// ---------- per-file floor ----------
+// The whole-app share hides one new screen: a 113-control screen whose fluid geometry resolved for
+// none of its labels sat among screens that measured, and the run read "0 errors". Any screen file
+// with under half its data-bound text measured is named, and the run exits 2 unless it found errors.
+function perFileOf(stats, file) {
+  stats.perFile = stats.perFile || {};
+  return stats.perFile[file] || (stats.perFile[file] = { bound: 0, measured: 0 });
+}
+export function thinMeasuredFiles(stats) {
+  return Object.entries(stats.perFile || {}).filter(([, n]) => n.bound && n.measured * 2 < n.bound).map(([file, n]) => ({ file, ...n }));
+}
+// ---------- end per-file floor ----------
 function report(res, json) {
   const { findings, stats } = res;
   if (json) { console.log(JSON.stringify({ ...res, vacuity: vacuity(stats) }, null, 2)); return; }
@@ -1165,6 +1233,7 @@ function report(res, json) {
   console.log('Room is an estimate that errs toward "does not fit"; confirm a borderline case in the running app.');
   const v = vacuity(stats);
   if (v.level !== 'ok') console.log('\n!! ' + v.msg);
+  for (const t of thinMeasuredFiles(stats)) console.log(`!! ${path.basename(t.file)}: only ${t.measured} of ${t.bound} data-bound text control(s) measured - this screen was NOT checked (exit 2 unless there are errors).`);
 }
 
 // The build-stamp variable is the one the ship writes (canvas-app.json buildStampVariable, default gblBuild).
@@ -1410,10 +1479,49 @@ function selftest() {
   const fmtApp = analyse([{ path: 'App.pa.yaml', text: ['App:', '  Properties:', '    Formulas: |-', '      =fmtPct(x: Number): Text = Text(x, "0%");'].join('\n') }]);
   if (!fmtApp.findings.some((f) => f.code === 'percent-format' && f.line === 4)) fails.push('format string in App.Formulas: expected percent-format on line 4');
 
+  // Per-file floor: a new screen whose fluid geometry measured nothing is named even when the app
+  // as a whole measured most of its text.
+  const pfGood = free([['lblA', 'Label', { X: '=20', Y: '=20', Width: '=300', Height: '=28', Size: '=11', Text: '=gblOrder.Code' }],
+    ['lblB', 'Label', { X: '=20', Y: '=60', Width: '=300', Height: '=28', Size: '=11', Text: '=gblOrder.Name' }],
+    ['lblC', 'Label', { X: '=20', Y: '=100', Width: '=300', Height: '=28', Size: '=11', Text: '=gblOrder.Ref' }]]);
+  const pfNew = free([['lblN', 'Label', { X: '=20', Y: '=20', Width: '=300 * lyQ', Height: '=28', Size: '=11', Text: '=gblOrder.Owner' }]]);
+  const pfRun = analyse([{ path: 'good.pa.yaml', text: pfGood }, { path: 'new.pa.yaml', text: pfNew }]);
+  const pfThin = thinMeasuredFiles(pfRun.stats);
+  if (vacuity(pfRun.stats).level !== 'ok' || pfThin.length !== 1 || pfThin[0].file !== 'new.pa.yaml') fails.push(`per-file floor: expected new.pa.yaml alone under half, got [${pfThin.map((t) => t.file).join(', ')}]`);
+  if (thinMeasuredFiles(analyse([{ path: 'good.pa.yaml', text: pfGood }]).stats).length) fails.push('per-file floor: a fully measured screen is not thin');
+
+  // Control traps: each red on the shape seen in a published app, green on the fix.
+  const trapApp = ['App:', '  Properties:', '    Formulas: |-', '      =clrInfo = RGBA(11, 83, 148, 1);', '      clrAccent = RGBA(11, 83, 148, 1);', '      clrWarn = RGBA(180, 83, 9, 1);'].join('\n');
+  const trap = (name, ctrls, want) => {
+    const r = analyse([{ path: 'App.pa.yaml', text: trapApp }, { path: 't.pa.yaml', text: free(ctrls) }]);
+    const got = [...new Set(r.findings.filter((f) => TRAP_CODES.has(f.code)).map((f) => f.code))].sort();
+    if (JSON.stringify(got) !== JSON.stringify([...want].sort())) fails.push(`trap ${name}: expected [${want.join(', ')}], got [${got.join(', ')}]`);
+  };
+  const TRAP_CODES = new Set(['textmode-on-modern-input', 'dropdown-forall-items', 'row-click-lost', 'number-spin-arrows', 'same-colour-branches']);
+  trap('modern TextInput with TextMode', [['txtStory', 'TextInput', { ...box, Mode: '=TextMode.MultiLine' }]], ['textmode-on-modern-input']);
+  trap('modern TextInput with its own enum', [['txtStory', 'TextInput', { ...box, Mode: "='TextInputCanvas.Mode'.Multiline" }]], []);
+  trap('classic TextInput with TextMode', [['txtStory', 'Classic/TextInput', { ...box, Mode: '=TextMode.MultiLine' }]], []);
+  trap('DropDown over a ForAll projection', [['ddPerson', 'DropDown', { ...box, Items: '=ForAll(Sort(colRoster, Name) As r, {Value: r.Name})' }]], ['dropdown-forall-items']);
+  trap('DropDown over Distinct', [['ddPerson', 'DropDown', { ...box, Items: '=Sort(Distinct(colRoster, Name), Value)' }]], []);
+  trap('NumberInput with arrows', [['numAmount', 'NumberInput', { ...box }]], ['number-spin-arrows']);
+  trap('NumberInput with Step 0', [['numAmount', 'NumberInput', { ...box, Step: '=0' }]], []);
+  trap('colour tokens with one value in an If', [['lblKind', 'Label', { ...box, Text: '="Kind"', Color: '=If(ThisItem.IsResource, clrInfo, clrAccent)' }]], ['same-colour-branches']);
+  trap('colour tokens with two values in an If', [['lblKind', 'Label', { ...box, Text: '="Kind"', Color: '=If(ThisItem.IsResource, clrInfo, clrWarn)' }]], []);
+  const galRow = (child) => ['Screens:', '  scrA:', '    Children:', '      - galPeople:', '          Control: Gallery', '          Variant: Vertical', '          Properties:',
+    '            Items: =colPeople', '            OnSelect: =Set(locSel, ThisItem)', '            X: =0', '            Y: =0', '            Width: =600', '            Height: =400', '            TemplateSize: =40',
+    '          Children:', '            - lblName:', '                Control: Label', '                Properties:', '                  Text: =ThisItem.Name', ...child].join('\n');
+  const rowRun = (child) => analyse([{ path: 'App.pa.yaml', text: trapApp }, { path: 'g.pa.yaml', text: galRow(child) }]).findings.some((f) => f.code === 'row-click-lost');
+  if (!rowRun([]) || rowRun(['                  OnSelect: =Select(Parent)'])) fails.push('trap row-click-lost: red without Select(Parent) on a template label, green with it');
+  // A template image whose only click is Select(Parent) is the row's, not a separate mouse-only target.
+  const imgRow = (click) => analyse([{ path: 'App.pa.yaml', text: trapApp }, { path: 'g.pa.yaml', text: galRow(['                  OnSelect: =Select(Parent)',
+    '            - imgPhoto:', '                Control: Image', '                Properties:', '                  X: =0', '                  Y: =0', '                  Width: =40', '                  Height: =40', '                  OnSelect: ' + click]) }])
+    .findings.some((f) => f.code === 'no-accessible-name' && f.control === 'imgPhoto');
+  if (imgRow('=Select(Parent)') || !imgRow('=Set(locZoom, true)')) fails.push('accessible name: a template image with only Select(Parent) is exempt; one with its own action is not');
+
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 6 literal-fit, 2 vertical-fit, 5 build-stamp, 4 phone-width, ${fmtCases.length + 1} format-string, comment-before-layout and vacuity cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 6 literal-fit, 2 vertical-fit, 5 build-stamp, 4 phone-width, ${fmtCases.length + 1} format-string, comment-before-layout, vacuity, per-file floor and control-trap cases decided as expected`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }
@@ -1449,6 +1557,7 @@ if (isMain) {
     if (vacuity(res.stats).level === 'none') { console.error('No data-bound text control could be measured - this is NOT a pass.'); process.exit(2); }
     if (res.findings.some((f) => f.level === 'error')) process.exit(1);
     if (res.stats.bound === 0) { console.error('No data-bound text control was examined - this is NOT a pass.'); process.exit(2); }
+    if (thinMeasuredFiles(res.stats).length) { console.error('A screen file had under half its data-bound text measured - this is NOT a pass for it.'); process.exit(2); }
     process.exit(res.findings.some((f) => f.level === 'error') ? 1 : 0);
   }
 }
