@@ -88,6 +88,10 @@
       "surface": "studio", "kind": "regex", "pattern": "\\bSaved:[ \\t]*([^\\n]{1,48})", "flags": "i",
       "purpose": "The 'Saved: <time>' line in the Save flyout - the proof a save landed", "check": "required", "lastVerified": "0.1.0"
     },
+    "studio.disconnected": {
+      "surface": "studio", "kind": "regex", "pattern": "There['’]s been a disconnect", "flags": "i",
+      "purpose": "Studio's dialog when its co-authoring connection dropped (left idle after a publish); a push then lands in a session no Studio is attached to", "check": "conditional", "lastVerified": "0.27.1"
+    },
     "studio.publishButton": {
       "surface": "studio", "kind": "css", "value": "button[aria-label^=\"Publish\" i]",
       "purpose": "Command-bar Publish button", "check": "required", "lastVerified": "0.1.0"

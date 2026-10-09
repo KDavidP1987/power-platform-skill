@@ -147,6 +147,25 @@ nothing touch the environment between push and save. Four distinct push failures
 looked like a repeat of the previous one - assuming a repeat sent the diagnosis the wrong way
 twice. Read each failure fresh.
 
+### A scripted restyle: prove it touched no behaviour
+
+A reskin across dozens of screens is safe to script, on top of fresh behaviour work, only when the
+script proves it changed presentation alone. One project's restyle rewrote 1,341 colour lines across
+46 screens and refused to write if any non-presentation line (`On*`, `Items`, `Text`, `Visible`,
+`Default`, ...) came out different. Write the result to a scratch copy and gate on
+`canvas-mcp.py diff <Src> <scratch> --restyle` before copying it back:
+
+- every difference outside presentation properties (fills, colours, borders, radii, padding,
+  position, size, font) fails the gate;
+- a conditional colour whose **branches collapse to one value** fails too: `If(c, clrX, clrX)` or a
+  `Switch` whose results are all the same token, where the source had two. Mapping a palette onto
+  tokens does this silently - the same preview found 14 selected and unselected tab colours that had
+  become one, so the selected state no longer showed.
+
+Controls the restyle adds (a header band, say) are reported as differences; read those by name and
+accept them one by one. A palette mapping itself is project design, not a rule; the guard is what
+makes any mapping shippable.
+
 ## 3. Path A: solution import (preferred for unattended work)
 
 Build the `.msapp` from repo `Src` on top of the **live** manifest, swap it into a solution
@@ -292,15 +311,68 @@ preconditions change.
 ### The order that works
 
 1. Open Studio in edit mode in a driven browser (`canvas-browser.mjs studio`) and wait for the
-   title to read `(Editing)`. **Leave it in the editor, not in Preview.**
+   title to read `(Editing)`. **Leave it in the editor, not in Preview.** If Studio is already
+   open, **reload it immediately before the push** (`studio --reload`): a Studio left idle after a
+   publish drops its co-authoring connection ("There's been a disconnect"), and a held push then
+   reports PUSHED CLEAN into a session no Studio is attached to. Measured: that push was lost; a
+   reload and a re-push two minutes later saved with 0 differences.
 2. `connect`, then `compile_canvas` - pushing a stamped scratch copy (below). Read line 1 and the
    error count (`authoring-sessions.md`, section 2). Keep the session held.
 3. Prove the push reached Studio's client: select a changed control and read the property back in
    the formula bar, or see the new control in the tree.
-4. Click Save (a real click, section 5). Open the Save flyout and read `Saved: <time>`.
-5. Release the held session. **Reload the Studio tab** (accept the `beforeunload` prompt), then
-   Publish. Safe only because step 4 already persisted the push - never reorder.
-6. Confirm the publish from the `canvasapps` record, then the player and its build stamp.
+4. Make Studio dirty if Save is disabled (below), then click Save (a real click, section 5) and read
+   `Saved: <time>` at or after the click.
+5. Release the held session **only after that stamp**. Measured: Save clicked, the hold released
+   about 40 seconds later, and the reload showed the previous build (32 property differences); the
+   same sequence waiting for the stamp saved with 0. `canvas-mcp.py hold` enforces it: a release
+   request waits until `canvas-browser.mjs save` has written its proof file for a save newer than
+   the push (write `saved` into the release file after reading the stamp by eye, or `discard` to
+   drop the push).
+6. **Reload the Studio tab** (accept the `beforeunload` prompt), then Publish. Safe only because
+   step 4 already persisted the push - never reorder.
+7. Confirm the save from a fresh session (`canvas-mcp.py sync <scratch> --diff` after the reload:
+   0 differences), the publish from the `canvasapps` record, then the player and its build stamp.
+
+### Step gates: each step waits for the previous one's result
+
+Never issue the next step in the same batch as the one before it. Measured: Save and Publish ran
+in one tool batch with a compile that failed; nothing had been pushed, Publish re-published the
+previous version and reported success. Another time `studio` failed (the profile was still held by
+the previous ship's browser), the chained compile ran with no session, and save plus publish
+re-published the old app; only a check of the published app caught it.
+
+| Step | Go on only when | Otherwise |
+|---|---|---|
+| `canvas-browser.mjs studio` (or `studio --reload`) | it prints `STUDIO READY` | it exits 3 (read-only, or no edit mode in 3 minutes) or 5 (profile in use): stop, `close-studio`, start again |
+| `canvas-mcp.py hold` | it prints `PUSHED CLEAN ... SESSION HELD` | it exits 1 (no session, errors, unreadable output, server did not start): nothing was pushed - stop; do not save or publish |
+| read-back | the changed property reads the new value in Studio | wrong session or an unapplied push: reload, push again |
+| `dirty` (when Save is disabled) | it exits 0 and says Save is enabled | exit 7: toggle a property the push changed (`dirty --toggle`) |
+| `save` | it prints `SAVE LANDED` with a stamp at or after the click | exit 7 (UNPROVEN, or nothing to save) or 3 (disconnected, read-only): do not release, do not publish |
+| release the hold | it prints `save after the push is proven - releasing` | it keeps holding: the save is not proven |
+| `publish` | its gates pass; then `lastpublishtime` moves | a refusal says why: a push that failed records no hash, so "no clean push since the last publish" means push again |
+
+`publish` records the hash the last **clean** push sent (`last-push.json`, written by `hold`), not the
+source on disk: a publish after a push that never started had recorded the new source, and the next
+real publish was refused as "source unchanged".
+
+### Proving what was saved: an order-independent property diff
+
+`sync_canvas` returns the session, and the server re-orders properties, re-quotes values, folds
+block scalars and writes or drops default values, so a line diff of a synced folder against `Src`
+differs in every file. `canvas-mcp.py diff <a> <b>` compares control by control, property by
+property, ignores the build stamp and default values present on one side only (counted; `--strict`
+lists them), and shows each difference from the first character that differs. After the save:
+reload Studio, then `canvas-mcp.py sync <scratch> --diff`. **0 differences is the proof the saved
+app holds what `Src` holds**; synced inside the session you pushed into, it proves only the session.
+
+**A refused push can leave formulas behind.** A push the compiler refused (6 errors) still left its
+formulas in the session, and the next push, reported clean, did not replace those properties: the
+saved app carried the refused formula at all 6 sites while every other change landed. The symptom
+was a screen whose `OnVisible` silently never ran, with no banner; error badges on the canvas are the
+visible tell. It depends on the property: an **existing** property's refused formula stuck, while a
+**new control's unknown property** (a `Default` on a modern TextInput, which takes `Value`) was
+dropped and never reached the saved app. After any refused push, reload Studio, push the fixed source,
+save, and diff a fresh sync before trusting the clean push; a re-push of the fixed source cleared it.
 
 ### Failure points, each of which reports success
 
@@ -320,6 +392,12 @@ preconditions change.
   confirmed. `second-tab --expect` and `studio-has` read the rendered tree text, which is
   virtualised, so MISSING there is not proof of absence: confirm a push by reading a pushed
   control's property in the formula bar, or by searching the published package.
+  **Save from the tab that has a Save button, not the newest tab.** After a push blanked Studio, the
+  second tab joined and rendered, then went blank too, while the OLDER tab re-rendered with its Save
+  button; a save aimed at the newest tab reported "no Save button" for five minutes. `save`,
+  `publish` and `dirty` scan every Studio tab's authoring frames and use the one holding a Save
+  button (printing each tab's Save count and editor text when there are several); the package
+  published from it carried every marker.
   **A save stamp older than the click is not this save.** `save` records when it clicked and
   compares the flyout's `Saved: <time>` with it: measured, it read a stamp 12 minutes old after a
   click that saved nothing (a clean push had not marked Studio dirty) and printed SAVE LANDED. It
@@ -354,12 +432,20 @@ preconditions change.
   disabled; Ctrl+S saved nothing and Publish republished the previous version, reporting success.
   Make a **no-op edit** (change a property and change it back) so Studio has something to save,
   then Save and Publish. `sync_canvas` into a scratch folder separates the two failures: the
-  session held the new build while the saved app held the old one.
+  session held the new build while the saved app held the old one. **Re-entering the same value is
+  not an edit.** Twice in a row a clean, held push left Save disabled within 2 seconds ("Save with
+  version notes" disabled too), and re-typing a property's value did not mark Studio dirty. Changing
+  one **pushed** property to another value and back (a colour token to another token and back) did,
+  and the Save then persisted the whole pushed state. `canvas-browser.mjs dirty` appends a space and
+  reports whether Save became enabled (exit 7 when not); `dirty --toggle <formula>` switches the
+  selected property to that formula and back through the formula bar and reads the original back
+  before you save. Never toggle through a toolbar dropdown: opening the wrong one wrote a font
+  constant over the app's font token on that control.
 - **Choose the no-op edit's property with care, and check the whole saved app.** A StartScreen
   toggle (screen B, then back to A) saved with only the first change applied: the published app
   opened on the wrong screen while the build stamp was correct. After publishing, download the app
-  and compare `App.pa.yaml` with the source (Studio reorders properties and adds `Theme`; anything
-  else is drift), or make the no-op on a property whose half-applied state is harmless.
+  and compare it with the source (`canvas-mcp.py diff <Src> <download>/Src`, which ignores the
+  re-ordering and the added `Theme`; anything it reports is drift), or make the no-op on a property whose half-applied state is harmless.
 - **A push that deletes controls can crash Studio.** Replacing a placeholder screen removed two
   controls from the screen whose tree Studio had open; three pushes in a row left a white canvas,
   the console error "An error occured while selecting the store state: Cannot read properties of
@@ -411,7 +497,7 @@ one sync client), build in a local temp directory, compile from there, and copy 
 | Question | The only evidence that answers it |
 |---|---|
 | did the push land? | `sync_canvas` right after the compile (or the CDP read-back) |
-| did the save land? | the Save flyout's `Saved: <time>`, then a **fresh** Studio session + `sync_canvas`, or a fresh download after publish |
+| did the save land? | the Save flyout's `Saved: <time>` at or after the click, then a **reloaded** Studio + `canvas-mcp.py sync <scratch> --diff` (0 differences), or a fresh download after publish |
 | did the publish land? | the `canvasapps` row's `lastpublishtime` moved |
 | is it live in the browser? | the player, refreshed, with the build stamp read |
 

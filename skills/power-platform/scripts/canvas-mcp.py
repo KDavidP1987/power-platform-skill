@@ -14,13 +14,25 @@ Why a direct client, when the plugin already exposes the tools:
   - A server left running holds the app's authoring session as YOU, which blocks version restore
     for about 15 minutes. This client always releases it and kills the process tree on exit.
   - `hold` keeps a clean push alive until Studio has saved it, and releases on a sentinel FILE
-    (not stdin), so it works when run in the background.
+    (not stdin), so it works when run in the background. It releases only once a save NEWER than
+    the push is proven (canvas-browser.mjs `save` writes save-proof.json on SAVE LANDED): measured,
+    a release about 40 s after the Save click lost the save. It records the hash it pushed
+    (last-push.json), which `canvas-browser.mjs publish` records instead of the source on disk.
+  - `diff` compares two canvas source folders property by property, order-independently. A line
+    diff of a synced session against Src is useless (the server re-orders properties); this prints
+    only real differences. `sync <scratch> --diff` syncs a FRESH session and diffs it with Src: 0
+    differences is the proof that the save holds what Src holds.
 
 Usage (reads the app identity from scripts/canvas-app.json, or --config <path>):
   python scripts/canvas-mcp.py tools                  # tool names and the argument names they take now
   python scripts/canvas-mcp.py compile                # compile and push canvasSrc to the live session
   python scripts/canvas-mcp.py hold [minutes]         # compile; if clean, hold the session until released
-  python scripts/canvas-mcp.py sync <scratch-dir>     # session -> disk (refuses any folder named Src)
+  python scripts/canvas-mcp.py sync <scratch-dir> [--diff]  # session -> disk (refuses any folder named Src);
+                                                      # --diff then compares it with canvasSrc
+  python scripts/canvas-mcp.py diff <dir> [<dir-b>]    # canvasSrc (or <dir>) vs <dir-b>, property by property;
+                                                      # --behaviour skips presentation properties; --restyle
+                                                      # also flags If/Switch colours whose branches collapsed;
+                                                      # --strict also lists default-valued one-sided properties
   python scripts/canvas-mcp.py sources | controls
   python scripts/canvas-mcp.py schema "<Data Source>"
   python scripts/canvas-mcp.py describe <ControlName>
@@ -30,14 +42,21 @@ Usage (reads the app identity from scripts/canvas-app.json, or --config <path>):
 
 Config keys (canvas-app.json): environmentId, appId, canvasSrc, login (your sign-in, sent as
 login_hint so the server does not show an account picker), optional releaseFile (default
-.ship-work/release-session), optional serverCommand (a list; default the dnx prerelease launch).
+.ship-work/release-session), workDir (.ship-work: last-push.json and save-proof.json live there),
+buildStampVariable (gblBuild; ignored by diff), optional serverCommand (a list; default the dnx launch).
 
-Order that works: open the app in Studio in edit mode and wait for "(Editing)", THEN run hold in the
-background; select a changed control in Studio and read it back; Save; create the release file.
-Exit codes: 0 ok, 1 refused or failed, 2 usage or configuration error.
+Order that works: reload Studio in edit mode and wait for "(Editing)" (`canvas-browser.mjs studio
+--reload`), THEN run hold in the background and wait for its PUSHED CLEAN line; read a changed control
+back in Studio; `canvas-browser.mjs save` (SAVE LANDED); then create the release file. The hold
+releases when save-proof.json is newer than the push. Write "saved" into the release file when you read
+"Saved: <time>" after the push by eye, or "discard" to drop the push without saving.
+Exit codes: 0 ok (diff: no difference), 1 refused, failed or a difference found, 2 usage or configuration.
 """
+import hashlib
 import json
 import os
+import shutil
+import tempfile
 import re
 import subprocess
 import sys
@@ -72,6 +91,216 @@ def parse_compile(txt):
     return errors, no_session, int(validated.group(1))
 
 
+# --------------------------------------------------------------------------- push record, save proof
+
+def src_hash(src_dir):
+    """The canvas source's hash: sha256 over each *.pa.yaml name and bytes, sorted by name. The same
+    algorithm as canvas-browser.mjs srcHash, so publish can compare it with its own log."""
+    if not src_dir or not os.path.isdir(src_dir):
+        return None
+    h = hashlib.sha256()
+    for f in sorted(x for x in os.listdir(src_dir) if x.lower().endswith(".pa.yaml")):
+        h.update(f.encode("utf-8"))
+        with open(os.path.join(src_dir, f), "rb") as fh:
+            h.update(fh.read())
+    return h.hexdigest()
+
+
+def release_verdict(content, proof, push_ms):
+    """What a release request means for a held push: 'discard' (drop it, no save wanted), 'release'
+    (a save newer than the push is proven, by the driver's proof file or by a person writing 'saved'),
+    or 'wait'. Measured: releasing about 40 s after a Save click, before the save landed, lost it."""
+    c = (content or "").strip().lower()
+    if c.startswith("discard"):
+        return "discard"
+    if c.startswith("saved"):
+        return "release"
+    try:
+        if proof and float(proof.get("atMs", 0)) >= push_ms:
+            return "release"
+    except (TypeError, ValueError):
+        pass
+    return "wait"
+
+
+# --------------------------------------------------------------------------- order-independent diff
+# A refused push can leave its formulas in the session, and a later clean push may not replace them
+# (measured: 6 sites of a refused formula saved while every other change landed; the screen's
+# OnVisible silently never ran). The server re-orders properties and re-serialises values, so only a
+# control-by-control, property-by-property compare finds that.
+
+KEY = re.compile(r'^(?P<ind>\s*)(?P<dash>-\s+)?(?P<key>[A-Za-z_][\w.]*|"[^"]*"|\'[^\']*\'):(?:\s+(?P<rest>.*))?$')
+BLOCK = re.compile(r'^[|>][-+]?\d*\s*$')
+# Values the server writes when the source omits them, and drops when the source states a control's
+# default (measured: Height =40, IsSearchable =true, AccessibleLabel ="" gone after a round trip). A
+# property present on one side only, with one of these values, is counted, not reported (--strict lists them).
+SERVER_DEFAULT = re.compile(r'^=(-?\d+(\.\d+)?|true|false|""|RGBA\([^)]*\)|\w+|\w+\.\w+(\.\w+)?)$')
+PRESENTATION_EXACT = {"X", "Y", "Width", "Height", "Size", "FontSize", "Font", "FontWeight", "Image",
+                      "ImagePosition", "BorderThickness", "BorderStyle", "FocusedBorderThickness",
+                      "RadiusTopLeft", "RadiusTopRight", "RadiusBottomLeft", "RadiusBottomRight",
+                      "PaddingTop", "PaddingBottom", "PaddingLeft", "PaddingRight", "DropShadow"}
+
+
+def is_presentation(prop):
+    return prop in PRESENTATION_EXACT or prop.endswith("Fill") or prop.endswith("Color")
+
+
+def _unquote(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+        try:
+            return json.loads(v)
+        except ValueError:
+            return v[1:-1]
+    if len(v) >= 2 and v[0] == "'" and v[-1] == "'":
+        return v[1:-1].replace("''", "'")
+    return v
+
+
+def pa_props(text):
+    """{path: value} for every scalar in a .pa.yaml file. List items ('- lblName:') are keyed by name,
+    so sibling order does not matter; whitespace is collapsed, so serialisation does not either."""
+    out, stack = {}, []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = KEY.match(line)
+        if not m:
+            continue
+        ind = len(m.group("ind")) + (len(m.group("dash")) if m.group("dash") else 0)
+        key = _unquote(m.group("key"))
+        rest = (m.group("rest") or "").strip()
+        while stack and stack[-1][0] >= ind:
+            stack.pop()
+        path = "/".join([k for _, k in stack] + [key])
+        if not rest:
+            stack.append((ind, key))
+            continue
+        if BLOCK.match(rest):
+            body = []
+            while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > ind):
+                body.append(lines[i].strip())
+                i += 1
+            rest = "\n".join(body)
+        else:
+            rest = _unquote(rest)
+        out[path] = re.sub(r"\s+", " ", rest).strip()
+    return out
+
+
+def _args(call):
+    """Top-level arguments of 'Name(a, b, ...)' (strings and nested brackets respected), or None."""
+    m = re.match(r"^\s*=?\s*(If|Switch)\s*\(", call)
+    if not m:
+        return None, None
+    depth, cur, out, q = 0, "", [], None
+    body = call[m.end():]
+    for j, ch in enumerate(body):
+        if q:
+            cur += ch
+            if ch == q:
+                q = None
+            continue
+        if ch in "\"'":
+            q = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                out.append(cur.strip())
+                return m.group(1), (out if not body[j + 1:].strip() else None)
+            depth -= 1
+        elif ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+            continue
+        cur += ch
+    return m.group(1), None
+
+
+def collapsed(value):
+    """True when a whole-formula If/Switch has two or more result branches and all are the same
+    (If(c, clrX, clrX)): a restyle mapped two colours to one token and the state no longer shows."""
+    fn, a = _args(value or "")
+    if not a:
+        return False
+    rest = a if fn == "If" else a[1:]
+    results = rest[1::2] + ([rest[-1]] if len(rest) % 2 else [])
+    norm = [re.sub(r"\s+", "", r) for r in results]
+    return len(norm) >= 2 and len(set(norm)) == 1
+
+
+def strip_stamp(v, var):
+    return re.sub(r'Set\(\s*%s\s*,\s*"[^"]*"\s*\)' % re.escape(var), "", v or "")
+
+
+def around(x, y, width=150):
+    """Both values cut to show where they first differ (a long formula can differ past its 150th character)."""
+    if x is None or y is None:
+        return (x if x is not None else "<none>")[:width], (y if y is not None else "<none>")[:width]
+    i = next((k for k, (p, q) in enumerate(zip(x, y)) if p != q), min(len(x), len(y)))
+    start = max(0, i - 40)
+    cut = lambda v: ("..." if start else "") + v[start:start + width] + ("..." if len(v) > start + width else "")
+    return cut(x), cut(y)
+
+
+def diff_dirs(a_dir, b_dir, behaviour=False, restyle=False, stamp_var="gblBuild", out=print, strict=False):
+    """Compare every .pa.yaml in two folders. Returns (differences, compared files, ignored defaults)."""
+    names = lambda d: {f for f in os.listdir(d) if f.lower().endswith(".pa.yaml") and not f.startswith("_")}
+    na, nb = names(a_dir), names(b_dir)
+    found = ignored = 0
+    for n in sorted(na - nb):
+        out("%s: only in %s" % (n, a_dir))
+        found += 1
+    for n in sorted(nb - na):
+        out("%s: only in %s" % (n, b_dir))
+        found += 1
+    for n in sorted(na & nb):
+        with open(os.path.join(a_dir, n), encoding="utf-8-sig") as f:
+            a = pa_props(f.read())
+        with open(os.path.join(b_dir, n), encoding="utf-8-sig") as f:
+            b = pa_props(f.read())
+        for k in sorted(set(a) | set(b)):
+            x, y = a.get(k), b.get(k)
+            prop = k.rsplit("/", 1)[-1]
+            where = "%s %s" % (n, "/".join(p for p in k.split("/") if p not in ("Children", "Properties"))[-90:])
+            if restyle and is_presentation(prop) and y is not None and collapsed(y) and not collapsed(x):
+                out("%s\n    COLLAPSED: every branch is the same value - the state it showed is gone\n    a: %s\n    b: %s"
+                    % (where, (x or "<none>")[:150], y[:150]))
+                found += 1
+                continue
+            if strip_stamp(x, stamp_var) == strip_stamp(y, stamp_var):
+                continue
+            if not strict and (x is None or y is None) and SERVER_DEFAULT.match(x if y is None else y):
+                ignored += 1
+                continue
+            if (behaviour or restyle) and is_presentation(prop):
+                continue
+            found += 1
+            out("%s\n    a: %s\n    b: %s" % ((where,) + around(x, y)))
+    return found, len(na & nb), ignored
+
+
+def cmd_diff(a_dir, b_dir, flags, stamp_var):
+    for d in (a_dir, b_dir):
+        if not os.path.isdir(d):
+            print("not a folder: %s" % d)
+            return 2
+    found, compared, ignored = diff_dirs(a_dir, b_dir, behaviour="--behaviour" in flags,
+                                         restyle="--restyle" in flags, stamp_var=stamp_var, strict="--strict" in flags)
+    if not compared:
+        print("NOTHING COMPARED - no .pa.yaml file is in both folders. This proves nothing.")
+        return 2
+    print("%d difference(s) in %d file(s) compared%s%s." % (
+        found, compared, " (presentation properties skipped)" if ("--behaviour" in flags or "--restyle" in flags) else "",
+        "; %d server-written default(s) ignored" % ignored if ignored else ""))
+    return 1 if found else 0
+
+
 def selftest():
     cases = [
         ("clean, summary omits Errors", "Files validated: 49\nDiagnostics: 55 total\nWarnings: 55\n", (0, False, 49)),
@@ -86,7 +315,85 @@ def selftest():
         ok = got == want
         bad += not ok
         print("%s  %s  %s" % ("ok  " if ok else "FAIL", name, "" if ok else "got %r want %r" % (got, want)))
-    print("selftest: %d case(s), %d failed" % (len(cases), bad))
+    checks = []
+
+    def check(name, cond):
+        checks.append((name, bool(cond)))
+
+    # The hold releases only after a save newer than the push (or an explicit word).
+    check("release: no proof waits", release_verdict("", None, 1000) == "wait")
+    check("release: proof older than the push waits", release_verdict("", {"atMs": 900}, 1000) == "wait")
+    check("release: proof newer than the push releases", release_verdict("", {"atMs": 1500}, 1000) == "release")
+    check("release: 'saved' (read by eye) releases", release_verdict("saved 10:41", None, 1000) == "release")
+    check("release: 'discard' drops the push", release_verdict("discard\n", {"atMs": 1}, 1000) == "discard")
+
+    # The order-independent diff. Source as written; the session re-ordered, re-serialised, and kept a
+    # refused formula at one site (the measured failure).
+    src = ("Screens:\n  scrMain:\n    Properties:\n      OnVisible: =Set(locRows, GroupBy(colA, Code, Rows))\n"
+           "    Children:\n      - lblTitle:\n          Control: Label@2.1.0\n          Properties:\n"
+           "            Text: =\"Totals: by code\"\n            X: =0\n            Color: =If(locSel, clrPrimary, clrText)\n"
+           "      - btnGo:\n          Control: Button@0.0.45\n          Properties:\n            OnSelect: |-\n"
+           "              =Navigate(scrNext);\n              Notify(\"Go\")\n")
+    sess = ("Screens:\n  scrMain:\n    Children:\n      - btnGo:\n          Control: Button@0.0.45\n          Properties:\n"
+            "            OnSelect: =Navigate(scrNext);  Notify(\"Go\")\n            Visible: =true\n"
+            "      - lblTitle:\n          Control: Label@2.1.0\n          Properties:\n            Color: =If(locSel, clrPrimary, clrText)\n"
+            "            Text: '=\"Totals: by code\"'\n    Properties:\n      OnVisible: =Set(locRows, GroupBy(colA, 'Cost Code', Rows))\n")
+    app_a = "App:\n  Properties:\n    OnStart: |-\n      =Set(gblBuild, \"unshipped\");\n      Set(gblX, 1)\n"
+    app_b = "App:\n  Properties:\n    OnStart: =Set(gblBuild, \"2026-01-15 14:02Z a1b2c3d (push)\"); Set(gblX, 1)\n    Theme: =PowerAppsTheme\n"
+    tmp = tempfile.mkdtemp(prefix="canvas-mcp-selftest-")
+    try:
+        def tree(name, files):
+            d = os.path.join(tmp, name)
+            os.makedirs(d)
+            for n, t in files.items():
+                with open(os.path.join(d, n), "w", encoding="utf-8", newline="\n") as f:
+                    f.write(t)
+            return d
+        quiet = lambda *_: None
+        a = tree("a", {"App.pa.yaml": app_a, "Main.pa.yaml": src})
+        b = tree("b", {"App.pa.yaml": app_b, "Main.pa.yaml": sess, "_EditorState.pa.yaml": "x: 1\n"})
+        found, compared, ignored = diff_dirs(a, b, out=quiet)
+        check("diff: a refused formula left in the session is the one difference (re-order, re-quote, block form, stamp, defaults ignored)",
+              (found, compared) == (1, 2))
+        c = tree("c", {"App.pa.yaml": app_a, "Main.pa.yaml": sess.replace("'Cost Code'", "Code")})
+        check("diff: the fixed session has 0 differences", diff_dirs(a, c, out=quiet)[0] == 0)
+        check("diff: server-written defaults are counted, not reported", ignored >= 2)
+        d = tree("d", {"App.pa.yaml": app_a, "Main.pa.yaml": src.replace("            X: =0\n", "")})
+        check("diff: X =0 dropped by the server is not a difference", diff_dirs(a, d, out=quiet)[0] == 0)
+        e = tree("e", {"App.pa.yaml": app_a, "Main.pa.yaml": src.replace("Control: Button@0.0.45\n          Properties:\n",
+                                                                          "Control: Button@0.0.45\n          Properties:\n            Visible: =false\n")})
+        check("diff: a default-valued property only one side has is counted, not reported", diff_dirs(e, a, out=quiet)[0] == 0)
+        check("diff: --strict reports it", diff_dirs(e, a, out=quiet, strict=True)[0] >= 1)
+        e2 = tree("e2", {"App.pa.yaml": app_a, "Main.pa.yaml": src.replace("Control: Button@0.0.45\n          Properties:\n",
+                                                                            "Control: Button@0.0.45\n          Properties:\n            Visible: =locShowGo && !locBusy\n")})
+        check("diff: a formula only the source has (dropped by a refused push) is a difference", diff_dirs(e2, a, out=quiet)[0] == 1)
+        f = tree("f", {"Main.pa.yaml": src})
+        check("diff: a screen missing on one side is a difference", diff_dirs(a, f, out=quiet)[0] == 1)
+        # Restyle guard: presentation may change; any other property is refused; collapsed branches flagged.
+        g = tree("g", {"App.pa.yaml": app_a, "Main.pa.yaml": src.replace("If(locSel, clrPrimary, clrText)", "If(locSel, clrNavy, clrInk)")})
+        check("restyle: a colour change alone passes the guard", diff_dirs(a, g, restyle=True, out=quiet)[0] == 0)
+        h = tree("h", {"App.pa.yaml": app_a, "Main.pa.yaml": src.replace("If(locSel, clrPrimary, clrText)", "If(locSel, clrInk, clrInk)")})
+        check("restyle: If(c, clrX, clrX) is flagged as collapsed", diff_dirs(a, h, restyle=True, out=quiet)[0] == 1)
+        i = tree("i", {"App.pa.yaml": app_a, "Main.pa.yaml": src.replace("Navigate(scrNext)", "Navigate(scrOther)")})
+        check("restyle: a behaviour line that changed is refused", diff_dirs(a, i, restyle=True, out=quiet)[0] == 1)
+        check("restyle: without --restyle the behaviour filter still sees the colour change skipped",
+              diff_dirs(a, g, behaviour=True, out=quiet)[0] == 0 and diff_dirs(a, g, out=quiet)[0] == 1)
+        check("collapsed: Switch with equal results", collapsed("=Switch(x, 1, clrA, 2, clrA, clrA)"))
+        check("collapsed: Switch with one different result", not collapsed("=Switch(x, 1, clrA, 2, clrB, clrA)"))
+        check("collapsed: strings with commas and brackets", not collapsed('=If(a, "x, (y)", "x, (z)")') and collapsed('=If(a, "x, (y)", "x, (y)")'))
+        check("collapsed: If with no else is not collapsed", not collapsed("=If(a, clrA)"))
+        check("collapsed: an If inside an expression is not judged", not collapsed("=ColorFade(If(a, clrA, clrA), 0.2)"))
+        # The push record hash: same names and bytes, same hash; a change moves it.
+        h1 = src_hash(a)
+        check("push hash: stable", h1 == src_hash(a) and h1 and len(h1) == 64)
+        check("push hash: a changed file moves it", h1 != src_hash(c))
+        check("push hash: no folder", src_hash(os.path.join(tmp, "none")) is None)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    for name, ok in checks:
+        bad += not ok
+        print("%s  %s" % ("ok  " if ok else "FAIL", name))
+    print("selftest: %d case(s), %d failed" % (len(cases) + len(checks), bad))
     return 1 if bad else 0
 
 
@@ -111,6 +418,10 @@ def load_config(argv):
     return cfg, os.path.dirname(os.path.dirname(os.path.abspath(path)))
 
 
+class ServerGone(Exception):
+    """The server process did not start, or exited: nothing was pushed."""
+
+
 class Client(object):
     def __init__(self, cmd):
         # shell=True so dnx resolves through PATH on Windows; the cost is that terminating the shell
@@ -130,12 +441,17 @@ class Client(object):
     def call(self, method, params=None):
         self.n += 1
         i = self.n
-        self.p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params or {}}) + "\n")
-        self.p.stdin.flush()
+        try:
+            self.p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params or {}}) + "\n")
+            self.p.stdin.flush()
+        except OSError as e:
+            # Measured: a server version listed without its platform package exits at once, and the
+            # first write raised OSError 22 with no word about the cause.
+            raise ServerGone(str(e))
         while True:
             line = self.p.stdout.readline()
             if not line:
-                return None
+                raise ServerGone("the server closed its output")
             try:
                 msg = json.loads(line.strip() or "null")
             except ValueError:
@@ -213,27 +529,69 @@ def run(c, action, args, cfg, root):
             print("\nREFUSING TO HOLD - compile reported %d error(s). Nothing valid was pushed; do not save." % errors)
             return 1
         release = os.path.join(root, cfg.get("releaseFile", os.path.join(".ship-work", "release-session")))
+        work = os.path.join(root, cfg.get("workDir", ".ship-work"))
+        proof_file = os.path.join(work, "save-proof.json")
         os.makedirs(os.path.dirname(release), exist_ok=True)
+        os.makedirs(work, exist_ok=True)
         if os.path.exists(release):
             os.remove(release)
-        cap = int(args[0]) * 60 if args else 3600
+        nums = [a for a in args if a.isdigit()]
+        cap = int(nums[0]) * 60 if nums else 3600
+        push_ms = time.time() * 1000
+        # The hash THIS push sent. Publish records it, so a push that failed or never started can never
+        # mark the source as published (measured: the next real publish was then refused as unchanged).
+        pushed = src_hash(os.path.join(root, cfg["canvasSrc"]))
+        with open(os.path.join(work, "last-push.json"), "w", encoding="utf-8") as f:
+            json.dump({"hash": pushed, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "atMs": push_ms, "files": files}, f)
         print("\nPUSHED CLEAN (%d files, 0 errors). SESSION HELD." % files)
         print("  Studio may go white: do not reload it (a reload joins a new session and drops the push).")
-        print("  Read a changed property back in Studio, Save, then create: %s" % release)
+        print("  Read a changed property back in Studio, then `canvas-browser.mjs save` (SAVE LANDED), then create:")
+        print("    %s" % release)
+        print("  The hold releases once a save newer than this push is proven (%s)." % proof_file)
+        print("  Saved by hand? Write 'saved' into the release file after reading 'Saved: <time>'. 'discard' drops the push.")
         print("  Auto-release after %d minutes." % (cap // 60), flush=True)
-        waited = 0
-        while not os.path.exists(release) and waited < cap:
+        waited, told = 0, False
+        while waited < cap:
+            if os.path.exists(release):
+                try:
+                    with open(release, encoding="utf-8") as f:
+                        content = f.read()
+                except OSError:
+                    content = ""
+                try:
+                    with open(proof_file, encoding="utf-8") as f:
+                        proof = json.load(f)
+                except (OSError, ValueError):
+                    proof = None
+                verdict = release_verdict(content, proof, push_ms)
+                if verdict == "release":
+                    print("save after the push is proven - releasing.")
+                    break
+                if verdict == "discard":
+                    print("release file says discard - releasing WITHOUT a proven save. Nothing from this push is saved.")
+                    break
+                if not told:
+                    print("RELEASE REQUESTED, but no save newer than the push is proven. STILL HOLDING:")
+                    print("  releasing before the save lands loses it (measured: a release about 40 s after the Save click).")
+                    print("  Run `canvas-browser.mjs save` until SAVE LANDED, or write 'saved' or 'discard' into the release file.", flush=True)
+                    told = True
             time.sleep(5)
             waited += 5
             if waited % 300 == 0:
                 print("still holding (%d min)" % (waited // 60), flush=True)
+        if waited >= cap:
+            print("AUTO-RELEASE after %d minutes: the hold timed out. A save is proven only by save-proof.json or a fresh session." % (cap // 60))
         print("session released after %d s" % waited)
         return 0
     if action == "sync":
         if not args:
             print("usage: sync <scratch-dir>")
             return 2
-        target = os.path.abspath(args[0])
+        pos = [a for a in args if not a.startswith("--")]
+        if not pos:
+            print("usage: sync <scratch-dir> [--diff]")
+            return 2
+        target = os.path.abspath(pos[0])
         if os.path.basename(target.rstrip("/\\")) == "Src" or os.path.abspath(app_dir) in target:
             print("refusing to sync into the app source: sync_canvas overwrites. Use a scratch folder.")
             return 2
@@ -241,7 +599,14 @@ def run(c, action, args, cfg, root):
         print(txt)
         if "No files returned" in txt:
             print("\nEMPTY SYNC - no Studio is attached, so the session is empty. This proves nothing about the saved app.")
-        return 1 if err else 0
+            return 1
+        if err:
+            return 1
+        if "--diff" in args:
+            # Proof of a SAVE only when Studio was reloaded first: the session then holds the saved app.
+            print("\nComparing the synced session with %s (order-independent):" % cfg["canvasSrc"])
+            return cmd_diff(os.path.join(root, cfg["canvasSrc"]), target, args, cfg.get("buildStampVariable", "gblBuild"))
+        return 0
     tools = {"sources": ("list_data_sources", {}), "controls": ("list_controls", {}),
              "schema": ("get_data_source_schema", {"dataSourceName": args[0] if args else ""}),
              "describe": ("describe_control", {"controlName": args[0] if args else ""}),
@@ -261,12 +626,41 @@ def main():
         return 0 if argv else 2
     if argv[0] == "--selftest":
         return selftest()
+    if argv[0] == "diff":
+        # Offline: no server, no session. Two folders, or canvasSrc and one folder.
+        rest, dirs, stamp = argv[1:], [], None
+        k = 0
+        while k < len(rest):
+            if rest[k] in ("--config", "--stamp"):
+                if rest[k] == "--stamp" and k + 1 < len(rest):
+                    stamp = rest[k + 1]
+                k += 2
+                continue
+            if not rest[k].startswith("--"):
+                dirs.append(rest[k])
+            k += 1
+        if len(dirs) == 2:
+            return cmd_diff(dirs[0], dirs[1], argv, stamp or "gblBuild")
+        if len(dirs) != 1:
+            print("usage: diff <dir> | diff <dir-a> <dir-b>  [--behaviour] [--restyle] [--stamp <variable>]")
+            return 2
+        cfg, root = load_config(argv)
+        if not cfg:
+            return 2
+        return cmd_diff(os.path.join(root, cfg["canvasSrc"]), dirs[0], argv, stamp or cfg.get("buildStampVariable", "gblBuild"))
     cfg, root = load_config(argv)
     if not cfg:
         return 2
     c = Client(cfg.get("serverCommand") or DEFAULT_CMD)
     try:
         return run(c, argv[0], argv[1:], cfg, root)
+    except ServerGone as e:
+        print("\nAUTHORING SERVER DID NOT START OR EXITED (%s). NOTHING WAS PUSHED - stop the chain here." % e)
+        print("  Run the server command by hand to read its error:")
+        print("    " + " ".join(cfg.get("serverCommand") or DEFAULT_CMD))
+        print("  A version listed without its platform package fails this way: set CANVAS_MCP_VERSION to a version")
+        print("  already in ~/.nuget/packages (authoring-sessions.md section 2).")
+        return 1
     finally:
         c.close()   # always release the authoring session, including on error or Ctrl+C
 

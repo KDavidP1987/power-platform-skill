@@ -108,6 +108,15 @@ retrying", and each new `connect` restarts that clock.
   camelCase (`directoryPath`); the plugin sent the wrong case to `connect` and got a bare error.
 - When reads work and writes fail, call the server's `tools/list` directly and compare argument
   names with what the client sends.
+- **"Failed to connect" can mean the latest version does not exist for your platform.** A new server
+  version was listed on NuGet before its `win-x64` package was, so the floating launch failed to
+  start: the MCP connector showed "failed to connect" with no reason, and the direct client died with
+  `OSError 22` on its first write (it now prints AUTHORING SERVER DID NOT START and exits 1). Run the
+  launch command by hand to read the real error (here "Version ... win-x64 is not found"), then pin a
+  version that is already cached: list `~/.nuget/packages/microsoft.powerapps.canvasauthoring.mcpserver/`
+  and set `CANVAS_MCP_VERSION=<that version>` for `canvas-mcp.py` (or put the pinned
+  `<package>@<version>` in the connector's launch arguments). `dnx` refuses `--prerelease` together
+  with a version, so the pin drops it. Unpin once the platform package is published.
 
 ### A direct stdio client keeps you shipping while the plugin catches up
 
@@ -135,7 +144,9 @@ What one worked well enough to describe:
 
 - **`sync_canvas` writes server state to disk. Never sync into `Src`** - sync into a scratch folder
   and diff. It proves nothing about what is SAVED (it returns the session you just pushed into);
-  verify saves from a fresh session or download.
+  verify saves from a fresh session or download. Diff by property, not by line: `canvas-mcp.py sync
+  <scratch> --diff` (or `diff <a> <b>`) compares control by control, order-independently
+  (`canvas-shipping.md` section 4).
 - **An empty `sync_canvas` means no Studio is attached, not that work is missing.** With no
   designer attached the session is empty, nothing is written ("No files returned"), and a marker
   grep reports every marker absent - which reads exactly like lost work and invites re-pushing
