@@ -40,8 +40,8 @@ What it will and will not do:
     copy over the owner's table. After the lookups, every shared table in the solution is removed
     and added back as a reference (DoNotIncludeSubcomponents, behavior 1). Shared tables are the
     manifest's "sharedTables" patterns plus every lookup target that does not carry the prefix.
-  - A yes/no column needs an explicit "default": true or false; without a DefaultValue every new
-    row reads No. A live default that differs is reported, never changed.
+  - A yes/no column should carry "default": true or false; without one every new row reads No, and
+    the plan warns. A live default that differs is reported, never changed.
   - Names Dataverse reserves are refused: <table>id, and the virtual <column>name of a lookup,
     choice or yes/no column (and <lookup>yominame), both inside the manifest and against the live
     table, where a lookup created elsewhere already owns <lookup>name. The create would fail with
@@ -205,10 +205,10 @@ def validate(m):
             elif ty == "file":
                 _check_len(errs, cw, c.get("maxSizeInKB"), 1, 10485760, key="maxSizeInKB")
             elif ty == "boolean":
-                # Without a DefaultValue every new row reads No, and nothing says so. Make it a decision.
-                if not isinstance(c.get("default"), bool):
-                    errs.append("%s: boolean needs an explicit \"default\": true or false - without one every new "
-                                "row reads No" % cw)
+                # Without a DefaultValue every new row reads No, and nothing says so. A missing default is
+                # warned about in the plan (manifests written before 0.28 stay valid); a wrong one is an error.
+                if "default" in c and not isinstance(c.get("default"), bool):
+                    errs.append("%s: boolean \"default\" must be true or false" % cw)
             elif ty == "autonumber":
                 if not isinstance(c.get("format"), str) or "{SEQNUM:" not in c["format"]:
                     errs.append("%s: autonumber needs a format containing {SEQNUM:n}, e.g. \"REQ-{SEQNUM:5}\"" % cw)
@@ -708,6 +708,9 @@ def build_plan(api, m, ctx):
                     desc += ", %d options %d..%d" % (len(c["options"]), base, base + len(c["options"]) - 1)
                 elif c["type"] == "boolean":
                     desc += ", default %s" % ("Yes" if c.get("default") else "No")
+                    if "default" not in c:
+                        p.warnings.append("%s.%s has no \"default\" in the manifest: every new row will read No. "
+                                          "Set \"default\": true or false to make it a decision" % (ln, c["schemaName"]))
                 p.add("+ column %s.%s (%s)" % (ln, c["schemaName"], desc),
                       lambda ln=ln, c=c: api.post("EntityDefinitions(LogicalName='%s')/Attributes" % ln,
                                                   attribute_body(c, base, lcid), solution=sol_name), ln)
@@ -1296,7 +1299,6 @@ def selftest():
                 {"schemaName": "abc_categoryyominame", "displayName": "Category Yomi", "type": "string"}),
             "a primary name on a lookup's reserved name companion": lambda m: m["tables"][1]["primaryName"].update(
                 schemaName="abc_categoryname"),
-            "a boolean without an explicit default": lambda m: m["tables"][0]["columns"][0].pop("default"),
             "a boolean default that is not true or false": lambda m: m["tables"][0]["columns"][0].update(
                 default="yes"),
         }
@@ -1337,6 +1339,11 @@ def selftest():
               and "reference" in out)
         check("plan lists a file column and a yes/no column with its default",
               "+ column abc_category.abc_icon (file)" in out and "+ column abc_category.abc_active (boolean, default Yes)" in out)
+        m = copy.deepcopy(base)
+        m["tables"][0]["columns"][0].pop("default")
+        rc, out2 = go(m, org, "--plan")
+        check("a yes/no column without a default is planned with a warning, not refused",
+              rc == 0 and "has no \"default\" in the manifest: every new row will read No" in out2)
         check("plan reports counts per table",
               re.search(r"abc_category\s+NEW, 3 to add, 0 present", out) is not None
               and re.search(r"abc_request\s+NEW, 8 to add, 0 present", out) is not None)
