@@ -91,6 +91,10 @@ conversion is their licensing decision, not a build step.
   well; the child-to-parent bind failed the same way until the child had Append To. Grant both on
   each side of every lookup the site sets, at the narrowest scope (Self for Contact, Parent for
   children).
+- **Server logic follows the same rule.** A `Server.Connector.Dataverse.CreateRecord` with lookup
+  binds returned 403 with Append To on the parent alone, and worked once each table at either end of
+  a bind had Append and Append To. `audit-pages-permissions.py` reads the binds in `server-logic/*.js`
+  and expects both, as it does for the Web API.
 - **Column allow-list:** `Webapi/<table>/enabled = true` and `Webapi/<table>/fields =
   <comma-separated logical names>`, listing only the columns the submitter owns (including the
   lookup's logical name). Process columns - stage, decision, score, rank, owner notes - stay out,
@@ -177,6 +181,25 @@ Render the contact id into the page from Liquid (`data-contact="{{ user.id }}"`)
 navigation property name is in `ManyToOneRelationships` (`ReferencingEntityNavigationPropertyName`).
 Show the server's error message on failure: the 403 text names the missing privilege exactly.
 
+**A grid of many columns from one list string.** A row can be read by a column name held in a
+variable (`r[fld]`), so one string of `column:Label` pairs drives the header, every cell and the
+column totals in two nested loops, instead of one hand-written cell per column (measured: an 18 x 10
+cost grid whose totals matched the hand calculation):
+
+```liquid
+{% assign cols = 'app_capital:Capital|app_expense:Expense|app_labour:Labour' | split: '|' %}
+<tr>{% for c in cols %}{% assign parts = c | split: ':' %}<th>{{ parts[1] }}</th>{% endfor %}</tr>
+{% for r in lines.results.entities %}<tr>
+  {% for c in cols %}{% assign parts = c | split: ':' %}{% assign fld = parts[0] %}<td>{{ r[fld] | default: 0 }}</td>{% endfor %}
+</tr>{% endfor %}
+<tr>{% for c in cols %}{% assign parts = c | split: ':' %}{% assign fld = parts[0] %}{% assign col_sum = 0 %}
+  {% for r in lines.results.entities %}{% assign v = r[fld] | default: 0 %}{% assign col_sum = col_sum | plus: v %}{% endfor %}
+  <td>{{ col_sum }}</td>{% endfor %}</tr>
+```
+
+A one-decimal percentage: `{{ e | times: 100.0 | divided_by: b | round: 1 }}%` (69.5%), with `b`
+tested for zero first. `times: 100.0` makes the division a decimal one.
+
 **Liquid traps:**
 
 - **No `for ... else`.** Standard Liquid's `{% for %}{% else %}{% endfor %}` is a parse error in
@@ -192,6 +215,20 @@ Show the server's error message on failure: the 403 text names the missing privi
   Escape the characters a regular expression gives meaning to (`'\['`, `'\.'`), and test a search
   with `[`, `%` and `_` in it - FetchXML `like` treats `%` and `_` as wildcards, so escape those too
   when the person's words must match literally.
+- **`split` drops empty entries**, so a lookup string that starts with its delimiter loses its
+  first key. With `lookup = '|id1=A|id2=B'`, `lookup | split: '|id1='` returns one element (`A|id2=B`),
+  not two, and a "found it" test of `size > 1` says "not found" for the first key only. Start every
+  lookup string with a sentinel (`'x|id1=A|id2=B'`), so every key has something before it.
+- **Text to number needs a type filter.** `'2' | plus: 0` concatenates ("20"), and `0 | plus: '7'`
+  fails with "Liquid error: Parameter count mismatch". Convert first with `| decimal` or `| integer`
+  (Power Pages filters): `{% assign n = s | decimal %}`.
+- **Filters apply left to right.** `t | plus: x | times: s` is `(t + x) * s`. To add a product,
+  compute it in its own `assign` first.
+- **Variable names ignore case, and an included template shares the page's scope.** `F` and `f` in
+  one template are one variable, and `aP` in a page and `ap` in a template it includes overwrote each
+  other (measured: a per-period table read zero while its total was right). Name variables so they
+  differ by more than case; `audit-pages-permissions.py` reports `LIQUID-CASE-CLASH` across a page
+  and its includes.
 
 ## 6. The cache
 
@@ -281,6 +318,28 @@ security finding, not a flaky test. The refusals to prove on every site:
 
 Read every write back from Dataverse (Web API as the owner), not from the page.
 
+**The walk signs in to the site, not only to Entra.** The profile keeps the Entra session but not
+the site session, so each new walk (and `ship`) can land on the site signed out: the header offers
+"Sign in", Liquid `user` is empty, every scoped page answers "not found", and `/_services/about`
+shows no Clear buttons, as if the contact lacked the role. Before the pages and before the Clear
+buttons, the walk opens `signInPath` (default `/`) and, when the site's own sign-in link
+(`signInSelector`) is shown, follows it; with an Entra session that completes with no person. When it
+cannot, it reports `SW-SIGNED-OUT` once and judges no page. Set `signInSelector` to the link in your
+own header when it does not point at `/SignIn`.
+
+**Text checks ignore case.** They read `innerText`, which applies CSS `text-transform`: a heading
+styled uppercase reads "TOTAL COST" on a page that says "Total cost". `expectText` and
+`expectNoText` compare case-insensitively.
+
+**Many roles with one test account.** A site that shows different sections by profile or role (full,
+team, status only) is proved with the one identity the walk has: switch it between profiles with
+test rows (a role row with an access override, an assignment set inactive), clear the cache
+(section 6; server logic reads need the cache-busting condition too), walk the sections and the
+server's refusals for that profile, then switch again, and restore the rows at the end. One person
+proved three profiles this way in minutes. Record each switch and its restore in the hand-back. A
+site administrator's session proves nothing about a restriction: switch the profile, not the
+account's admin role.
+
 ## 8. Security review before release
 
 Table permissions and the column allow-list (section 3) are the two guards that matter most, but
@@ -294,14 +353,16 @@ those in your tenant.
    (`pac pages download`), because it reads files only. It inventories every table permission
    (table, scope, privileges, parent, roles - a child permission inherits its parent's roles) and
    every Liquid `fetchxml` and `/_api` call in the page copies, templates, snippets and JavaScript,
-   then reports: a table the code uses with no permission; a privilege the code needs and nobody
+   and every Dataverse call and lookup bind in `server-logic/*.js` (`/_api/serverlogics/<name>` is the
+   endpoint, not a table), then reports: a table the code uses with no permission; a privilege the code needs and nobody
    grants (the call will be refused); Create, Write or Delete granted that no code uses; Global
    access for the anonymous or the authenticated role; a column the code writes that the allow-list
    lacks; allow-listed columns nothing uses; process columns (stage, owner, decision, score) in an
    allow-list; Web API enabled with `*`, with no fields, with no permission, or with no caller;
    Web API enabled on a table some role reads with Global scope (`WEBAPI-GLOBAL-READ`: every row
    is reachable through `/_api`, whatever the pages show - section 11); and `*` on a table the
-   site's roles may create in or write to (`WEBAPI-WILDCARD-WRITE`).
+   site's roles may create in or write to (`WEBAPI-WILDCARD-WRITE`); and Liquid variables that
+   differ only by case across a page and its includes (`LIQUID-CASE-CLASH`, section 5).
    Exit 0 clean, 1 findings, 2 nothing examined. On the real site it read three permissions, 57
    settings and 68 code files and found nothing above info. What it cannot see: column
    permissions, the "Power Pages Web API Columns" view, basic forms and lists that use a table
@@ -413,13 +474,17 @@ The rules below are what that pairing found the platform needs, in order:
    `p` (20 px, black) and every heading (weight 400). Class selectors already beat it; for bare
    paragraphs and headings inside your containers use class-scoped rules
    (`.wrap p:not([class])`). Measure computed sizes in the browser - the stylesheet looks right.
+   A platform script also rewrites the text of `<time>` elements into a long local date and time:
+   render a date the person should read as a `<span>` holding the formatted text (observed).
 4. **A CSS web file under Home is linked into every page automatically**, with a version stamp;
    adding your own `<link>` loads it twice. The stamp changes only when the site cache is cleared,
    so after an upload the browser keeps the old stylesheet: clear the browser cache (CDP
    `Network.clearBrowserCache` in Playwright) before judging a CSS change. To tell "not uploaded"
    from "cached", read what the site serves, bypassing the cache, and look for a rule you just
    added: `await (await fetch('/site.css', { cache: 'reload' })).text()` in the page. If the served
-   file has it, the upload landed and only the browser is stale.
+   file has it, the upload landed and only the browser is stale. Custom CSS web files are served
+   with `Cache-Control: max-age=3600` (measured), so a returning visitor can see the old style for up
+   to an hour after a release: say so in the hand-back.
 5. **Brand artwork the owner keeps out of git** needs a prepare script that writes each web file
    and its record with fixed ids before every upload, a `.gitignore` for both, and a designed
    fallback (`onerror` to a text wordmark; a solid brand colour behind a photo). Screenshots of the
@@ -688,6 +753,12 @@ to install on a managed machine. The calls themselves are the Power Platform API
 Az.Accounts the token is a SecureString). `pac` has no token command, but `pac pages list` and
 `pac org who` give the site ids and the Dataverse organization id.
 
+**A token can lack the Power Pages permission.** A token for `https://api.powerplatform.com` issued
+to a client app that was not granted Power Pages access got 403 from the websites endpoint
+(measured). Then create the site in the studio (Create a site, **Start from blank**), which needs no
+token: dismiss the studio's teaching bubble first, or it swallows the first click. Keep the studio as
+the documented route for creation and use the API only where its token works.
+
 | Operation | Call |
 |---|---|
 | List sites | `GET .../websites` |
@@ -808,6 +879,10 @@ that sent its own author, status, project and visibility). Its shape:
   parent before a comment and refuses one on an item that is not visible, and validates required
   fields and dates again on the server (the page's checks are for the person, the server's for
   security).
+- **A date-only column takes a date.** Given a full timestamp, a server logic `CreateRecord` returned
+  400 with an empty body (measured), so nothing in the response names the column. Send `yyyy-MM-dd`
+  for date-only columns, and log the status and the body of every failed write
+  (`Server.Logger.Error`), so the next 400 can be read.
 - **Table permissions grant Read, Create, Append and Append To only** - no Write, no Delete - so
   nothing anyone created can be changed or removed through the site.
 - **A double press makes one row**: the button is disabled on submit (measured: two quick presses

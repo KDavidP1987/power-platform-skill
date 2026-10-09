@@ -49,12 +49,19 @@
 //   widths         viewport widths, default [1440, 390]; the sideways-scroll check runs after
 //                  every width change and on every page
 //   signInPattern  regex for sign-in URLs (default: Entra, b2c, /SignIn, /Account/Login)
+//   signInSelector the site's own sign-in link (default a[href*="/SignIn" i], a[href*="/Account/Login" i]);
+//                  false skips the check. Before the pages (and before ship's Clear buttons) the walk
+//                  opens signInPath (default /); when the link is shown it follows it and waits up to
+//                  signInTimeout seconds (default 60) for the site to come back signed in. A profile
+//                  keeps the Entra session but not the site session, so this usually completes with no
+//                  person. When it cannot, the walk reports SW-SIGNED-OUT once and judges no page.
 //   writes         true when the steps create or change data; then "restore" (how the test rows are
 //                  removed, e.g. the owner's cleanup script) and "confirm" are required
 //   orgUrl, dataverseTokenCommand   the Dataverse org and a command printing a token for it (confirm)
 //   pages          [{path, name?, expectText?: [..], expectSelector?: [..], expectNoText?: [..],
 //                   screenshotSelector?, expectWithin?}]
-//                  visited at every width; a screenshot named <name>-<width>.png when name is set
+//                  visited at every width; a screenshot named <name>-<width>.png when name is set.
+//                  Text is matched case-insensitively (innerText applies CSS text-transform)
 //   steps          [{goto}|{fill, value}|{click}|{pressTwice}|{select, value}|{press, selector?}|{expectText}|
 //                   {expectNoText}|{expectUrl}|{wait}|{screenshot}|{capture}]  performed once, at the
 //                  first width. Any step may also carry "capture" (taken after the step).
@@ -88,6 +95,8 @@
 //
 // Finding codes:
 //   SW-NAV            a page failed to load (HTTP 400+), or a signed-in page landed on sign-in
+//   SW-SIGNED-OUT     the walk is signed out of the site itself and could not sign in through the
+//                     site's own link; no page was judged (exit 2)
 //   SW-TEXT           expected text or selector missing, or text that must not show is shown
 //   SW-URL            expectUrl did not match
 //   SW-STEP           a step could not be performed (selector not found, timeout)
@@ -168,6 +177,9 @@ export function validateScenario(s) {
     if (c.filled && (!Array.isArray(c.filled) || !c.filled.every((x) => typeof x === 'string'))) errs.push(`confirm[${i}].filled must be a list of column names`);
     if (!c.absent && !c.expect && c.count === undefined && !c.filled) errs.push(`confirm[${i}] asserts nothing: give "expect", "count" or "absent"`);
   }
+  if (s.signInSelector !== undefined && s.signInSelector !== false && !(typeof s.signInSelector === 'string' && s.signInSelector.trim())) errs.push('signInSelector must be a CSS selector, or false to skip the site sign-in check');
+  if (s.signInPath !== undefined && !(typeof s.signInPath === 'string' && s.signInPath.startsWith('/'))) errs.push('signInPath must start with /');
+  if (s.signInTimeout !== undefined && !(Number(s.signInTimeout) > 0)) errs.push('signInTimeout must be a number of seconds');
   if ((s.confirm || []).length && !/^https?:\/\//.test(s.orgUrl || '')) errs.push('confirm needs "orgUrl" (the Dataverse org, e.g. https://<org>.crm.dynamics.com)');
   // As in canvas-browser walk: a screen that says "Saved" proves nothing about the row.
   if (s.writes === true && !(s.confirm || []).length) errs.push('a scenario that writes must have "confirm" checks that read the rows back in Dataverse');
@@ -297,8 +309,36 @@ export function signedOutVerdict(entry, finalUrl, text, signInPattern = DEFAULT_
   if (redirected) return null;
   const must = entry.mustNotShow || [];
   if (!must.length) return { code: 'SW-SIGNEDOUT-LEAK', msg: `${entry.path}: signed out, not sent to sign-in (${finalUrl})` };
-  const shown = must.filter((m) => text.includes(m));
+  const shown = must.filter((m) => textHas(text, m));
   return shown.length ? { code: 'SW-SIGNEDOUT-LEAK', msg: `${entry.path}: signed out, shows ${shown.map((x) => JSON.stringify(x)).join(', ')}` } : null;
+}
+
+// Text checks read innerText, which applies CSS text-transform: a heading styled uppercase reads
+// "TOTAL COST" while the scenario says "Total cost". Compare case-insensitively; innerText still
+// keeps hidden text out, which textContent would not.
+export function textHas(haystack, needle) {
+  return String(haystack ?? '').toLowerCase().includes(String(needle ?? '').toLowerCase());
+}
+
+// The site session. A persistent profile keeps the Entra session but not the Power Pages site
+// session: a new walk can land on the site signed out (the header offers "Sign in", Liquid `user` is
+// empty), and then every scoped page answers "not found" for the wrong reason. state of one look:
+// 'sign-in-page' (on the identity provider), 'elsewhere' (left the site), 'signed-out' (the site's
+// own sign-in link is shown) or 'signed-in'.
+export const DEFAULT_SITE_SIGNIN_LINK = 'a[href*="/SignIn" i], a[href*="/Account/Login" i]';
+export function sessionState(url, baseUrl, signInLinks, signInPattern = DEFAULT_SIGNIN) {
+  if (new RegExp(signInPattern, 'i').test(url)) return 'sign-in-page';
+  let same = false;
+  try { same = new URL(url).host === new URL(baseUrl).host; } catch { /* not a URL */ }
+  if (!same) return 'elsewhere';
+  return signInLinks > 0 ? 'signed-out' : 'signed-in';
+}
+export function signedOutFinding(state, selector, baseUrl) {
+  if (state === 'signed-in') return null;
+  const why = state === 'sign-in-page' ? 'the sign-in went to the identity provider and needs a person there'
+    : state === 'elsewhere' ? 'the site\'s sign-in link left the site and did not come back'
+      : `the site still shows its sign-in link (${selector}) after following it`;
+  return { code: 'SW-SIGNED-OUT', msg: `the walk is signed out of the site: ${why}. Pages were not judged (they would all miss for this reason). Run \`site-walk.mjs signin --url ${baseUrl}\`, then walk again` };
 }
 
 // signin --accept-site-consent: accept only the site's own sign-in app ("Portals-<site name>"), for the
@@ -536,6 +576,31 @@ async function shot(page, out, name, width, selector) {
   await page.screenshot({ path: file, fullPage: true });   // the page only: never browser chrome
 }
 
+// Make sure the walk is signed in to the site itself, not only to Entra: open signInPath (default /),
+// and when the site's own sign-in link (signInSelector) is shown, follow it and wait for the return
+// to the site - with an Entra session it completes without a person. Returns {finding, note}.
+export async function ensureSiteSession(page, s) {
+  const sel = s.signInSelector === undefined ? DEFAULT_SITE_SIGNIN_LINK : s.signInSelector;
+  if (sel === false) return { finding: null, note: 'not checked (signInSelector false)' };
+  const pattern = s.signInPattern || DEFAULT_SIGNIN;
+  const links = () => page.evaluate((q) => [...document.querySelectorAll(q)].filter((e) => e.getClientRects().length).length, sel).catch(() => 0);
+  const look = async () => sessionState(page.url(), s.baseUrl, await links(), pattern);
+  await page.goto(abs(s.baseUrl, s.signInPath || '/'), { waitUntil: 'load', timeout: 45000 }).catch(() => {});
+  let state = await look();
+  if (state === 'signed-in') return { finding: null, note: 'signed in' };
+  if (state === 'signed-out') {
+    await page.evaluate((q) => { const a = [...document.querySelectorAll(q)].find((e) => e.getClientRects().length); if (a) a.click(); }, sel).catch(() => {});
+    const end = Date.now() + Number(s.signInTimeout || 60) * 1000;
+    do {
+      await page.waitForTimeout(1000);
+      await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {});
+      state = await look();
+    } while (state !== 'signed-in' && Date.now() < end);
+    if (state === 'signed-in') { await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}); return { finding: null, note: 'signed in through the site\'s own sign-in link' }; }
+  }
+  return { finding: signedOutFinding(state, sel, s.baseUrl), note: '' };
+}
+
 // Walk one scenario. ctx is a signed-in context; freshContext() makes a cookie-free one.
 // getToken(scenario) returns a Dataverse token for orgUrl (or throws); runStart defaults to now.
 export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = false, getToken = null, runStart = Date.now() }) {
@@ -551,6 +616,13 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
   const navSeen = [];
   let examined = 0;
   const page = ctx.pages()[0] || await ctx.newPage();
+
+  // Signed out of the site, every page and step below would miss for that one reason: say so once.
+  if ((s.pages || []).length || (s.steps || []).length || (s.api || []).length) {
+    const sess = await ensureSiteSession(page, s);
+    add('site session', null, sess.finding, sess.note);
+    if (sess.finding) return { examined: 0, rows, vars, timings, signedOut: true };
+  }
 
   async function visit(path, label, width) {
     let resp = null;
@@ -597,9 +669,9 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
       if (!(await visit(p.path, label, width))) continue;
       const judge = async () => {
         const body = await bodyText();
-        for (const t of p.expectText || []) if (!body.includes(t)) return { code: 'SW-TEXT', msg: `missing text ${JSON.stringify(t)}` };
+        for (const t of p.expectText || []) if (!textHas(body, t)) return { code: 'SW-TEXT', msg: `missing text ${JSON.stringify(t)}` };
         for (const sel of p.expectSelector || []) if (!(await page.locator(sel).count())) return { code: 'SW-TEXT', msg: `missing ${sel}` };
-        for (const t of p.expectNoText || []) if (body.includes(t)) return { code: 'SW-TEXT', msg: `shows ${JSON.stringify(t)}` };
+        for (const t of p.expectNoText || []) if (textHas(body, t)) return { code: 'SW-TEXT', msg: `shows ${JSON.stringify(t)}` };
         return null;
       };
       let f = await judge(), note = '';
@@ -650,7 +722,7 @@ export async function runWalk(s, { ctx, freshContext, out = null, allowWrites = 
             const text = want ? st.expectText : st.expectNoText;
             const once = async (first) => {
               if (want) return page.getByText(text, { exact: false }).first().waitFor({ timeout: first ? Number(st.timeout || 10000) : 3000 }).then(() => true, () => false);
-              return !(await bodyText()).includes(text);
+              return !textHas(await bodyText(), text);
             };
             let ok = await once(true);
             if (!ok && st.expectWithin) {
@@ -854,6 +926,9 @@ async function cmdShip() {
       const ctx = await persistent(chromium, true);
       const page = ctx.pages()[0] || await ctx.newPage();
       const done = [];
+      // Signed out of the site, /_services/about shows no Clear buttons, which reads as a missing role.
+      const sess = await ensureSiteSession(page, s);
+      if (sess.finding) { await ctx.close(); log(`ship clear: ${sess.finding.code} ${sess.finding.msg}. Clear config and Clear cache NOT pressed.`); continue; }
       await page.goto(abs(s.baseUrl, '/_services/about'), { waitUntil: 'load', timeout: 45000 }).catch(() => {});
       for (const name of [/clear config/i, /clear cache/i]) {
         const b = page.getByRole('button', { name });
@@ -945,6 +1020,15 @@ function fixtureServer() {
     const twice = (guard) => `<input id="c" value="hello"><button id="go" type="button" onclick="${guard ? "if(this.dataset.busy)return;this.dataset.busy=1;" : ''}fetch('/post-comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:document.getElementById('c').value})})">Post</button>`;
     if (p === '/twice') return send(200, 'text/html', html('twice', twice(false)));
     if (p === '/once') return send(200, 'text/html', html('once', twice(true)));
+    // A site session apart from sign-in (what a persistent profile meets): /site/ offers Sign in until
+    // its cookie is set, and /site/SignIn sets it and returns; /dead/SignIn returns without it.
+    if (p === '/site/SignIn') return send(302, 'text/plain', '', { Location: u.searchParams.get('returnUrl') || '/site/home', 'Set-Cookie': 'ss=1; Path=/' });
+    if (p === '/dead/SignIn') return send(302, 'text/plain', '', { Location: '/dead/home' });
+    if (p === '/site/home' || p === '/dead/home') {
+      const pre = p.split('/')[1], on = pre === 'site' && /(^|;\s*)ss=1/.test(req.headers.cookie || '');
+      return send(200, 'text/html', html('home', `<header>${on ? '<a href="/site/signout">Sign out</a>' : `<a href="/${pre}/SignIn?returnUrl=/${pre}/home">Sign in</a>`}</header>`
+        + `<h2 style="text-transform:uppercase">Total cost of work</h2><p>${on ? 'SCOPED-ITEM' : 'Not found'}</p>`));
+    }
     if (p === '/SignIn') return send(200, 'text/html', html('sign in', '<p>Please sign in</p>'));
     if (p === '/secret') return signedIn(req) ? send(200, 'text/html', html('secret', '<p>SECRET-ITEM</p>')) : send(302, 'text/plain', '', { Location: '/SignIn' });
     if (p === '/leaky') return send(200, 'text/html', html('leaky', '<p>SECRET-ITEM</p>'));
@@ -1056,6 +1140,19 @@ async function selftest() {
   check('consent: wider permissions -> left for a person', /more than sign-in/.test(consentVerdict(consent('Portals-Work Portal', ['Sign you in and read your profile', 'Read and write all users\' full profiles'])).reason || ''));
   check('consent: admin approval -> left for a person', /administrator/.test(consentVerdict(consent('Portals-Work Portal', ['Need admin approval'])).reason || ''));
 
+  // Text-transform and the site session.
+  check('text: innerText of an uppercase heading misses with a plain includes (the trap)', !'TOTAL COST OF INVESTMENTS'.includes('Total Cost of Investments'));
+  check('text: case-insensitive match finds it', textHas('Summary\nTOTAL COST OF INVESTMENTS\n', 'Total Cost of Investments') && !textHas('Total', 'Totals'));
+  const site = 'https://work.example.com';
+  check('session: sign-in link on the site -> signed-out', sessionState(site + '/home/', site, 1) === 'signed-out');
+  check('session: no sign-in link -> signed-in', sessionState(site + '/home/', site, 0) === 'signed-in');
+  check('session: on Entra -> sign-in-page', sessionState('https://login.microsoftonline.com/x/oauth2', site, 0) === 'sign-in-page');
+  check('session: another host -> elsewhere', sessionState('https://other.example.com/', site, 0) === 'elsewhere');
+  check('session: signed out -> SW-SIGNED-OUT naming the signin command', signedOutFinding('signed-out', 'a.signin', site)?.code === 'SW-SIGNED-OUT' && /signin --url https:\/\/work\.example\.com/.test(signedOutFinding('signed-out', 'a.signin', site).msg));
+  check('session: signed in -> no finding', signedOutFinding('signed-in', 'a', site) === null);
+  check('scenario: signInSelector false accepted, a number refused, signInPath must start with /',
+    validateScenario({ baseUrl: site, signInSelector: false }).length === 0 && validateScenario({ baseUrl: site, signInSelector: 3 }).length === 1 && validateScenario({ baseUrl: site, signInPath: 'home' }).length === 1);
+
   if (has('logic-only')) {
     log(fails.length ? `\n${fails.length} FAILED` : '\nlogic half passed. Browser half NOT run (--logic-only): run --selftest without it where Playwright is installed.');
     process.exit(fails.length ? 1 : 0);
@@ -1163,6 +1260,18 @@ async function selftest() {
   if (codes(once).size) log(table(once.rows.filter((r) => r.code)));
   const rep3 = await run({ baseUrl: base, widths: [1440], apiFrom: '/ok', api: [{ name: 'repeat', path: '/_api/items(3)', expectStatus: 200, repeat: 3 }] });
   check('repeat sends the request three times at once', rep3.rows.some((r) => /3 at once: 200, 200, 200/.test(r.note)));
+
+  // The site session, and text under text-transform.
+  const sess = await run({ baseUrl: base, widths: [1440], signInPath: '/site/home', pages: [{ path: '/site/home', expectText: ['SCOPED-ITEM'], expectNoText: ['Not found'] }] });
+  check('signed out of the site: signs in through its own link, then judges pages', codes(sess).size === 0 && /own sign-in link/.test(sess.rows.find((r) => r.step === 'site session')?.note || ''));
+  if (codes(sess).size) log(table(sess.rows.filter((r) => r.code)));
+  const dead = await run({ baseUrl: base, widths: [1440], signInPath: '/dead/home', signInTimeout: 3, pages: [{ path: '/dead/home', expectText: ['SCOPED-ITEM'] }] });
+  check('a sign-in that does not take -> SW-SIGNED-OUT once, no page-level misses, exit 2', dead.rows.filter((r) => r.code === 'SW-SIGNED-OUT').length === 1 && !codes(dead).has('SW-TEXT') && exitCode(dead) === 2);
+  const upper = await run({ baseUrl: base, widths: [1440], signInSelector: false, pages: [{ path: '/dead/home', expectText: ['Total cost of work'] }, { path: '/dead/home', expectNoText: ['total COST'] }] });
+  check('signInSelector false skips the check', /not checked/.test(upper.rows.find((r) => r.step === 'site session')?.note || '') && !codes(upper).has('SW-SIGNED-OUT'));
+  check('uppercase heading: expectText holds, expectNoText catches it in any case', upper.rows.filter((r) => r.code === 'SW-TEXT').length === 1 && upper.rows.some((r) => r.code === 'SW-TEXT' && /shows "total COST"/.test(r.msg)));
+  const upStep = await run({ baseUrl: base, widths: [1440], signInSelector: false, steps: [{ goto: '/dead/home' }, { expectText: 'Total cost of work' }] });
+  check('uppercase heading: an expectText step holds', codes(upStep).size === 0);
 
   const empty = await run({ baseUrl: base });
   check('empty scenario: nothing examined (exit 2)', exitCode(empty) === 2);
