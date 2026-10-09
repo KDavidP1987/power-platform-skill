@@ -30,10 +30,15 @@
 //                                                  in the signed-in profile, reads back Connected; plan unless --apply
 //   node canvas-browser.mjs play [--screen NAME]   open the PUBLISHED app, capture, report console
 //   node canvas-browser.mjs walk <scenario.json>   PERFORM a task and assert the result
-//   node canvas-browser.mjs studio                 open Studio in EDIT mode and hold it open
+//   node canvas-browser.mjs studio                 open Studio in EDIT mode and hold it open; prints STUDIO READY,
+//                                                  or exits 3 (read-only, or no edit mode in 3 minutes) - stop the chain
+//   node canvas-browser.mjs studio --reload        reload the held Studio right before a push; checks for the
+//                                                  "There's been a disconnect" dialog (exit 3)
 //   node canvas-browser.mjs keys [combo]           reattach to Studio: report mode / send keys
-//   node canvas-browser.mjs save                   click Studio's Save button (not Ctrl+S), read "Saved: <time>"
-//   node canvas-browser.mjs publish [--reload-first]  publish the saved app to the player
+//   node canvas-browser.mjs save                   click Studio's Save button (not Ctrl+S), read "Saved: <time>"; on
+//                                                  SAVE LANDED writes <workDir>/save-proof.json (a held push waits for it)
+//   node canvas-browser.mjs publish [--reload-first]  publish the saved app to the player (records the hash the
+//                                                  last clean push sent, from <workDir>/last-push.json)
 //   node canvas-browser.mjs close-studio           leave the editor through Back (frees the lock),
 //                                                  then quit the held browser (frees the profile)
 //   node canvas-browser.mjs tabs                   list the held browser's tabs (Studio, blank, other)
@@ -45,8 +50,11 @@
 //                                                  browser (it joins the co-authoring session) and wait
 //                                                  for the named controls to render there
 //   node canvas-browser.mjs studio-has <name...>   does the held Studio tab show these control names
-//   node canvas-browser.mjs dirty                  make a harmless edit (a space in the formula bar) so
-//                                                  Save is enabled after a push that left it disabled
+//   node canvas-browser.mjs dirty [--toggle <formula>]  make a harmless edit so Save is enabled after a push that
+//                                                  left it disabled: a trailing space, or --toggle the selected
+//                                                  property to another value and back (read back); exit 7 if
+//                                                  Save stays disabled
+//   save / publish / dirty act on the Studio tab whose authoring frame holds a Save button, not the newest
 //   node canvas-browser.mjs shot <url> <name>      navigate anywhere, screenshot + aria dump
 //   node canvas-browser.mjs lint <scenario.json>   check a scenario's verbs without a browser
 //   node canvas-browser.mjs confirm <scenario.json> [--since <ISO time>]
@@ -172,6 +180,7 @@ const SELECTOR_DEFAULTS = {
     { kind: 'css', value: 'button[aria-label*="more save" i]' },
     { kind: 'css', value: 'button[aria-label*="save options" i]' }] },
   'studio.savedStamp':        { surface: 'studio', kind: 'regex', pattern: '\\bSaved:[ \\t]*([^\\n]{1,48})', flags: 'i', check: 'required' },
+  'studio.disconnected':      { surface: 'studio', kind: 'regex', pattern: 'There[\'’]s been a disconnect', flags: 'i', check: 'conditional' },
   'studio.publishButton':     { surface: 'studio', kind: 'css', value: 'button[aria-label^="Publish" i]', check: 'required' },
   'studio.publishConfirm':    { surface: 'studio', kind: 'anyOf', check: 'conditional', anyOf: [
     { kind: 'role', role: 'button', name: 'publish this version', flags: 'i' },
@@ -1411,6 +1420,18 @@ function selftest() {
     ['yesterday late is old', stampVerdict('11:59:00 PM', null, click) === 'old'],
     // second-tab must leave the held tab open until after publish (closing it first lost the push).
     ['second-tab closes no tab', !secondTabClosesTabs()],
+    // save / publish / dirty use the tab whose authoring frame holds a Save button, not the newest.
+    ['save tab: the older tab with Save wins over a blank newest', (pickSaveTab([{ i: 0, saveButtons: 0, textLen: 0 }, { i: 1, saveButtons: 1, textLen: 2000 }]) || {}).i === 1],
+    ['save tab: rendered beats unrendered', (pickSaveTab([{ i: 0, saveButtons: 1, textLen: 0 }, { i: 1, saveButtons: 1, textLen: 900 }]) || {}).i === 1],
+    ['save tab: none holds Save', pickSaveTab([{ i: 0, saveButtons: 0, textLen: 50 }]) === null],
+    ['disconnect dialog recognised', rx('studio.disconnected').test('There’s been a disconnect') && rx('studio.disconnected').test("There's been a disconnect")],
+    // publish records the hash the last clean push sent; a failed push records nothing.
+    ['publish hash: the last clean push', publishHash({ hash: 'p1', at: 't' }, 'd2').hash === 'p1'],
+    ['publish hash: no push record -> source', publishHash(null, 'd2').hash === 'd2'],
+    ['after a failed push the publish is refused', publishRefused(publishHash({ hash: 'p1' }, 'd2').hash, { hash: 'p1' }, false)],
+    ['close-studio: editor gone is closable', editorGone({ stillEditing: true, back: false, leave: false, preview: false }) && !editorGone({ stillEditing: true, back: true })],
+    ['dirty: formula text normalised', formulaText('clrWhite  \n') === 'clrWhite'],
+    ['dirty: toggle never types (auto-close)', /insertText/.test(cmdDirty.toString()) && /ControlOrMeta\+A/.test(cmdDirty.toString())],
     // clipcheck reports text cut at the top and the bottom, not only whole hidden lines.
     ['clipcheck measures vertical cuts', /vcut/.test(MEASURE.clipped.toString()) && /createRange/.test(MEASURE.clipped.toString())],
     // Never launch Chrome on Windows while the person's Chrome runs (it opens a tab in their browser).
@@ -1634,31 +1655,74 @@ async function walkOne(file) {
   return verdict;
 }
 
+// The process that holds Studio open writes its pid beside the profile, so close-studio can end it
+// when the browser or the editor is already gone (a live holder keeps the profile: the next `studio`
+// then fails PROFILE IN USE and a chained compile runs with no session).
+const HOLDER_PID = () => PROFILE.replace(/[\\/]+$/, '') + '.studio-pid';
+// `studio --reload`: reload the held Studio tab right before a push. A Studio left idle (after a
+// publish) drops its co-authoring connection, and a push then lands where no Studio is attached.
+async function studioReload() {
+  const { browser, ctx } = await attach();
+  const { page } = await editingTab(ctx);
+  if (!page || !isStudioTab(page)) { log('  !! no Studio tab in the held browser - run `studio`.'); await browser.close(); process.exitCode = 3; return; }
+  page.on('dialog', async (d) => { await d.accept().catch(() => {}); });
+  log('  reloading Studio before the push (nothing should be held now: a reload drops an unsaved push)');
+  await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+  const r = await waitForStudioMode(page);
+  if (r.ready) {
+    const scan = await tabScan(page);
+    if (scan.disconnected) { log('  !! still shows "There\'s been a disconnect" after the reload.'); process.exitCode = 3; }
+    else log('  STUDIO READY (Editing) - connect and push now.');
+  }
+  await browser.close();
+}
+// Wait for (Editing) or (Read-only) in the title. Not ready on read-only or timeout: exit non-zero so a
+// chained compile never runs against a Studio that is not editing.
+async function waitForStudioMode(page) {
+  log('Waiting for the editor (slow; up to 3 minutes) ...');
+  let title = '';
+  for (let i = 0; i < 36; i++) {
+    await page.waitForTimeout(5000);
+    title = await page.title().catch(() => '');
+    if (rx('studio.titleEditing').test(title) || rx('studio.titleReadOnly').test(title)) break;
+  }
+  log('  window title: ' + (title || '(none yet)'));
+  if (rx('studio.titleReadOnly').test(title)) {
+    log('  !! READ-ONLY: an edit lock is stranded (a tab was killed instead of closed via Back).');
+    log('     A compile will not persist from here. STUDIO NOT READY - stop the chain.');
+    process.exitCode = 3;
+    return { ready: false, title };
+  }
+  if (!rx('studio.titleEditing').test(title)) {
+    log('  !! Studio did not reach edit mode in 3 minutes. STUDIO NOT READY - stop the chain.');
+    process.exitCode = 3;
+    return { ready: false, title };
+  }
+  return { ready: true, title };
+}
+
 async function cmdStudio() {
   needApp();
+  if (has('reload')) return studioReload();
   const ctx = await launch({ headless: false, debugPort: DEBUG_PORT });
   const page = await freshPage(ctx);
   log('Opening Studio in EDIT mode:\n  ' + STUDIO_URL);
   await page.goto(STUDIO_URL, { waitUntil: 'domcontentloaded' });
   if (!(await isSignedIn(page))) { log('NOT SIGNED IN - run `login` first.'); await ctx.close(); process.exitCode = 2; return; }
   // The diagnosis of a stranded edit lock is one word in the title, stated nowhere else.
-  log('Waiting for the editor (slow; up to 3 minutes) ...');
-  let title = '';
-  for (let i = 0; i < 36; i++) {
-    await page.waitForTimeout(5000);
-    title = await page.title();
-    if (rx('studio.titleEditing').test(title) || rx('studio.titleReadOnly').test(title)) break;
-  }
-  log('  window title: ' + (title || '(none yet)'));
-  if (rx('studio.titleReadOnly').test(title)) {
-    log('  !! READ-ONLY: an edit lock is stranded (a tab was killed instead of closed via Back).');
-    log('     A compile will not persist from here.');
-  } else if (rx('studio.titleEditing').test(title)) {
-    log('  EDIT MODE. Now connect the authoring MCP, then compile.');
-    log('  The push BLANKS the screen - that is the push arriving. A RELOAD DISCARDS THE PUSH.');
-    log('  Save with `canvas-browser.mjs save` (clicks the button; Ctrl+S hits the outer shell).');
-  }
+  const mode = await waitForStudioMode(page);
   await capture(page, 'studio');
+  if (!mode.ready) {
+    // Quit, so the profile is free and the exit code reaches the chain: measured, a failed `studio`
+    // followed by a compile pushed nothing, and save + publish re-published the old app.
+    await ctx.close().catch(() => {});
+    process.exit(3);
+  }
+  log('  STUDIO READY (Editing). Now connect the authoring MCP, then compile.');
+  log('  The push BLANKS the screen - that is the push arriving. A RELOAD DISCARDS THE PUSH.');
+  log('  Save with `canvas-browser.mjs save` (clicks the button; Ctrl+S hits the outer shell).');
+  try { writeFileSync(HOLDER_PID(), String(process.pid)); } catch { /* read-only home */ }
+  process.on('exit', () => { try { if (readFileSync(HOLDER_PID(), 'utf8').trim() === String(process.pid)) rmSync(HOLDER_PID(), { force: true }); } catch { /* gone */ } });
   log('\nHolding Studio open. Leave with `close-studio`, never by killing the window.');
   // close-studio quits this browser once the lock is released; exit cleanly when it does, so
   // this process stops holding the persistent profile.
@@ -1780,6 +1844,44 @@ function studioPage(ctx) {
   return ctx.pages().filter(isStudioTab).pop() || ctx.pages().filter((p) => rx('portal.makerUrl').test(p.url())).pop() || ctx.pages()[0];
 }
 
+// The Studio tab that can SAVE: the one whose authoring frame holds a Save button. Not the newest tab:
+// measured, after a push blanked Studio a second tab joined and then went blank too, while the OLDER tab
+// re-rendered with the Save button; `save` on the newest tab reported "no Save button" for five minutes.
+// Scan each Studio tab (newest first) and print what each holds, so the choice is visible.
+async function tabScan(page) {
+  let saveButtons = 0; let textLen = 0; let disconnected = false;
+  for (const f of page.frames()) {
+    if (!rx('studio.authoringFrameUrl').test(f.url())) continue;
+    try {
+      saveButtons += await f.locator(css('studio.saveButton')).count();
+      const t = await f.evaluate(() => (document.body ? document.body.innerText : ''));
+      textLen += t.length;
+      if (rx('studio.disconnected').test(t)) disconnected = true;
+    } catch { /* detached */ }
+  }
+  return { saveButtons, textLen, disconnected };
+}
+export function pickSaveTab(scans) {
+  // scans: [{ i, saveButtons, textLen }] newest first. A tab with a Save button and a rendered editor wins.
+  return scans.find((s) => s.saveButtons > 0 && s.textLen > 0) || scans.find((s) => s.saveButtons > 0) || null;
+}
+async function editingTab(ctx) {
+  const tabs = ctx.pages().filter(isStudioTab).reverse();
+  if (tabs.length === 0) return { page: studioPage(ctx), scan: null };
+  const scans = [];
+  for (const [i, p] of tabs.entries()) scans.push({ i, ...(await tabScan(p)) });
+  if (tabs.length > 1) {
+    for (const s of scans) log('  studio tab ' + (tabs.length - s.i) + '/' + tabs.length + ': Save buttons ' + s.saveButtons + ', editor text ' + s.textLen + (s.disconnected ? ', DISCONNECTED' : ''));
+  }
+  const pick = pickSaveTab(scans);
+  if (pick && tabs.length > 1) log('  using studio tab ' + (tabs.length - pick.i) + ' (it holds the Save button)');
+  return pick ? { page: tabs[pick.i], scan: pick } : { page: tabs[0], scan: scans[0] };
+}
+// A Studio left idle after a publish drops its co-authoring connection ("There's been a disconnect").
+// A push then reports PUSHED CLEAN into a session no Studio is attached to, and Save is blocked.
+const DISCONNECT_NOTE = '     The co-authoring connection dropped: a push since then went to a session no Studio is attached to.\n'
+  + '     Reload Studio (`studio --reload`), push again, then save.';
+
 // --- tab hygiene ------------------------------------------------------------------------------
 // Every tab a run leaves open is one more for the person to close, and an extra Studio tab
 // competes for the edit lock. `tabs` lists them; `tidy` closes what nothing is using.
@@ -1836,8 +1938,9 @@ async function framesText(page) {
 }
 
 // After a push blanked the Studio tab, a SECOND tab on the same edit URL joins the held
-// co-authoring session and renders the pushed document; `save`, `publish` and `keys` then use it
-// (the newest Studio tab). Never opened on a new-blank URL: that would create another app.
+// co-authoring session and renders the pushed document. `save`, `publish` and `dirty` then use
+// whichever Studio tab holds the Save button (often the older one re-renders first). Never opened on
+// a new-blank URL: that would create another app.
 async function cmdSecondTab() {
   const { browser, ctx } = await attach();
   const first = ctx.pages().find(isStudioTab);
@@ -1867,7 +1970,7 @@ async function cmdSecondTab() {
   // close-studio leaves and closes them all (or `tidy --studio` once the publish is proven).
   const older = ctx.pages().filter((p) => p !== page && isStudioTab(p)).length;
   if (older) log('  kept ' + older + ' older Studio tab(s) open on purpose: closing one before save and publish loses the push. close-studio closes them after publish.');
-  log('  save / publish / keys now use this tab; close-studio leaves every Studio tab.');
+  log('  save / publish / dirty use whichever Studio tab holds a Save button; close-studio leaves every Studio tab.');
   await browser.close();
 }
 const TREE_TEXT_NOTE = '  (MISSING reads the rendered tree text, which is virtualised: it is not proof of absence. Confirm a push by reading a pushed'
@@ -1889,30 +1992,84 @@ async function cmdStudioHas() {
 }
 
 // After a co-authoring push, Studio can hold the document with Save disabled (nothing "changed"
-// locally). A space appended to the selected property's formula, committed with Tab, makes the
-// buffer dirty without changing what the formula means; then `save`.
+// locally). Default: a space appended to the selected property's formula, committed with Tab, makes the
+// buffer dirty without changing what the formula means. That was not always enough: twice in a row a
+// clean push left Save disabled within 2 s, and re-entering the same value did not mark Studio dirty.
+// What did: change one PUSHED property to another value and back (Color clrWhite -> clrNavy -> clrWhite);
+// Save then persisted the whole pushed state. `dirty --toggle <formula>` does exactly that through the
+// formula bar of the selected property and reads the original back. Never through a toolbar dropdown:
+// opening the wrong one wrote Font.Arial over a font token on that control.
+export function formulaText(t) { return String(t || '').replace(/\u00a0/g, ' ').replace(/\s+$/, ''); }
+async function saveEnabled(page) {
+  const hit = await editorControl(page, css('studio.saveButton'));
+  if (!hit) return null;
+  try { return !(await hit.ctl.isDisabled()) && (await hit.ctl.getAttribute('aria-disabled')) !== 'true'; } catch { return null; }
+}
 async function cmdDirty() {
   const { browser, ctx } = await attach();
-  const studio = studioPage(ctx);
+  const { page: studio } = await editingTab(ctx);
   if (rx('studio.titleReadOnly').test(await studio.title())) { log('  READ-ONLY - nothing can be saved from here.'); await browser.close(); process.exitCode = 3; return; }
-  for (const f of studio.frames()) {
-    if (!rx('studio.authoringFrameUrl').test(f.url())) continue;
-    try {
-      if (await locsOf(f, 'studio.formulaBar')[0].count() === 0) continue;
-      await f.locator(css('studio.formulaEditor')).first().click({ timeout: 10000 });
-      await studio.keyboard.press('End');
-      await studio.keyboard.type(' ');
-      await studio.waitForTimeout(800);
-      await studio.keyboard.press('Tab');
-      await studio.waitForTimeout(1500);
-      log('  formula bar edited (a trailing space) - now `save`, and read "Saved: <time>".');
-      await browser.close();
-      return;
-    } catch { /* detached or not this frame */ }
+  const toggle = typeof flag('toggle', '') === 'string' ? String(flag('toggle', '')).replace(/^=/, '') : '';
+  let f = null;
+  for (const x of studio.frames()) {
+    if (!rx('studio.authoringFrameUrl').test(x.url())) continue;
+    try { if (await locsOf(x, 'studio.formulaBar')[0].count() > 0) { f = x; break; } } catch { /* detached */ }
   }
-  log('  !! no formula bar found in any authoring frame - select a control first.');
-  await capture(studio, 'dirty-not-found');
-  process.exitCode = 4;
+  if (!f) {
+    log('  !! no formula bar found in any authoring frame - select a control first.');
+    await capture(studio, 'dirty-not-found');
+    process.exitCode = 4;
+    await browser.close();
+    return;
+  }
+  let original = '';
+  {
+    try {
+      const ed = f.locator(css('studio.formulaEditor')).first();
+      const replaceWith = async (text) => {
+        await ed.click({ timeout: 10000 });
+        await studio.keyboard.press('ControlOrMeta+A');
+        // insertText, not type(): typed brackets and quotes are auto-closed by the editor.
+        await studio.keyboard.insertText(text);
+        await studio.waitForTimeout(800);
+        await studio.keyboard.press('Tab');
+        await studio.waitForTimeout(2000);
+      };
+      if (toggle) {
+        original = formulaText(await ed.innerText());
+        if (!original) { log('  !! the formula bar is empty - select a pushed control and property first.'); process.exitCode = 4; await browser.close(); return; }
+        log('  toggling the selected property: ' + original.slice(0, 60) + '  ->  ' + toggle + '  ->  back');
+        await replaceWith(toggle);
+        await replaceWith(original);
+        const back = formulaText(await ed.innerText());
+        if (back !== original) {
+          log('  !! the property does NOT read back as it was:\n     was: ' + original.slice(0, 120) + '\n     now: ' + back.slice(0, 120));
+          log('     Fix it in the formula bar before any save - a save now would persist the wrong value.');
+          await capture(studio, 'dirty-readback'); process.exitCode = 4; await browser.close(); return;
+        }
+        log('  read back unchanged: ' + back.slice(0, 60));
+      } else {
+        await ed.click({ timeout: 10000 });
+        await studio.keyboard.press('End');
+        await studio.keyboard.type(' ');
+        await studio.waitForTimeout(800);
+        await studio.keyboard.press('Tab');
+        await studio.waitForTimeout(1500);
+        log('  formula bar edited (a trailing space).');
+      }
+      const en = await saveEnabled(studio);
+      if (en === false) {
+        log('  !! Save is still DISABLED: Studio sees nothing to save, and a save now persists nothing.');
+        log('     Select a property the push CHANGED and run `dirty --toggle <another valid value>` (e.g. a colour token).');
+        process.exitCode = 7;
+      } else log('  Save is ' + (en ? 'enabled' : 'in an unknown state') + ' - now `save`, and read "Saved: <time>" at or after the click.');
+    } catch (e) {
+      log('  !! dirty stopped part-way (' + String(e.message).split('\n')[0] + ').');
+      if (original) log('     Check the selected property reads exactly: ' + original.slice(0, 120) + ' - before any save.');
+      await capture(studio, 'dirty-failed');
+      process.exitCode = 4;
+    }
+  }
   await browser.close();
 }
 
@@ -1948,9 +2105,10 @@ async function cmdKeys() {
 
 async function cmdSave() {
   const { browser, ctx } = await attach();
-  const studio = studioPage(ctx);
+  const { page: studio, scan } = await editingTab(ctx);
   await studio.bringToFront();
   if (rx('studio.titleReadOnly').test(await studio.title())) { log('  READ-ONLY - a save cannot persist.'); await browser.close(); process.exitCode = 3; return; }
+  if (scan && scan.disconnected) { log('  !! Studio shows "There\'s been a disconnect". Not saving.'); log(DISCONNECT_NOTE); await capture(studio, 'save-disconnected'); await browser.close(); process.exitCode = 3; return; }
   const hit = await editorControl(studio, css('studio.saveButton'));
   if (!hit) { log('  !! no Save button in any authoring frame.'); await capture(studio, 'save-not-found'); await browser.close(); process.exitCode = 4; return; }
   await dismissBubbles(hit.frame);
@@ -1978,6 +2136,12 @@ async function cmdSave() {
   } else if (verdict === 'landed' || verdict === 'landed-untimed') {
     log('  SAVE LANDED: "Saved: ' + after + '"' + (before ? '  (was "' + before + '")' : '')
       + (verdict === 'landed-untimed' ? '  (no time of day in the stamp to compare with the click - check it by eye)' : ''));
+    // The proof a held push waits for: canvas-mcp.py hold releases only after a save newer than its push.
+    try {
+      mkdirSync(dirname(SAVE_PROOF()), { recursive: true });
+      writeFileSync(SAVE_PROOF(), JSON.stringify({ atMs: clickedAt.getTime(), at: clickedAt.toISOString(), stamp: after, verdict }, null, 1));
+      log('  save proof written: ' + SAVE_PROOF() + ' (a held push may now be released)');
+    } catch { /* unwritable work folder: release the hold by hand */ }
   } else if (after && after === before) {
     log('  !! "Saved: ' + after + '" did not move. Studio saw nothing to save: the change may live only in the');
     log('     co-authoring session (was Studio in Preview when it arrived?). Treat the save as NOT done.');
@@ -1985,13 +2149,17 @@ async function cmdSave() {
   } else {
     log('  !! could not read "Saved: <time>" from the Save flyout - open it by hand. Until then the save is UNPROVEN.');
   }
-  log('  Independent proof: a FRESH Studio session, or a pac canvas download after publish.');
+  log('  Independent proof: reload Studio, `canvas-mcp.py sync <scratch> --diff` (0 differences), or a pac canvas download after publish.');
   await browser.close();
 }
+const SAVE_PROOF = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'save-proof.json');
 
 // Publish once per batch. A measured build published 21 times; a publish costs minutes and proves
-// nothing new when the source has not changed. The canvas source's hash is recorded after each
-// publish (in the work folder); an unchanged source is refused unless --again is passed.
+// nothing new when the source has not changed. The hash recorded after each publish (in the work folder)
+// is the one the last SUCCESSFUL push sent (canvas-mcp.py writes last-push.json only on a clean push),
+// not the source on disk: measured, a publish after a push that never started recorded the new source,
+// and the next real publish was refused as "unchanged". With no push record, the source on disk.
+// An unchanged hash is refused unless --again is passed.
 function srcHash() {
   const dir = APP.canvasSrc ? resolve(REPO, APP.canvasSrc) : null;
   if (!dir || !existsSync(dir)) return null;
@@ -2000,6 +2168,9 @@ function srcHash() {
   return h.digest('hex');
 }
 const PUBLISH_LOG = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'publish-log.json');
+const LAST_PUSH = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'last-push.json');
+// Which hash a publish ships: the last clean push's when there is one, else the source on disk.
+export function publishHash(push, disk) { return push && push.hash ? { hash: push.hash, from: 'push' } : { hash: disk, from: 'source' }; }
 export function publishRefused(h, last, again) { return !!(h && last && last.hash === h && !again); }
 // One fix batch. The first publish ships the build and the second may repair what the first walks
 // found; from the third on, the screenshot critique and the independent review must both be back,
@@ -2029,11 +2200,16 @@ export function missingSources(want, text) {
 function publishLog() { try { return JSON.parse(readFileSync(PUBLISH_LOG(), 'utf8')); } catch { return []; } }
 
 async function cmdPublish() {
-  const hash = srcHash();
+  let push = null;
+  try { push = JSON.parse(readFileSync(LAST_PUSH(), 'utf8')); } catch { /* no push recorded: an import-path app */ }
+  const disk = srcHash();
+  const { hash, from } = publishHash(push, disk);
+  if (from === 'push' && disk && disk !== hash) log('  note: the source changed since the last clean push (' + push.at + '); this publish ships what was PUSHED, not the source on disk.');
   const plog = publishLog();
   const last = plog[plog.length - 1];
   if (publishRefused(hash, last, has('again'))) {
-    log('  REFUSED: the canvas source has not changed since the last publish (' + last.at + '). Publishing again re-tests nothing.');
+    log('  REFUSED: ' + (from === 'push' ? 'no clean push since' : 'the canvas source has not changed since') + ' the last publish (' + last.at + '). Publishing again re-tests nothing.');
+    if (from === 'push') log('  A push that failed or never started records nothing: push again and read PUSHED CLEAN first.');
     log('  Batch the fixes, push them, save, then publish once. --again publishes anyway (e.g. after a Studio-only change).');
     process.exitCode = 7; return;
   }
@@ -2058,8 +2234,9 @@ async function cmdPublish() {
   }
   const isFixBatch = plog.length >= 1 && REVIEW_FILES.every((f) => existsSync(join(REPO, f))) && !plog.some((e) => e && e.fixBatch);
   const { browser, ctx } = await attach();
-  const studio = studioPage(ctx);
+  const { page: studio, scan } = await editingTab(ctx);
   await studio.bringToFront();
+  if (scan && scan.disconnected && !has('reload-first')) { log('  !! Studio shows "There\'s been a disconnect". Not publishing.'); log(DISCONNECT_NOTE); await browser.close(); process.exitCode = 3; return; }
   if (has('reload-first')) {
     // Publish was measured inert (dialog opened, confirm clicked, nothing published) in a tab
     // that had carried a co-authoring push, and worked first time after a reload. Safe ONLY
@@ -2092,7 +2269,7 @@ async function cmdPublish() {
   log('  Publish ships what was SAVED when it started; the player can lag the publish by ten minutes.');
   try {
     mkdirSync(dirname(PUBLISH_LOG()), { recursive: true });
-    plog.push({ at: new Date().toISOString(), hash, ...(override ? { unreviewed: override } : {}), ...(batch ? { batch } : {}), ...(isFixBatch && !override && !batch ? { fixBatch: true } : {}) });
+    plog.push({ at: new Date().toISOString(), hash, from, ...(override ? { unreviewed: override } : {}), ...(batch ? { batch } : {}), ...(isFixBatch && !override && !batch ? { fixBatch: true } : {}) });
     writeFileSync(PUBLISH_LOG(), JSON.stringify(plog.slice(-50), null, 1));
     log('  publish ' + plog.length + ' of this build' + (plog.length > 4 ? ' - more than four publishes means fixes are being shipped one at a time; batch them.' : '.'));
   } catch { /* unwritable work folder */ }
@@ -2132,19 +2309,44 @@ async function leaveEditor(page) {
   return { ...seen, stillEditing: rx('studio.titleEditing').test(t) };
 }
 
+// End the `studio` process that holds the profile, when the browser it held is already gone.
+function killHolder() {
+  let pid = 0;
+  try { pid = Number(readFileSync(HOLDER_PID(), 'utf8').trim()); } catch { return false; }
+  if (!pid || pid === process.pid) return false;
+  try { process.kill(pid); log('  ended the studio holder process ' + pid + ' (its browser was gone; the profile is free)'); } catch { /* already gone */ }
+  try { rmSync(HOLDER_PID(), { force: true }); } catch { /* fine */ }
+  return true;
+}
+// A tab whose editor is gone (no Back, no Leave, still titled Editing) cannot be left through Back;
+// keeping it open kept the holder alive and the next `studio` failed PROFILE IN USE.
+export function editorGone(r) { return !!(r && r.stillEditing && !r.back && !r.leave && !r.preview); }
+
 async function cmdCloseStudio() {
   // Back, not a killed tab: a killed tab strands the edit lock (connect then returns a bare 422).
   // Exit preview first; accept the DOM "Leave" modal; a native beforeunload dialog follows, so
   // the handler is registered BEFORE the click.
-  const { browser, ctx } = await attach();
+  let browser, ctx;
+  try { ({ browser, ctx } = await attach()); } catch (e) {
+    log('  no browser on the debug port (' + String(e.message).split('\n')[0] + ').');
+    if (!killHolder()) log('  nothing to close.');
+    return;
+  }
   // Every Studio tab: a push can leave a blank first tab plus a second tab that joined the session.
   const pages = ctx.pages().filter(isStudioTab).reverse();
-  if (!pages.length) { log('no Studio page on the debug port'); await browser.close(); return; }
+  if (!pages.length) {
+    log('  no Studio page on the debug port - quitting the held browser so the profile is free');
+    try { const cdp = await browser.newBrowserCDPSession(); await cdp.send('Browser.close'); } catch { await browser.close().catch(() => {}); killHolder(); }
+    return;
+  }
   let stillEditing = false;
   for (const [k, page] of pages.entries()) {
     page.on('dialog', async (d) => { await d.accept().catch(() => {}); });
     const r = await leaveEditor(page);
-    log('  tab ' + (k + 1) + '/' + pages.length + ': ' + (r.stillEditing ? 'still in the editor' : 'left the editor'));
+    const gone = editorGone(r);
+    log('  tab ' + (k + 1) + '/' + pages.length + ': ' + (gone ? 'editor gone (no Back button) - closing the tab; a lock it held ages out in 30-60 minutes'
+      : r.stillEditing ? 'still in the editor' : 'left the editor'));
+    if (gone) { await page.close({ runBeforeUnload: false }).catch(() => {}); continue; }
     if (r.stillEditing) stillEditing = true;
   }
   log(stillEditing ? '  !! STILL IN THE EDITOR - close it by hand before the next compile or import' : '  edit lock released');
@@ -2789,8 +2991,8 @@ else if (!commands[cmd]) {
   log('  confirm <scenario.json> [--since ISO]   run only the scenario\'s Dataverse checks');
   log('  connection --connector dataverse|outlook|approvals|<api> --name N [--apply] [--json]');
   log('  create --name N --solution-id GUID [--form-factor tablet|phone] [--layout responsive|fixed] [--tables a,b] [--publish] [--close]');
-  log('  studio | keys [combo] | save | publish [--reload-first] | close-studio [--keep-browser] | shot <url> <name>');
-  log('  tabs | tidy [--all] [--studio] [--dry-run] | second-tab [--expect a,b] | studio-has <name...> | dirty');
+  log('  studio [--reload] | keys [combo] | save | publish [--reload-first] | close-studio [--keep-browser] | shot <url> <name>');
+  log('  tabs | tidy [--all] [--studio] [--dry-run] | second-tab [--expect a,b] | studio-has <name...> | dirty [--toggle <formula>]');
   log('  doctor [--player-only|--studio-only] [--record]   are the UI anchors in assets/selectors.json still valid?\n');
   log('  config:  ' + (CONFIG_PATH || '(none found - pass --config or create scripts/canvas-app.json)'));
   if (APP.appId) log('  app:     ' + (APP.appName || '') + '  ' + APP.appId);
