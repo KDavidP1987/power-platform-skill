@@ -288,6 +288,10 @@ evidence. Design each one so the broken version gives a different answer.
   written row. The restore scenario confirms the baseline the same way. Observed on the first real
   run: the screen's "Saved" step failed while the confirmation proved the row was written - the
   banner was outside the app frame (next bullet), not a failed save.
+- **Assert a write by its confirm, not by its toast.** A `Notify` success banner is gone after a
+  long settle, so an `expect` on it failed while the write had succeeded; an `expect` that caught
+  it would prove no more. Prove the write with the `confirm` check, or with a deterministic second
+  action whose answer depends on it (a once-a-day rule refusing the second attempt).
 - **`Notify()` banners are drawn by the player, outside the app's frame.** An `expect` that searched
   only the app frame reported "not in the DOM at all" for a success message plainly on screen. The
   bundled driver now searches the player's other frames when the app frame has no match.
@@ -336,8 +340,29 @@ evidence. Design each one so the broken version gives a different answer.
   normally - a render-timing artifact of the driven session (observed once). Record such cases so
   nobody re-investigates.
 - **Click the control, not its caption.** A Button's caption is also a text node; `getByText` can
-  hit a spot that is not the hit surface. Prefer role `button`, then the
+  hit a spot that is not the hit surface. Prefer role `checkbox`, then `button`, then the
   `div[data-control-name]` containing the text, then raw text.
+- **Match the whole name before a part of it, and treat two matches as a fault.** Matching click and
+  type targets by case-insensitive substring passed three steps that did the wrong thing: `into:
+  City` typed into a search box whose placeholder said "Search city", `click: RAR` pressed "New RAR"
+  (creating a form a step early), and `click: Close` hit a toast's close button. Each step passed;
+  the walk failed later or not at all. The bundled driver tries an exact accessible name first
+  (ignoring case and spacing), then substring, ranks text boxes by accessible name, placeholder and
+  label the same way, and warns when more than one control matched or when only a substring did.
+  `"exact": true` on a step refuses a substring match.
+- **Click by accessible name, and check the name of what was hit.** A click found by visible text
+  opened a date picker: the text sat over a control whose accessible name was something else. The
+  driver now warns when the control under the click is named without the step's text; give the step
+  that control's name instead.
+- **A classic CheckBox can take a click without toggling.** Clicking its wrapper reported OK and left
+  the box unticked, so the save wrote No while every step passed; only the Dataverse confirm caught
+  it. Click the checkbox by role (`getByRole('checkbox', { name })`), read its state before and
+  after, and fail when it did not change. The driver does both, and a write that depends on a
+  checkbox still needs a `confirm` on that column.
+- **Verify a modern DropDown by what the person sees.** Playwright's view of its listbox (the
+  `role=option` text) can differ from the rendered list. Drive it with `selectOption({ label })` on
+  the hidden native `<select>` that carries the options, and confirm the choice with a screenshot of
+  the opened list, not by option text alone.
 - **Choosing the option a ComboBox already holds can leave its list open**, and the open list
   swallows the next click (a row's Open button did nothing, then timed out). Press `Escape` after
   choosing, or check the list closed, before clicking anything else on the screen.
@@ -378,6 +403,12 @@ for (const d of await indexedDB.databases()) indexedDB.deleteDatabase(d.name);  
   admin-only label renders it; the scenario `expect`s it (top-level `"build"`). Then "the browser is
   on the build I just shipped" is a fact, not a hope. Elapsed time is not evidence; only the stamp
   is. **Reload and repeat before debugging a formula.**
+- **A stale player is not a failed ship: read the package before shipping again.** After a
+  successful publish the player kept serving the previous version through two reloads (about two
+  minutes) while the published package already held the new text. `pac canvas download` the app,
+  unpack it, and search the control's JSON under `Controls/` for the new text or the build stamp. If
+  it is there, the ship landed: wait, reload with `--fresh`, and read the stamp again. Re-shipping
+  instead adds a publish that proves nothing more and resets the wait.
 - **A browser session can stick to one back-end node.** Retries kept failing in one session while a
   fresh session succeeded, and one user was always broken while another was always fine; per-session
   schema divergence was the leading explanation (mechanism unverified). Before concluding, retry in a
@@ -508,7 +539,34 @@ selector (section 5), then save and publish. What goes wrong:
   reports px per char per CSS px, and the equivalent per unit of canvas `Size` (points, x 4/3).
 
 All four are scenario verbs in the bundled driver (`clipcheck`, `deadclick`, `scroll`,
-`measurefont`).
+`measurefont`), with `overlapcheck` for text-bearing controls that overlap as rendered.
+
+- **A layout change is gated by a whole-app sweep, after every publish.** One round of text-fit work
+  found what no static check could: columns clipped sideways by a few px (the widths were estimates)
+  and a totals row 32 px off its columns (a gallery offset missing). It took four rounds because each
+  fix was proved only in the player, one at a time. Keep one read-only scenario that visits every
+  screen and tab at desktop and phone width with `clipcheck` and `overlapcheck` on each, run it after
+  every publish that touches layout, and fix the whole batch of findings before the next publish
+  (a sweep finding does not stop the walk, so one run lists them all).
+- **Wait for a total to stop changing before comparing it.** Past the 2,000-row ceiling, a collection
+  filled in sequential chunks shows a PART total while it fills: a tile read 34.6M before 45.8M, and
+  a dashboard read blank and "$0" for about three minutes. An early read records a wrong total as a
+  defect; a late one hides the slowness. Read the value until two reads agree (the driver's `stable`
+  verb: `{"stable": "lblTotal", "every": 10000}`, which logs the time to a stable value and fails past
+  `within`), then compare. Set `every` longer than one chunk takes. Minutes to a stable figure is a
+  finding in itself: the screen needs a loading state until the last chunk lands.
+- **Print cannot be captured headless, but the call can.** Override `window.print` in every frame
+  before the step and record the call; the record proves the print path ran:
+
+```js
+for (const f of page.frames()) await f.evaluate(() => { window.__printed = 0; window.print = () => { window.__printed++; }; });
+// ... click the Print button ...
+const printed = (await Promise.all(page.frames().map((f) => f.evaluate(() => window.__printed || 0).catch(() => 0)))).reduce((a, b) => a + b, 0);
+```
+
+  In the app, drive `Print()` from a Timer (`Duration` 400, `Start` = a print flag the button sets,
+  `OnTimerEnd`: `Print()` then clear the flag), so the layout hides its chrome before the browser
+  prints.
 
 ## 14. Diagnosing without Monitor: the OData trace and the Monitor export
 
@@ -600,6 +658,13 @@ and a stale date nothing else read.
   element screenshot of the single open message's reading pane (header and body). A capture of the
   mail client shows the person's folder list and other mail; never publish one.
 
+**Serving a page to a browser: pick a free port and check what is served.** A local `http.server`
+on a fixed port (8765) collided with another session's server on the same machine: the page 404'd
+as if the file were missing, and the listing showed another project's folder. Let the system choose
+the port (`python -m http.server 0 --bind 127.0.0.1 --directory design`, then read the port it
+prints), and load the directory listing first to confirm it is your folder before navigating to the
+page.
+
 **Screenshots for the design critique.** After a ship, capture every published screen at 1440 and
 390 px and the report with `assets/templates/screenshot-walk.json` (replace its click targets with the
 app's navigation; it uses `viewport`, `capture` and `clipcheck`, so it also fails on clipped text).
@@ -651,6 +716,14 @@ row as the `confirm` check (changed during this run); a refusal gets it with
 `changedThisRun: false`, so the walk proves the row was left as it was, plus a dead-click sweep of
 the trigger screen; a `twice` scenario confirms exactly one row. Each skeleton still needs its build
 stamp and, when it writes, its restore.
+
+**Save, reopen, save: every edit form gets it by default.** An action that writes and whose success
+scenario types or selects a value is an edit form, and the script adds a `reopen` walk for it: the
+success steps, then leave the form (a `todo` to write against the real navigation), reopen the
+record, save again without editing, and confirm the row still holds the values and is still one
+row. A screen that reopened a saved form BLANK (a modern input reset to its value from before the
+edit) passed every other walk, three times in one session, and its no-change save wrote the blanks
+over the data. Write your own `reopen` scenario for the action to replace the generated one.
 
 **The rule this serves: every requirement is performed in the published app, not only traced in
 source.** A requirement whose only evidence is "the formula does it" is unverified. Static tracing

@@ -765,13 +765,166 @@ async function horizontalOverflow(page, frame) {
   return worst;
 }
 
+// --- target matching (pure, so --selftest proves it) -------------------------------------------
+// Click and type targets used to match by case-insensitive SUBSTRING across accessible names and
+// placeholders, taking the first hit. Each of these passed its step and failed later: `into: City`
+// typed into a search box whose placeholder said "Search city", `click: RAR` pressed "New RAR",
+// `click: Close` hit a toast's close button. So an exact name wins over a substring, and more than
+// one control at the winning tier is reported, not silently resolved to the first.
+const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+// 0 exact, 1 exact ignoring case, 2 substring ignoring case, null no match.
+export function matchTier(text, name) {
+  const t = norm(text), n = norm(name);
+  if (!t || !n) return null;
+  if (n === t) return 0;
+  const tl = t.toLowerCase(), nl = n.toLowerCase();
+  if (nl === tl) return 1;
+  if (nl.includes(tl)) return 2;
+  return null;
+}
+export const TIER_NAMES = ['exact', 'exact (case differs)', 'substring'];
+// cands: [{ names: [accessible name, placeholder, label, ...], visible }]. The best tier wins; within
+// it, every candidate is returned as `tied` so the caller can report an ambiguous target. Invisible
+// candidates count only when nothing visible matches (a canvas app keeps other screens in the DOM).
+export function rankTargets(text, cands, { exactOnly = false } = {}) {
+  const scored = cands.map((c, i) => {
+    const tiers = (c.names || []).map((n) => matchTier(text, n)).filter((x) => x !== null);
+    return { i, tier: tiers.length ? Math.min(...tiers) : null, visible: c.visible !== false };
+  }).filter((s) => s.tier !== null && (!exactOnly || s.tier < 2));
+  const pool = scored.some((s) => s.visible) ? scored.filter((s) => s.visible) : scored;
+  if (!pool.length) return { best: -1, tier: null, tied: [] };
+  const tier = Math.min(...pool.map((s) => s.tier));
+  const tied = pool.filter((s) => s.tier === tier).map((s) => s.i);
+  return { best: tied[0], tier, tied };
+}
+// The control a click lands on can be named differently from the text that found it (a date picker
+// opened when the text sat over it). Warn when the hit control's accessible name lacks the text.
+export function nameMismatch(text, accessibleName) {
+  const n = norm(accessibleName);
+  return !!n && matchTier(text, n) === null;
+}
+const escapeRx = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const exactRx = (text) => new RegExp('^\\s*' + escapeRx(norm(text)).replace(/ /g, '\\s+') + '\\s*$', 'i');
+// A chunked collection shows a PART-loaded total while it fills (a tile read 34.6M before 45.8M, a
+// dashboard read blank and "$0" for about 3 minutes). samples: [{ t: ms since start, text }]. Stable
+// = the same non-empty text on `reads` consecutive samples; `at` is when it first read that value.
+export function settleVerdict(samples, { reads = 2 } = {}) {
+  let run = 0;
+  for (let k = 0; k < samples.length; k++) {
+    const v = norm(samples[k].text);
+    run = v && k > 0 && v === norm(samples[k - 1].text) ? run + 1 : (v ? 1 : 0);
+    if (run >= reads) {
+      const first = samples[k - reads + 1];
+      return { stable: true, value: v, at: first.t, changes: new Set(samples.slice(0, k + 1).map((s) => norm(s.text))).size - 1 };
+    }
+  }
+  const last = samples[samples.length - 1];
+  return { stable: false, value: last ? norm(last.text) : '', at: null, changes: new Set(samples.map((s) => norm(s.text))).size - 1 };
+}
+
+// --- target resolution in the player (uses the pure functions above) ---------------------------
+const CHECKBOX_SEL = 'input[type="checkbox"], [role="checkbox"]';
+async function checkedState(loc) {
+  return loc.evaluate((e) => {
+    const b = e.matches('input[type="checkbox"], [role="checkbox"]') ? e : e.querySelector('input[type="checkbox"], [role="checkbox"]');
+    if (!b) return null;
+    return b.matches('input') ? b.checked : b.getAttribute('aria-checked') === 'true';
+  }).catch(() => null);
+}
+// The accessible name of the control a click on this locator lands on: whatever is painted at its
+// centre (something else may sit over the text), else the interactive element around or inside it.
+async function hitName(loc) {
+  return loc.evaluate((e) => {
+    const sel = 'button, [role="button"], [role="checkbox"], [role="link"], [role="tab"], [role="menuitem"], a, input, select, textarea';
+    const r = e.getBoundingClientRect();
+    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    const at = top && !e.contains(top) && !top.contains(e) ? top.closest(sel) : null;
+    const b = at || (e.matches(sel) ? e : (e.closest(sel) || e.querySelector(sel)));
+    if (!b) return '';
+    const by = (b.getAttribute('aria-labelledby') || '').split(/\s+/).map((id) => document.getElementById(id)).filter(Boolean).map((x) => x.textContent).join(' ');
+    return b.getAttribute('aria-label') || by || b.getAttribute('title') || b.innerText || b.value || '';
+  }).catch(() => '');
+}
+async function namesOf(loc, max = 6) {
+  return loc.evaluateAll((els, m) => els.slice(0, m).map((e) => (e.getAttribute('aria-label') || e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40)), max).catch(() => []);
+}
+// Click: tiers in order, exact name before substring; within a tier, checkbox before button before
+// the control wrapper before raw text (a caption is a separate text node and can sit outside the
+// hit surface). Reports a tier holding more than one match, and a hit control whose name lacks the text.
+async function clickTarget(frame, text, nth, exactOnly) {
+  const ex = exactRx(text);
+  const tiers = [
+    ['exact name', [['checkbox', frame.getByRole('checkbox', { name: ex })], ['button', frame.getByRole('button', { name: ex })],
+      ['link', frame.getByRole('link', { name: ex })], ['tab', frame.getByRole('tab', { name: ex })], ['menuitem', frame.getByRole('menuitem', { name: ex })]]],
+    ['exact text', [['control', frame.locator(CONTROL).filter({ hasText: ex })], ['text', frame.getByText(ex)]]],
+  ];
+  if (!exactOnly) tiers.push(['substring', [['checkbox', frame.getByRole('checkbox', { name: text, exact: false })], ['button', frame.getByRole('button', { name: text, exact: false })],
+    ['control', frame.locator(CONTROL).filter({ hasText: text })], ['text', frame.getByText(text, { exact: false })]]]);
+  for (const [tierName, shapes] of tiers) {
+    for (const [shape, loc] of shapes) {
+      const n = await loc.count();
+      if (n <= nth) continue;
+      const t = loc.nth(nth);
+      try { await t.waitFor({ state: 'visible', timeout: 15000 }); } catch { continue; }
+      const notes = [];
+      if (n > 1 && !nth) notes.push(n + ' controls matched "' + text + '" (' + tierName + ', ' + shape + '): ' + (await namesOf(loc)).map((x) => '"' + x + '"').join(', ') + ' - clicked the first; give "nth" or a more exact name');
+      if (tierName === 'substring') notes.push('no control is named exactly "' + text + '"; matched by substring (' + shape + ') - "exact": true refuses this');
+      const name = await hitName(t);
+      if (nameMismatch(text, name)) notes.push('the control clicked is named "' + norm(name).slice(0, 60) + '", which does not contain "' + text + '" - click it by that name');
+      // A checkbox hit by any shape: remember its state, so the caller can prove it toggled.
+      const box = shape === 'checkbox' ? t : ((await t.locator(CHECKBOX_SEL).count().catch(() => 0)) ? t : null);
+      const before = box ? await checkedState(box) : null;
+      try { await t.click({ timeout: 15000 }); } catch { continue; }
+      return { how: tierName + ', ' + shape, notes, checkbox: box, before };
+    }
+  }
+  return null;
+}
+// Type: rank every text box by accessible name, placeholder and label (exact first), among the
+// visible ones; report a tie. Falls back to Playwright's own label lookup.
+const TEXTBOX_SEL = 'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]), textarea';
+async function typeTarget(frame, into, nth, exactOnly) {
+  const all = frame.locator(TEXTBOX_SEL);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 30000) {
+    const cands = await all.evaluateAll((els) => els.map((e) => {
+      const by = (e.getAttribute('aria-labelledby') || '').split(/\s+/).map((id) => document.getElementById(id)).filter(Boolean).map((x) => x.textContent);
+      const labels = Array.from(e.labels || []).map((l) => l.textContent);
+      const r = e.getBoundingClientRect(); const cs = getComputedStyle(e);
+      return { names: [e.getAttribute('aria-label'), e.getAttribute('placeholder'), e.getAttribute('title'), ...by, ...labels].filter(Boolean),
+        visible: r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' };
+    })).catch(() => []);
+    const rk = rankTargets(into, cands, { exactOnly });
+    if (rk.best >= 0 && cands[rk.best].visible) {
+      const pick = rk.tied[Math.min(nth, rk.tied.length - 1)];
+      const notes = [];
+      if (rk.tied.length > 1 && !nth) notes.push(rk.tied.length + ' text boxes matched "' + into + '" (' + TIER_NAMES[rk.tier] + '): ' + rk.tied.slice(0, 6).map((k) => '"' + cands[k].names[0] + '"').join(', ') + ' - typed into the first; give "nth" or a more exact name');
+      if (rk.tier === 2) notes.push('no text box is named exactly "' + into + '"; matched "' + cands[pick].names.find((x) => matchTier(into, x) === 2) + '" by substring - "exact": true refuses this');
+      return { box: all.nth(pick), how: TIER_NAMES[rk.tier], notes };
+    }
+    await frame.page().waitForTimeout(500);
+  }
+  if (exactOnly) return null;
+  const byLabel = frame.getByLabel(into, { exact: false });
+  if (await byLabel.count()) return { box: byLabel.first(), how: 'label lookup', notes: ['matched only by Playwright\'s label lookup, not by name or placeholder'] };
+  return null;
+}
+
 // --- scenario steps --------------------------------------------------------------------------
 // Verbs (combine freely in one step; they run in this order):
 //   {"wait": 3000}                          settle
 //   {"viewport": [390, 844]}                re-lay out at another size; horizontal scroll is then
 //                                           measured and fails the step ("mustBeClean": false notes it)
-//   {"click": "Approve", "nth": 0}          click a control by accessible name / text (0-based nth)
-//   {"type": "abc", "into": "Search"}       fill by placeholder/label, then Tab so .Value commits
+//   {"click": "Approve", "nth": 0}          click a control by accessible name / text (0-based nth). An
+//                                           exact name beats a substring; checkbox, then button, then
+//                                           the control wrapper, then text. A checkbox must toggle.
+//   {"type": "abc", "into": "Search"}       fill by accessible name/placeholder/label (exact first),
+//                                           then Tab so .Value commits
+//   "exact": true                           with click/type: refuse a substring-only match
+//   {"stable": "lblTotal", "within": 300000, "every": 10000, "reads": 2}
+//                                           read a control's text until two reads agree (a chunked
+//                                           load shows part totals while it fills); logs time-to-stable,
+//                                           FAILS past "within", notes a fill over a minute
 //   {"select": "Closed", "nth": 1}          choose an option in the nth <select> (DropDown)
 //   {"fillCell": 3, "value": "7.5"}         fill the nth text input in the frame, then Tab
 //   {"expect": "Saved"}                     FAIL unless that text is visibly on screen
@@ -820,39 +973,56 @@ async function runSteps(page, frameRef, steps, results) {
       }
 
       if (step.click) {
-        // Prefer the control over its caption text: a caption is a separate text node and can
-        // sit outside the hit surface - the click "succeeds" and nothing happens.
-        const candidates = [
-          frame.getByRole('button', { name: step.click, exact: false }),
-          frame.locator(CONTROL).filter({ hasText: step.click }),
-          frame.getByText(step.click, { exact: false }),
-        ];
         // nth is 0-based, and a gallery keeps every row in the DOM: after a filter, the row
         // you mean is nth 0; a higher nth can hit an unpainted row that swallows the click.
         const nth = Number(step.nth || 0);
-        let clicked = false;
-        for (const c of candidates) {
-          if (await c.count() <= nth) continue;
-          const t = c.nth(nth);
-          try { await t.waitFor({ state: 'visible', timeout: 15000 }); await t.click({ timeout: 15000 }); clicked = true; break; }
-          catch { /* next shape */ }
-        }
-        if (!clicked) throw new Error('nothing clickable matched "' + step.click + '"');
-        log(tag + 'click "' + step.click + '"' + (nth ? ' [nth ' + nth + ']' : '') + '  OK');
+        const hit = await clickTarget(frame, String(step.click), nth, !!step.exact);
+        if (!hit) throw new Error('nothing clickable matched "' + step.click + '"' + (step.exact ? ' exactly' : ''));
+        hit.notes.forEach((n) => log(tag + 'warn: ' + n));
+        log(tag + 'click "' + step.click + '"' + (nth ? ' [nth ' + nth + ']' : '') + '  OK  (' + hit.how + ')');
         await page.waitForTimeout(Number(step.settle || 3500));
+        // A classic CheckBox's wrapper takes the click and does not toggle: the save then wrote No
+        // while every step passed. Read the box again after the settle; unchanged is a failure.
+        if (hit.checkbox && hit.before !== null) {
+          const after = await checkedState(hit.checkbox);
+          if (after === hit.before) throw new Error('checkbox "' + step.click + '" is still ' + (after ? 'checked' : 'unchecked') + ' after the click - the click did not toggle it');
+          log(tag + 'checkbox "' + step.click + '" ' + (hit.before ? 'checked -> unchecked' : 'unchecked -> checked'));
+        }
       }
 
       if (step.type !== undefined) {
         // fill() then Tab. A TextInput publishes .Value on BLUR; without it the box shows the
         // text and every formula reading .Value behaves as if nothing was typed.
-        let box = frame.getByPlaceholder(step.into, { exact: false }).first();
-        if (await box.count() === 0) box = frame.getByLabel(step.into, { exact: false }).first();
+        const found = await typeTarget(frame, String(step.into), Number(step.nth || 0), !!step.exact);
+        if (!found) throw new Error('no text box matched "' + step.into + '"' + (step.exact ? ' exactly' : '') + ' by accessible name, placeholder or label');
+        found.notes.forEach((n) => log(tag + 'warn: ' + n));
+        const box = found.box;
         await box.waitFor({ state: 'visible', timeout: 30000 });
         await box.click();
         await box.fill(String(step.type));
         if (step.blur !== false) await page.keyboard.press('Tab');
-        log(tag + 'type "' + step.type + '" into "' + step.into + '"  OK (blurred to commit)');
+        log(tag + 'type "' + step.type + '" into "' + step.into + '"  OK (' + found.how + '; blurred to commit)');
         await page.waitForTimeout(Number(step.settle || 3000));
+      }
+
+      if (step.stable !== undefined) {
+        // Read the control's text until it stops changing. One early read of a chunked load records
+        // a part total as a defect; one late read hides minutes of blank tiles from the person.
+        const within = Number(step.within || 300000), every = Number(step.every || 10000);
+        const el = frame.locator('[' + CTRL_ATTR + '="' + String(step.stable).replace(/"/g, '') + '"]').first();
+        const samples = []; const t0 = Date.now();
+        let v = { stable: false };
+        while (Date.now() - t0 <= within) {
+          samples.push({ t: Date.now() - t0, text: await el.innerText({ timeout: 5000 }).catch(() => '') });
+          v = settleVerdict(samples, { reads: Number(step.reads || 2) });
+          if (v.stable) break;
+          await page.waitForTimeout(every);
+        }
+        if (!v.stable) throw new Error('"' + step.stable + '" never read the same twice in ' + Math.round(within / 1000) + ' s (last "' + (samples.at(-1) || {}).text + '")');
+        const secs = Math.round(v.at / 1000);
+        log(tag + 'stable "' + step.stable + '" = "' + v.value + '" after ' + secs + ' s' + (v.changes ? ' (' + v.changes + ' earlier reading(s))' : ''));
+        if (v.at > 60000) log(tag + 'note: ' + secs + ' s to a stable value is itself a finding - the person sees part or blank figures meanwhile');
+        results.passed.push('stable:' + step.stable);
       }
 
       if (step.select !== undefined) {
@@ -980,7 +1150,7 @@ async function runSteps(page, frameRef, steps, results) {
 }
 
 // --- scenario lint (no browser) ---------------------------------------------------------------
-const VERBS = new Set(['wait', 'viewport', 'radio', 'pick', 'from', 'click', 'nth', 'type', 'into', 'blur', 'select', 'fillCell', 'value', 'expect', 'absent',
+const VERBS = new Set(['wait', 'viewport', 'radio', 'pick', 'from', 'click', 'nth', 'exact', 'type', 'into', 'blur', 'stable', 'within', 'every', 'reads', 'select', 'fillCell', 'value', 'expect', 'absent',
   'scroll', 'clipcheck', 'deadclick', 'overlapcheck', 'measurefont', 'capture', 'mustBeClean', 'settle', 'note']);
 export function lintScenario(sc) {
   const errs = [];
@@ -999,9 +1169,12 @@ export function lintScenario(sc) {
     if ('pick' in st && !st.from) errs.push(`step ${i + 1}: "pick" needs "from" (the dropdown's accessible name)`);
     if ('from' in st && !('pick' in st)) errs.push(`step ${i + 1}: "from" is only used with "pick"`);
     if ('radio' in st && !(typeof st.radio === 'string' && st.radio.trim())) errs.push(`step ${i + 1}: "radio" is the option's visible label`);
-    if (!keys.some((k) => !['nth', 'into', 'from', 'blur', 'value', 'mustBeClean', 'settle', 'note'].includes(k))) errs.push(`step ${i + 1}: no action or assertion`);
+    if ('exact' in st && !('click' in st || 'type' in st)) errs.push(`step ${i + 1}: "exact" is only used with "click" or "type"`);
+    for (const k of ['within', 'every', 'reads']) if (k in st && !('stable' in st)) errs.push(`step ${i + 1}: "${k}" is only used with "stable"`);
+    if ('stable' in st && !(typeof st.stable === 'string' && /^[A-Za-z_][\w]*$/.test(st.stable))) errs.push(`step ${i + 1}: "stable" is the control's name (data-control-name), for example lblTotal`);
+    if (!keys.some((k) => !['nth', 'exact', 'into', 'from', 'blur', 'value', 'within', 'every', 'reads', 'mustBeClean', 'settle', 'note'].includes(k))) errs.push(`step ${i + 1}: no action or assertion`);
   });
-  if (!(sc.steps || []).some((st) => st.expect || st.absent || st.deadclick || st.clipcheck || st.overlapcheck)) {
+  if (!(sc.steps || []).some((st) => st.expect || st.absent || st.stable || st.deadclick || st.clipcheck || st.overlapcheck)) {
     errs.push('scenario asserts nothing (no expect/absent/deadclick/clipcheck/overlapcheck) - it would pass vacuously');
   }
   // Every write is production data. A scenario that saves must say so ("writes": true) and say
@@ -1148,8 +1321,9 @@ function selectorTableProblems() {
 function selftest() {
   const good = { name: 'ok', steps: [{ click: 'Approvals', settle: 3000 }, { type: 'x', into: 'Search' }, { expect: 'Saved' }, { deadclick: 'scr' }] };
   const bad = { name: 'a/b', steps: [{ clik: 'Approvals' }, { type: 'x' }, { nth: 1 }, { click: 'Open', nth: -1 },
-    { viewport: [390] }, { pick: 'Laptop' }, { from: 'Type' }, { radio: '' }] };
-  const goodPhone = { name: 'phone', steps: [{ viewport: [390, 844] }, { pick: 'Laptop', from: 'Asset type' }, { radio: 'Approved' }, { clipcheck: 'scr' }] };
+    { viewport: [390] }, { pick: 'Laptop' }, { from: 'Type' }, { radio: '' }, { expect: 'x', exact: true }, { stable: 'lbl Total' }, { expect: 'y', within: 1000 }] };
+  const goodPhone = { name: 'phone', steps: [{ viewport: [390, 844] }, { pick: 'Laptop', from: 'Asset type' }, { radio: 'Approved' }, { clipcheck: 'scr' },
+    { click: 'Close', exact: true }, { type: 'Leeds', into: 'City', exact: true }, { stable: 'lblTotal', within: 300000, every: 10000, reads: 3 }] };
   const goodWrite = { name: 'edit-then-revert', writes: true, restore: 'revert-edit', steps: [{ fillCell: 0, value: '7.5' }, { expect: 'Saved' }],
     confirm: [{ entitySet: 'app_timeentries', filter: "app_name eq 'TEST-1'", expect: { app_hours: 7.5 }, count: 1 }] };
   const badWrite = { name: 'edit', writes: true, steps: [{ fillCell: 0, value: '7.5' }, { expect: 'Saved' }] };
@@ -1160,7 +1334,7 @@ function selftest() {
   const b = [...lintScenario(bad), ...lintScenario(badWrite), ...lintScenario(badConfirm), ...lintScenario(absentOnly)];
   const want = ['file-name safe', 'unknown verb', 'needs "into"', 'no action', '0-based', 'asserts nothing', 'no "restore"', 'no "confirm"',
     'entity set name', '"filter" is required', 'unknown key', 'object of column', 'asserts nothing: give', 'cannot be combined',
-    '[width, height]', '"pick" needs "from"', 'only used with "pick"', 'visible label'];
+    '[width, height]', '"pick" needs "from"', 'only used with "pick"', 'visible label', '"exact" is only used', '(data-control-name)', 'only used with "stable"'];
   // Tab hygiene: what tidy treats as blank, as the Studio editor, and as anything else.
   const T = [['about:blank', 'blank'], ['chrome-error://chromewebdata/', 'blank'], ['edge://newtab/', 'blank'],
     ['https://make.powerapps.com/e/E/canvas/?action=edit&app-id=x', 'studio'], ['https://make.powerapps.com/e/E/apps', 'other'],
@@ -1255,8 +1429,32 @@ function selftest() {
     rmSync(tmp, { recursive: true, force: true });
   } catch (e) { S.push(['playwright roots: ' + e.message, false]); }
   tabs.push(...S.filter(([, okc]) => !okc).map(([k]) => 'save/second-tab/clip: ' + k));
+  // Target matching: an exact name beats a substring, and a tie is reported (walks 34, 36, 37).
+  const box = (names, visible = true) => ({ names, visible });
+  const M = [
+    ['exact beats substring: into City', rankTargets('City', [box(['Search city']), box(['City'])]).best === 1],
+    ['exact beats substring: click RAR', rankTargets('RAR', [box(['New RAR']), box(['RAR'])]).best === 1],
+    ['case-only difference is tier 1', rankTargets('city', [box(['Search city']), box(['City'])]).tier === 1],
+    ['substring still found when nothing is exact', rankTargets('City', [box(['Search city'])]).tier === 2],
+    ['exactOnly refuses a substring-only match', rankTargets('City', [box(['Search city'])], { exactOnly: true }).best === -1],
+    ['two exact matches are reported as tied', rankTargets('Close', [box(['Close']), box(['Dismiss']), box(['Close'])]).tied.length === 2],
+    ['placeholder counts as a name', rankTargets('Reason', [box(['txtNotes', 'Notes']), box(['txtReason', 'Reason'])]).best === 1],
+    ['a visible match beats a hidden exact one', rankTargets('City', [box(['City'], false), box(['Search city'])]).best === 1],
+    ['hidden matches count when none is visible', rankTargets('City', [box(['City'], false)]).best === 0],
+    ['no match', rankTargets('City', [box(['Country'])]).best === -1],
+    ['whitespace normalised', matchTier('  Save  record ', 'Save record') === 0],
+    ['clicked control named otherwise is flagged', nameMismatch('Submit', 'Date picker: choose a date')],
+    ['clicked control containing the text is not', !nameMismatch('Submit', 'Submit request') && !nameMismatch('Submit', '')],
+    ['exactRx is whole-name and case-insensitive', exactRx('New RAR').test(' new  rar ') && !exactRx('RAR').test('New RAR') && exactRx('a.b (x)').test('a.b (x)') && !exactRx('a.b').test('axb')],
+    // A chunked load: blank, a part total, then the full total twice.
+    ['part total is not stable', settleVerdict([{ t: 0, text: '' }, { t: 10, text: '34.6M' }, { t: 20, text: '45.8M' }]).stable === false],
+    ['stable on two equal reads, timed at the first', (() => { const v = settleVerdict([{ t: 0, text: '' }, { t: 10, text: '34.6M' }, { t: 20, text: '45.8M' }, { t: 30, text: '45.8M' }]); return v.stable && v.value === '45.8M' && v.at === 20; })()],
+    ['blank reads never count as stable', settleVerdict([{ t: 0, text: '' }, { t: 10, text: ' ' }]).stable === false],
+    ['reads: 3 needs three equal reads', settleVerdict([{ t: 0, text: '$0' }, { t: 10, text: '$0' }], { reads: 3 }).stable === false],
+  ];
+  tabs.push(...M.filter(([, okc]) => !okc).map(([k]) => 'target matching: ' + k));
   const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0 && tabs.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 23 publish-guard, review-gate, fix-batch, data-source, profile-copy, terms-dialog and auto-tidy cases, ${S.length} save-stamp, second-tab, clipcheck, channel and Playwright-lookup cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 23 publish-guard, review-gate, fix-batch, data-source, profile-copy, terms-dialog and auto-tidy cases, ${S.length} save-stamp, second-tab, clipcheck, channel and Playwright-lookup cases, ${M.length} target-matching and settle cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
          : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}], tabs -> [${tabs.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }
