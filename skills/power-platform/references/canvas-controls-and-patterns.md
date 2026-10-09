@@ -599,7 +599,7 @@ relying on `DisplayMode`.
 - **A permission matrix as a four-level ladder** (Hidden / Viewable / Editable / Create new), stored
   as three booleans and mapped in one place, also collapses contradictory combinations.
 - **A way back into an admin screen is a way in.** A shared detail screen with a contextual Back
-  (`If(gblReturnTo = "Governance", Navigate(DataGovernance), Back())`) made an admin-only screen
+  (`If(gblReturnTo = "Quality", Navigate(scrDataQuality), Back())`) made an admin-only screen
   reachable from an ungated one, and through that screen's own Back to the admin hub the
   permission audit's door inference rated 17 admin writes as ungated. An admin screen gates its own
   exits (`Visible: =gblIsAdmin` on its onward navigation, a Home button for everyone else) and carries
