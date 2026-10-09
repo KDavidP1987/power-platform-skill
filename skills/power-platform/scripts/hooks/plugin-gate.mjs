@@ -625,7 +625,7 @@ export function evaluatePre(root, input = {}, env = process.env) {
     }
   }
   // B. plan before schema
-  if (isShell && /deploy-tables\.py/i.test(cmd) && !/--plan\b/.test(cmd)) {
+  if (isShell && runsDeployer(cmd)) {
     const ok = planReady(root);
     if (ok !== true) {
       return `Power Platform order gate (power-platform plugin) [Dataverse]: plan before schema. Tables are deployed only once ${ok} exists; ` +
@@ -633,6 +633,23 @@ export function evaluatePre(root, input = {}, env = process.env) {
     }
   }
   return null;
+}
+
+// Does this shell command RUN the schema deployer for real? Only a segment whose program is the script
+// (or an interpreter given it) counts, and --plan, --selftest and --help are dry. A git diff, a grep or a
+// commit message that merely names the file is not a deploy (the gate blocked reading it).
+export function runsDeployer(cmd) {
+  for (const seg of String(cmd).split(/&&|\|\||[;|&\n]/)) {
+    const toks = seg.trim().split(/\s+/).filter((t) => t && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)).map((t) => t.replace(/^["']|["']$/g, ''));
+    if (!toks.length) continue;
+    const prog = path.basename(toks[0]).toLowerCase();
+    const at = /^deploy-tables\.py$/.test(prog) ? 0
+      : /^(python[0-9.]*|py)(\.exe)?$/.test(prog) ? toks.findIndex((t, i) => i > 0 && /deploy-tables\.py$/i.test(t)) : -1;
+    if (at < 0) continue;
+    if (toks.slice(at + 1).some((t) => /^(--plan|--selftest|--help|-h)$/.test(t))) continue;
+    return true;
+  }
+  return false;
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -694,6 +711,9 @@ function selftest() {
     for (const n of ['A', 'B', 'C']) rm(`canvas/app/Src/${n}.pa.yaml`);
     check('A: other tools are allowed', pre('Read', { file_path: path.join(tmp, 'canvas/app/Src/Loans.pa.yaml') }), silent);
     check('B: deploy-tables without a plan is denied', pre('Bash', { command: 'python scripts/deploy-tables.py --solution X' }), denies('plan before schema', 'acceptance-contract.md'));
+    check('B: reading or diffing the deployer is not a deploy', pre('Bash', { command: 'git diff main -- scripts/deploy-tables.py && grep -n default scripts/deploy-tables.py' }), silent);
+    check('B: the deployer selftest is not a deploy', pre('Bash', { command: 'cd x && python scripts/deploy-tables.py --selftest' }), silent);
+    check('B: a deploy after a cd is still a deploy', pre('Bash', { command: 'cd x && python3 "scripts/deploy-tables.py" --manifest t.json' }), denies('plan before schema'));
     check('B: deploy-tables --plan is allowed', pre('Bash', { command: 'python scripts/deploy-tables.py --plan' }), silent);
     fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });
     fs.copyFileSync(TEMPLATE, path.join(tmp, 'docs', 'acceptance-contract.md'));
