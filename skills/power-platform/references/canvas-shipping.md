@@ -351,7 +351,7 @@ re-published the old app; only a check of the published app caught it.
 | Step | Go on only when | Otherwise |
 |---|---|---|
 | `canvas-browser.mjs studio` (or `studio --reload`) | it prints `STUDIO READY` | it exits 3 (read-only, or no edit mode in 3 minutes) or 5 (profile in use): stop, `close-studio`, start again |
-| `canvas-mcp.py hold` | it prints `PUSHED CLEAN ... SESSION HELD` | it exits 1 (no session, errors, unreadable output, server did not start): nothing was pushed - stop; do not save or publish |
+| `canvas-mcp.py hold`, started in the background (a foreground call blocks until release, times out, and the push dies with it before the save) | it prints `PUSHED CLEAN ... SESSION HELD` | it exits 1 (no session, errors, unreadable output, server did not start): nothing was pushed - stop; do not save or publish |
 | read-back | the changed property reads the new value in Studio | wrong session or an unapplied push: reload, push again |
 | `dirty` (when Save is disabled) | it exits 0 and says Save is enabled | exit 7: toggle a property the push changed (`dirty --toggle`) |
 | `save` | it prints `SAVE LANDED` with a stamp at or after the click | exit 7 (UNPROVEN, or nothing to save) or 3 (disconnected, read-only): do not release, do not publish |

@@ -391,6 +391,9 @@ export function transcriptFacts(transcriptPath) {
   }
   const killed = (out) => typeof out === 'string' && /\[killed\]\s*$/.test(readFileSafe(out).slice(-200));
   facts.pending = [...started.entries()].filter(([id, out]) => !done.has(id) && !killed(out)).map(([id]) => id);
+  // A driver holding Studio open (for the person's Publish click) never exits on its own: name it, so the
+  // message says how to end it rather than "wait for it".
+  facts.studioHolders = facts.pending.filter((id) => typeof started.get(id) === 'string' && /Holding Studio open|STUDIO READY/.test(readFileSafe(started.get(id))));
   return facts;
 }
 export function unattended(root, facts, env = process.env) {
@@ -453,7 +456,11 @@ export function runChecks(root, input = {}, env = process.env) {
     out.push(`Background shell work started in this session is still running (${facts.pending.slice(0, 5).join(', ')}). ` +
       'When this turn ends a headless run ends with it and the work is killed. Wait for it now (Monitor with an until-loop on its ' +
       'output, or read the output file once its notification arrives), act on the result, then finish. Run walks and other ' +
-      'checks you need the answer to in the foreground (timeout up to 600000 ms) or inside a helper agent.');
+      'checks you need the answer to in the foreground (timeout up to 600000 ms) or inside a helper agent.' +
+      ((facts.studioHolders || []).length ? ` ${facts.studioHolders.join(', ')} ${facts.studioHolders.length > 1 ? 'hold' : 'holds'} Studio open and will not exit ` +
+        'on its own. Close Studio the way a person does - node canvas-browser.mjs close-studio (Back, then Leave, which frees the edit ' +
+        'lock; the holder then exits) - and confirm the task finished. Do not kill the browser: that races the Leave dialog in Studio and can ' +
+        'keep the lock. A project with its own browser driver should take close-studio and tidy from the skill.' : ''));
   }
   if (pp && unattended(root, facts, env) && asksPerson(facts.lastText)) {
     out.push('No person is present in this run, so a question will not be answered. Do not end the turn on one: take your own ' +
@@ -944,6 +951,11 @@ function selftest() {
       check('R1: output ending in [killed] is finished', facts([res(`Command running in background with ID: hold2. Output is being written to: ${outF}`)]), (g) => g.length === 0);
       fs.writeFileSync(outF, 'studio ready\n');
       check('R1: a live holder is still running', facts([res(`Command running in background with ID: hold3. Output is being written to: ${outF}`)]), (g) => g.join() === 'hold3');
+      fs.writeFileSync(outF, 'STUDIO READY\n\nHolding Studio open. Leave with `close-studio`, never by killing the window.\n');
+      fs.writeFileSync(T, res(`Command running in background with ID: hold4. Output is being written to: ${outF}`));
+      check('R1: a Studio holder is named, with close-studio as the way out', transcriptFacts(T).studioHolders, (g) => g.join() === 'hold4');
+      fs.writeFileSync(outF, 'walk 3 of 9\n');
+      check('R1: other background work is not called a Studio holder', transcriptFacts(T).studioHolders, (g) => g.length === 0);
       fs.rmSync(sx, { recursive: true, force: true });
     }
   } finally {
