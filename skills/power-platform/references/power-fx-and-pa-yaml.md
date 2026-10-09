@@ -200,6 +200,13 @@ in Preview, against the same data, before theorising (`browser-verification.md` 
   'Is Active (Projects)'.Yes)`. Writing a real boolean into a Two Options column is fine.
   - `Coalesce(Record.YesNo, false)` still has the table-scoped type, so `UpdateContext` and a
     boolean variable reject it; `If(Record.YesNo, true, false)` produces a real boolean.
+  - **Where it does compile, `Coalesce(rec.'Flag', false)` always reads false.** Every location
+    code showed Inactive, and a checkbox showed a saved Yes unticked - so the next save wrote No and
+    logged a change nobody made. Seen on an old table and on columns created the same day. Read it
+    as `rec.'Flag' = 'Flag (Locations)'.Yes`, and write it as
+    `If(x, 'Flag (Locations)'.Yes, 'Flag (Locations)'.No)`. `check-pa-yaml.mjs` notes (does not
+    block) a `Coalesce(<record>.'Quoted Column', true|false)`; a boolean column of a collection you
+    built is a real boolean and is fine.
   - Two different option sets are different types even with identical labels; a lookup to the
     same table assigns straight across. For a picklist whose members differ, coerce with `& ""`
     and `Switch`, or use one global choice for a shared meaning.
@@ -250,7 +257,12 @@ in Preview, against the same data, before theorising (`browser-verification.md` 
   columns on a table share a display name, formulas must use `'Order Name (app_name)'`; a custom
   `Status` column pushes the built-in one to `'Status (statecode)'` and plain `Status` silently
   binds the custom column, while the option set stays `'Status (Orders)'`. A lookup's displayed name
-  can need the same treatment: `p.'Business Unit'.'Business Unit (app_name)'`. Tools that match
+  can need the same treatment: `p.'Business Unit'.'Business Unit (app_name)'`. **The primary name
+  column collides with the table itself** when the two share a display name: a table "Order Group"
+  whose primary column is also "Order Group" reads `r.'Order Group (app_name)'`, while a table whose
+  primary column has its own name ("Order Plan") reads it plainly; the GUID column carries the bare
+  table name. Read the table's and the primary column's display names before writing the formula -
+  guessing cost three compile rounds in one build. Tools that match
   formulas by display name must accept the suffix and match on the logical half (`audits.md`) - one
   audit reported seven phantom columns without it. Avoid the collision in schema (`dataverse.md`);
   the disambiguated form is the escape hatch when you inherit one.
@@ -263,7 +275,14 @@ in Preview, against the same data, before theorising (`browser-verification.md` 
   `GroupBy(t, Col, grp)`, not `GroupBy(t, "Col", "grp")`. Much published documentation shows the
   quoted form. `Distinct(...)` returns a column named `Value`, not `Result`, in at least one build;
   `GroupBy` keeps the real column name and reads more cleanly.
+- **`GroupBy` on a display name with a space fails over a collection of Dataverse rows.**
+  `GroupBy(colRows, 'Account Code', grp)` failed to compile with "'Account Code' isn't recognized".
+  Add a plain key first: `GroupBy(AddColumns(colRows, AcKey, 'Account Code'), AcKey, grp)`.
 - **Sort order is an enum**: `Sort(t, col, SortOrder.Descending)`; a bare `Descending` fails.
+- **`Sort()` takes ONE key.** `Sort(t, A, SortOrder.Descending, B, SortOrder.Ascending)` fails with
+  "Invalid number of arguments: received 5" - and then about 120 "Name isn't valid" errors cascade
+  through every control that reads a variable set from that gallery. The multi-key form is
+  `SortByColumns(t, "A", SortOrder.Descending, "B", SortOrder.Ascending)`.
 
 ## 5. Lookups and relationships in formulas and queries
 
@@ -421,7 +440,12 @@ duplicate**.
    is already case-insensitive.
 9. **`StartsWith`'s second argument must be a literal or a simple value to delegate** - not an
    expression built inside the predicate (section 7).
-10. **Read the delegation warnings.** Studio's underline and the compile output name the exact
+10. **Dataverse `ne` includes the null rows, so `<>` is the delegable spelling of "blank or anything
+    else".** `IsBlank()` on a choice column is not delegable, and the obvious workaround looks unsafe,
+    but `Status ne 'Submitted'` returned all 27 of 27 rows whose status was blank. So
+    `Status <> 'Status (Notes)'.Approved && Status <> 'Status (Notes)'.Submitted` delegates and
+    keeps the blanks. The same holds for a Yes/No flag (`<> false`, section 4).
+11. **Read the delegation warnings.** Studio's underline and the compile output name the exact
     clause. They are authoritative and free - and their **disappearance** is the best evidence a
     fix delegates: moving a filter onto a stored key column took the warning count from 61 to 60.
     With two rows of test data a broken filter and a working one look identical.
@@ -479,6 +503,8 @@ duplicate**.
   player - the header bound to the loaded collections showed data, every built table was blank, and
   any switch that re-selected the build filled them. Never chain two `Select`s where the second
   depends on the first: run the load inline in `OnVisible`, then one `Select(btnBuild)` after it.
+  `check-pa-yaml.mjs` notes (does not block) two or more `Select()` statements in one behaviour
+  formula: independent loaders are fine, and only you know whether the second reads the first.
 - **`Refresh()` of a source the control does not read does nothing visible.** A gallery bound to a
   collection is unaffected by `Refresh('Orders')`; rebuild what the control actually binds.
 - **`Switch()` and `If()` take their result type from the first branch** and coerce the rest:
@@ -493,7 +519,11 @@ duplicate**.
   `Coalesce(Sum(...), 0)`, and sweep every total when you find one. **`Blank <> 0` is true**, so a
   branch on a sum takes the wrong side: `If(Sum(colLines, Budget) <> 0, fromLines, fallback)` chose
   the lines branch, with a blank budget, for every category that had no lines. Coalesce every `Sum`
-  that feeds a comparison, not only the ones on display.
+  that feeds a comparison, not only the ones on display. The same guard reached a divide in a third
+  app: `If(Sum(col, x) = 0, "-", y / Sum(col, x))` on a hidden gallery put "Invalid operation:
+  division by zero" on screen open, and `Coalesce(Sum(col, x), 0) = 0` cleared it. `check-pa-yaml.mjs`
+  blocks a `Sum`, `Average`, `Min` or `Max` compared with `= 0` or `<> 0` unless it is wrapped in
+  `Coalesce` or tested with `IsBlank` (`CountRows` and `CountIf` return 0 and are not flagged).
 - **The same holds for a variable that has not been set yet.** `If(gblTotal = 0, 0, done / gblTotal)`
   divided by Blank in Studio before any record was opened, and Studio showed "Invalid operation:
   division by zero" on the first compile. Guard with `Coalesce(gblTotal, 0) = 0`.
@@ -502,10 +532,13 @@ duplicate**.
   the compile's warning count did not change. Keep `StartsWith` for emails and codes.
 - **`Text(x, "0.##")` keeps a dangling separator.** `Text(40, "[$-en-US]0.##")` renders "40." (as
   Excel does). It compiled, passed every audit and shipped twice in one app (eighteen sites, then
-  seven). Use a fixed format (`"0.00"`) or bare `Text(x)`.
+  seven), and in a third app `Text(110, "0.##")` read "110.%" in a published player. Use a fixed
+  format (`"0.00"`), or `Text(Round(x, 2))` to drop trailing zeros ("110", "60.5").
 - **`%` in a Power Fx format string does not multiply by 100**, as Excel's does. `Text(0.64,
   "0.0%")` prints "0.6%" (seen again in a published player: 0.494 showed "0.5%"). Scale it
-  yourself: `Text(x * 100, "[$-en-US]0.0") & "%"`, and search the app for `%"` inside every `Text(`.
+  yourself: `Text(x * 100, "[$-en-US]0.0") & "%"`. Three apps hit it independently (0.8 showed
+  "1%", -0.8 "-1%"). `check-canvas-format.mjs` fails both masks - a `%` in a `Text()` format, and a
+  decimal part of only `#` - in every file, `App.pa.yaml` included.
 - **A screen that grows past the window needs a narrower width.** A report or print screen whose
   `Height` exceeds `App.Height` gets a vertical scrollbar that takes about 17 px of the width, so a
   `Width` of `App.Width` (or a floored `lyW`) then scrolls sideways too. Write
@@ -531,6 +564,9 @@ duplicate**.
 - **`Navigate()` needs a literal screen.** It cannot take a variable; a data-driven list of
   destinations drives a `Switch` of literal `Navigate` calls.
 - **Blank compares confidently.** `>=`, `<=` and `<>` against `Blank()` all return an answer.
+- **`Trim()` of an empty input returns Blank, and `"" <> Blank()` is true.** A change log that
+  compared `Coalesce(old, "")` with `Trim(txt.Value)` logged "None -> None" for every untouched
+  field. Normalise both sides the same way: `Coalesce(Trim(txt.Value), "") <> Coalesce(old, "")`.
 - **A comparison against a value that does not exist is always true and nothing flags it.**
   `gblMetric <> "Variance"` never fired because the picker offered "Variance vs Budget"; the red/green
   styling it gated had never worked. Only performing the task finds a formula that is merely wrong.
@@ -588,7 +624,8 @@ duplicate**.
 ## 11. .pa.yaml syntax that breaks the whole compile
 
 The compile is all-or-nothing across every file: one bad character fails the app, and the error
-rarely points at the responsible line. The bundled hook catches the first four at write time.
+rarely points at the responsible line. The bundled hook (`check-pa-yaml.mjs`) catches the first
+five at write time.
 
 - **A colon followed by a space inside a single-line value** breaks the YAML scanner even inside
   a quoted string: `Text: ="Total: " & x` fails. Build it as `"Total:" & " " & x`, or use a block
@@ -596,7 +633,9 @@ rarely points at the responsible line. The bundled hook catches the first four a
   inside `OnSelect: =`. Error text: *"While scanning a plain scalar value, found invalid mapping"*.
   Record literals are the usual victim - write `{locOpen:true}` without the space, or put any
   formula containing a record in a block scalar. A house rule of " - " instead of ": " in UI
-  strings avoids the trap in captions.
+  strings avoids the trap in captions. `node check-pa-yaml.mjs --fix <Src>` moves every such
+  single-line formula into a `|-` block scalar - the same string, so nothing else changes - and
+  leaves alone a line that also holds " #", which may be a real YAML comment.
 - **A `#` preceded by a space in a single-line value starts a YAML comment** - `"Order #"` lost
   the rest of the formula; one app renamed it "Order No".
 - **A `#` line inside a formula is formula text, and `#` is not a Power Fx comment.** Inside a
@@ -609,6 +648,9 @@ rarely points at the responsible line. The bundled hook catches the first four a
   continuation.)
 - **`Tooltip` on a modern Button** - a hard bind error (`canvas-controls-and-patterns.md`,
   section 1).
+- **`AccessibleLabel` on a classic `Label`** - "Unknown property", although the same Label takes
+  `Tooltip`. Its `Text` is its accessible name. A clickable tab built from a Label therefore cannot
+  be given a name for walks or screen readers: build tabs as Buttons.
 - **The ~50 file ceiling** - see `canvas-shipping.md`.
 - **A base64 data-URI image costs file size.** `Image: ="data:image/png;base64,..."` works, but a
   logo added roughly 49 KB to every `.pa.yaml` that carried it - pressure on file-size limits, and
@@ -648,7 +690,8 @@ rarely points at the responsible line. The bundled hook catches the first four a
 - **Read the first line.** `No active coauthoring canvas designer session detected` means the
   result is meaningless (`canvas-shipping.md`, section 8).
 - **Read the first diagnostic, not the loudest.** Everything after a failed `OnStart` or a failed
-  record literal is consequence.
+  record literal is consequence. One `Sort` with two keys ("Invalid number of arguments: received
+  5") produced about 120 "Name isn't valid" errors below it (section 4).
 - **A wall of `'X' isn't recognized`** almost always means the session, not the source.
 - **FAILED is printed for warnings too.** Count `: error` lines; anchor on `Files validated: N`.
 - **Zero errors is not a clean compile.** Type mismatches inside `Filter` (section 4) and

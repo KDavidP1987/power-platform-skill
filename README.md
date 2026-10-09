@@ -392,6 +392,8 @@ an `OnSelect` detail view, a scrolling detail pane outside a gallery, or (one-li
 with a tooltip that reads the same columns. **Vertical fit:** a box shorter than one line of its
 font, or a one-line box whose data can wrap, shows text cut at the top and the bottom. **Theme tokens:** once the
 app defines its colours and fonts in `App.pa.yaml`, a literal colour or font in a screen fails.
+**Format strings:** a `%` in a `Text()` mask (it does not multiply by 100) and a decimal part of
+only `#` (`"0.##"` shows "110.") fail in every file, `App.pa.yaml` included.
 
 ```bash
 node check-canvas-format.mjs canvas/<app>/Src --schema canvas/text-fit-schema.json
@@ -525,7 +527,7 @@ Platform build, `"pluginGate": false` in `scripts/canvas-app.json` turns them of
 | Hook | Event | Does |
 |---|---|---|
 | `preflight.mjs` | SessionStart | Git state, `pac org who`, the top of `docs/STATE.md`, the ship loop in one line |
-| `check-pa-yaml.mjs` | PostToolUse | Colon-space in single-line Power Fx, a `#` line inside a formula or ` #` in a single-line value, `Tooltip` on a modern Button, shallow block-scalar lines, the file ceiling: faults that fail a whole-app compile |
+| `check-pa-yaml.mjs` | PostToolUse | Colon-space in single-line Power Fx (`--fix` moves it into a block scalar), a `#` line inside a formula or ` #` in a single-line value, `Tooltip` on a modern Button, `AccessibleLabel` on a classic Label, shallow block-scalar lines, the file ceiling: faults that fail a whole-app compile. Also blocks an aggregate compared with `= 0`/`<> 0` without `Coalesce`; notes, without blocking, a Yes/No column read through `Coalesce(..., false)` and two queued `Select()` calls |
 | `check-standards.mjs` | PostToolUse | Optional, configurable output standards (by default emoji and purple accents, Power Fx `RGBA` included) |
 | `check-canvas-format.mjs --hook` | PostToolUse | Long data-bound text with no remedy, and literal colours or fonts once theme tokens exist; blocks only on lengths it knows (`textFitSchema` in `standards.config.json`) |
 | `check-canvas-overlap.mjs --hook` | PostToolUse | A control placed over another that can be on screen at the same time, or decoration declared over a button or label; blocks on errors in the file just written |

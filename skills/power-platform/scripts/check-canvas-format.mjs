@@ -43,6 +43,12 @@
 //    shorter than one line (text-cut-vertically), or a one-line box whose data can wrap
 //    (one-line-box-wraps: set Wrap false + Tooltip), shows centred text cut at the top and the bottom.
 //
+// 9. FORMAT STRINGS. Two Text() format masks render wrong in the player and pass every compile:
+//    a "%" in the mask does not multiply by 100 as Excel's does (Text(0.494, "0.0%") shows "0.5%",
+//    seen in three apps), and a decimal part of only "#" keeps the separator on a whole number
+//    (Text(110, "0.##") shows "110."). Checked in every file, App.pa.yaml included (a formatting
+//    function in App.Formulas is where one mask reaches every screen).
+//
 // Exit: 0 clean, 1 findings, 2 nothing examined (no files, no data-bound text control, or none of the
 // bound text measurable) - NOT a pass. Under half measured prints a loud warning.
 // The formula, its error direction and the four remedies: references/canvas-layout.md, "Long text".
@@ -652,6 +658,57 @@ export function minWidthFinding(appText) {
     msg: `App has a phone branch (App.Width < ...) but ${m ? 'MinScreenWidth is ' + m[1] : 'no MinScreenWidth'}: at the default the player stays wider than a phone and the page scrolls sideways. Set App.MinScreenWidth: =320 (canvas-layout.md, "Phone width").` };
 }
 
+// ---------- format strings ----------
+// Every Text( call whose second argument is a plain string literal: { mask, at } (at: offset of the call).
+export function textMasks(src) {
+  const out = [];
+  const re = /(^|[^A-Za-z0-9_.'])Text\s*\(/g;
+  let m;
+  while ((m = re.exec(src))) {
+    let i = m.index + m[0].length, depth = 1, arg = 0, cur = '';
+    const args = [];
+    for (; i < src.length && depth > 0; i++) {
+      const ch = src[i];
+      if (ch === '"') {                                    // a string, "" inside it is a quote
+        let j = i + 1;
+        for (; j < src.length; j++) { if (src[j] === '"') { if (src[j + 1] === '"') { j++; continue; } break; } }
+        cur += src.slice(i, j + 1); i = j; continue;
+      }
+      if (ch === "'") { const e = src.indexOf("'", i + 1); const end = e < 0 ? src.length - 1 : e; cur += src.slice(i, end + 1); i = end; continue; }
+      if ('([{'.includes(ch)) depth++;
+      if (')]}'.includes(ch)) { depth--; if (depth === 0) break; }
+      if (ch === ',' && depth === 1) { args.push(cur); cur = ''; arg++; continue; }
+      cur += ch;
+    }
+    args.push(cur);
+    const mask = (args[1] || '').trim().match(/^"((?:[^"]|"")*)"$/);
+    if (mask) out.push({ mask: mask[1].replace(/""/g, '"'), at: m.index + m[1].length });
+  }
+  return out;
+}
+// The faults in one mask: 'percent' and/or 'dangling-decimal'. A [$-en-US] locale tag is ignored.
+export function maskFaults(mask) {
+  const body = mask.replace(/\[[^\]]*\]/g, '');
+  const faults = [];
+  if (body.includes('%')) faults.push('percent');
+  if (body.split(';').some((sec) => /[0#]\.#/.test(sec) && !/[0#]\.0/.test(sec))) faults.push('dangling-decimal');
+  return faults;
+}
+export function formatStringFindings(text, file) {
+  const findings = [];
+  for (const { mask, at } of textMasks(String(text || ''))) {
+    const line = String(text).slice(0, at).split('\n').length;
+    for (const fault of maskFaults(mask)) {
+      findings.push(fault === 'percent'
+        ? { level: 'error', code: 'percent-format', file, line, msg: `Text(..., "${mask}"): a % in a Power Fx format string does not multiply by 100 as Excel's does - 0.494 shows "0.5%". ` +
+            `Scale it yourself: Text(x * 100, "0.0") & "%" (and if x is already a percentage, still move the % out: Text(x, "0") & "%").` }
+        : { level: 'error', code: 'dangling-decimal-format', file, line, msg: `Text(..., "${mask}"): a decimal part of only # keeps the separator on a whole number - Text(110, "0.##") shows "110.". ` +
+            `Use a fixed mask ("0.00"), or Text(Round(x, 2)) to drop trailing zeros.` });
+    }
+  }
+  return findings;
+}
+
 export function analyse(files, { schema = null, screenWidth = 1366, screenHeight = 768, galleriesOnly = false, theme = true, stampVar = 'gblBuild' } = {}) {
   const findings = [];
   const stampRe = stampVar ? new RegExp('(^|[^A-Za-z0-9_])' + String(stampVar).replace(/[^A-Za-z0-9_]/g, '') + '($|[^A-Za-z0-9_])') : null;
@@ -664,6 +721,7 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
   const cmap = readColourMap(appText);
   const mw = appFile ? minWidthFinding(appText) : null;
   if (mw) findings.push({ ...mw, file: appFile.path });
+  for (const f of files) if (!/(^|[\\/])_EditorState\.pa\.yaml$/i.test(f.path)) findings.push(...formatStringFindings(f.text, f.path));
   const toMap = (obj) => new Map(Object.entries(obj || {}).flatMap(([k, v]) => { const c = columnInfo(v); return c ? [[k, c], [k.toLowerCase(), c]] : []; }));
   const flatCols = schema ? (schema.columns || (schema.tables ? {} : schema)) : null;
   const schemaMap = flatCols ? toMap(flatCols) : new Map();
@@ -1119,7 +1177,15 @@ function readStampVar(root = process.cwd()) {
 function hookMode() {
   let input = {}; try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { /* not a hook payload */ }
   const file = input?.tool_input?.file_path || input?.tool_response?.filePath;
-  if (!file || !file.endsWith('.pa.yaml') || /(^|[\\/])(App|_EditorState)\.pa\.yaml$/i.test(file)) process.exit(0);
+  if (!file || !file.endsWith('.pa.yaml') || /(^|[\\/])_EditorState\.pa\.yaml$/i.test(file)) process.exit(0);
+  if (/(^|[\\/])App\.pa\.yaml$/i.test(file)) {                // the app file: format strings only
+    let text = ''; try { text = fs.readFileSync(file, 'utf8'); } catch { process.exit(0); }
+    const fmt = formatStringFindings(text, file);
+    if (!fmt.length) process.exit(0);
+    console.error(`Formatting check failed for ${path.basename(file)}:\n\n  ` + fmt.map((f) => `${f.code}: ${f.msg}`).join('\n  ') +
+      `\n\nSee references/power-fx-and-pa-yaml.md, section 8.`);
+    process.exit(2);
+  }
   const dir = path.dirname(file);
   // The whole Src folder is read so collections built on other screens resolve; only this file's findings are reported.
   const files = collect([dir]);
@@ -1321,10 +1387,33 @@ function selftest() {
   if (numEval(parseFx('=Mod(4, lyCols) * 10 + RoundDown(4 / lyCols, 0)'), { consts: cst }) !== 40) fails.push('Mod/RoundDown on constants');
   if (Math.abs(contrastRatio([255, 255, 255, 1], [0, 0, 0, 1]) - 21) > 0.01) fails.push('contrast ratio of white on black should be 21');
 
+  // Format strings: the masks seen in published players go red, their fixed forms stay green.
+  const fmtCases = [
+    ['=Text(0.494, "0.0%")', ['percent-format']],
+    ['=Text(gblVar, "[$-en-US]0%")', ['percent-format']],
+    ['=Text(110, "0.##")', ['dangling-decimal-format']],
+    ['=Text(x, "[$-en-US]#,##0.#")', ['dangling-decimal-format']],
+    ['=Text(x, "0.##%")', ['percent-format', 'dangling-decimal-format']],
+    ['=Text(x * 100, "0.0") & "%"', []],
+    ['=Text(Round(x, 2))', []],
+    ['=Text(x, "[$-en-US]#,##0.00")', []],
+    ['=Text(x, "0.0#")', []],
+    ['=Text(Now(), "dd.mm.yyyy hh:mm")', []],
+    ['=Text(x, gblMask)', []],
+    ['="Done: 50%" & Text(x, "#,##0")', []],
+    ['=Concatenate(lbl.Text, Text(Sum(t, If(a, 1, 0)), "0.##"))', ['dangling-decimal-format']],
+  ];
+  for (const [src, want] of fmtCases) {
+    const got = formatStringFindings(src, 'f.pa.yaml').map((f) => f.code).sort();
+    if (JSON.stringify(got) !== JSON.stringify([...want].sort())) fails.push(`format string ${src}: expected [${want.join(', ')}], got [${got.join(', ')}]`);
+  }
+  const fmtApp = analyse([{ path: 'App.pa.yaml', text: ['App:', '  Properties:', '    Formulas: |-', '      =fmtPct(x: Number): Text = Text(x, "0%");'].join('\n') }]);
+  if (!fmtApp.findings.some((f) => f.code === 'percent-format' && f.line === 4)) fails.push('format string in App.Formulas: expected percent-format on line 4');
+
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 6 literal-fit, 2 vertical-fit, 5 build-stamp, 4 phone-width, comment-before-layout and vacuity cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 6 literal-fit, 2 vertical-fit, 5 build-stamp, 4 phone-width, ${fmtCases.length + 1} format-string, comment-before-layout and vacuity cases decided as expected`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }
