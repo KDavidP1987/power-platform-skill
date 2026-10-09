@@ -1479,6 +1479,7 @@ function selftest() {
     ['save tab: the older tab with Save wins over a blank newest', (pickSaveTab([{ i: 0, saveButtons: 0, textLen: 0 }, { i: 1, saveButtons: 1, textLen: 2000 }]) || {}).i === 1],
     ['save tab: rendered beats unrendered', (pickSaveTab([{ i: 0, saveButtons: 1, textLen: 0 }, { i: 1, saveButtons: 1, textLen: 900 }]) || {}).i === 1],
     ['save tab: none holds Save', pickSaveTab([{ i: 0, saveButtons: 0, textLen: 50 }]) === null],
+    ['save: an editor that renders nothing is diagnosed as torn down', editorTornDown({ saveButtons: 0, textLen: 0 }) && !editorTornDown({ saveButtons: 0, textLen: 40 }) && !editorTornDown(null)],
     ['disconnect dialog recognised', rx('studio.disconnected').test('There’s been a disconnect') && rx('studio.disconnected').test("There's been a disconnect")],
     // publish records the hash the last clean push sent; a failed push records nothing.
     ['publish hash: the last clean push', publishHash({ hash: 'p1', at: 't' }, 'd2').hash === 'p1'],
@@ -1921,6 +1922,11 @@ async function tabScan(page) {
   }
   return { saveButtons, textLen, disconnected };
 }
+// An authoring frame that renders no text and no Save button: the editor was torn down (after a push).
+export function editorTornDown(scan) { return !!scan && scan.saveButtons === 0 && scan.textLen === 0; }
+const TORN_DOWN_NOTE = '     The editor in this tab rendered nothing: Studio tore it down after the push. While the push is still held,\n'
+  + '     `second-tab` can join the session and save it (canvas-shipping.md, "The push blanks Studio\'s screen"). If that tab is blank too,\n'
+  + '     the push is lost: release the hold, `close-studio`, reopen Studio and push again. Never reload - a reload discards the push.';
 export function pickSaveTab(scans) {
   // scans: [{ i, saveButtons, textLen }] newest first. A tab with a Save button and a rendered editor wins.
   return scans.find((s) => s.saveButtons > 0 && s.textLen > 0) || scans.find((s) => s.saveButtons > 0) || null;
@@ -2170,7 +2176,13 @@ async function cmdSave() {
   if (rx('studio.titleReadOnly').test(await studio.title())) { log('  READ-ONLY - a save cannot persist.'); await browser.close(); process.exitCode = 3; return; }
   if (scan && scan.disconnected) { log('  !! Studio shows "There\'s been a disconnect". Not saving.'); log(DISCONNECT_NOTE); await capture(studio, 'save-disconnected'); await browser.close(); process.exitCode = 3; return; }
   const hit = await editorControl(studio, css('studio.saveButton'));
-  if (!hit) { log('  !! no Save button in any authoring frame.'); await capture(studio, 'save-not-found'); await browser.close(); process.exitCode = 4; return; }
+  if (!hit) {
+    log('  !! no Save button in any authoring frame.');
+    // Measured: after a clean push the authoring frame stayed but its shell rendered nothing (a grey page
+    // under a stale "Publish successful" toast); no Save button ever came back and the push was lost.
+    if (editorTornDown(scan)) log(TORN_DOWN_NOTE);
+    await capture(studio, 'save-not-found'); await browser.close(); process.exitCode = 4; return;
+  }
   await dismissBubbles(hit.frame);
   if (await hit.frame.locator(css('studio.closePreview')).count() > 0) {
     log('  !! Studio is in PREVIEW. A push that landed while in Preview was lost on Save twice when measured;');
