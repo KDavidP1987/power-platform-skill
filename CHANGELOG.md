@@ -11,6 +11,36 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-13
+
+SKILL.md restructured to Anthropic's current skill guidance. After compaction Claude Code keeps only the
+first 5,000 tokens of an invoked skill, and this skill's body was about 10,500, so in a long build
+everything from the tool table down was gone. The body is now about 4,100 tokens, opens with the
+non-negotiables (numbering unchanged), and nothing was deleted: the tool table, the Playwright notes and
+the note on Microsoft's plugins moved to `references/tools.md`.
+
+Measured against 0.30.0 on the ten graded tasks, two runs each, with the installed plugin switched off
+in every run: 141 of 148 checks for both versions; USD 17.90 against 19.69, 11.8M tokens against 13.6M,
+50 minutes against 54. One task regressed (a recipient leak in an existing flow was reported, not
+fixed); non-negotiable 9 now says the proof covers every flow and a leak is fixed in source, and on a
+re-run both runs left every flow clean under `lint-flows.mjs --require-safe-recipients`.
+
+### Added
+
+- `references/tools.md`: every bundled tool, Playwright two ways, working without Playwright, and
+  Microsoft's plugins alongside this one.
+- SKILL.md: two copyable checklists (a new build, and the loop for every change) with go-back lines, and
+  a "Needs" list with install lines.
+- `validate-skills.mjs` fails a SKILL.md body over 20,000 characters (about 5,000 tokens).
+- `evals/run_iteration.py --skill <folder> --configs with_skill` compares two versions task for task; runs
+  and grading switch off a user-scope install of this plugin, which had put a second copy of the skill in
+  every run.
+
+### Changed
+
+- SKILL.md order: non-negotiables, how to behave, the build order, the working loop, the routing table,
+  tools. The routing table's rows are shorter; each topic still has one home.
+
 ## [0.30.0] - 2026-10-12
 
 Thirty-one lessons from three apps, most of them from one week in which new galleries and new screens

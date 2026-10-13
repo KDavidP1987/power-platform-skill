@@ -105,6 +105,7 @@ const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const MAX_NAME = 64;
 const MAX_DESC = 1024;
 const SOFT_MAX_LINES = 500;
+const MAX_BODY_CHARS = 20000;
 const TEMPLATE_MARKERS = ["__NAME__", "__TITLE__", "__DESCRIPTION__", "__TRIGGER__", "<the words a user would actually type>"];
 
 function parseFrontmatter(text) {
@@ -163,6 +164,10 @@ function checkSkill(name) {
   }
   const bodyLines = body.split(/\r?\n/).length;
   if (bodyLines > SOFT_MAX_LINES) warnings.push(`SKILL.md body is ${bodyLines} lines (aim for < ${SOFT_MAX_LINES}; move detail to references/)`);
+  // After compaction Claude Code re-attaches only the first 5,000 tokens of an invoked skill
+  // (code.claude.com/docs/en/skills, "Skill content lifecycle"); Anthropic's overview puts the body
+  // under 5k tokens. About 4 characters a token: past 20,000 characters the tail is lost in a long build.
+  if (body.length > MAX_BODY_CHARS) errors.push(`SKILL.md body is ${body.length} characters (about ${Math.round(body.length / 4)} tokens; max ${MAX_BODY_CHARS}, about 5,000 tokens) - after compaction Claude Code keeps only the first 5,000 tokens; move detail to references/`);
   if (!existsSync(join(dir, "tests", "prompts.md"))) warnings.push("no tests/prompts.md — add should/should-not trigger prompts");
   for (const sub of ["scripts", "references", "assets"]) {
     const p = join(dir, sub);
