@@ -94,6 +94,21 @@ function hasReport(dir, depth = 0) {
   }
   return false;
 }
+// The project a hook call belongs to: the nearest folder at or above the session's working directory
+// that holds the app config or a .git, else the working directory itself. The shell's directory drifts
+// (cd canvas/<app>/Src), and a gate that read the config from there missed "pluginGate": false and
+// refused a write the project had opted out of.
+export function projectRoot(start) {
+  let dir = path.resolve(start);
+  for (let i = 0; i < 12; i++) {
+    if (fs.existsSync(path.join(dir, 'scripts', 'canvas-app.json')) || fs.existsSync(path.join(dir, 'canvas-app.json'))
+      || fs.existsSync(path.join(dir, '.git'))) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return path.resolve(start);
+}
 const exists = (root, ...rels) => rels.some((r) => fs.existsSync(path.join(root, r)));
 // A sub-folder with its own .git is another project (an umbrella folder of repos): its site, flows and
 // design records are not this folder's, so the walks below stop there. A live gate at an umbrella
@@ -664,17 +679,17 @@ if (!isMain) { /* imported: no side effects */ }
 else if (process.argv.includes('--selftest')) selftest();
 else if (process.argv.includes('--post')) {
   const input = readStdinJson();
-  const note = decidePost(input.cwd || process.cwd(), input);
+  const note = decidePost(projectRoot(input.cwd || process.cwd()), input);
   if (note) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: note } }));
   process.exit(0);
 } else if (process.argv.includes('--pre')) {
   const input = readStdinJson();
-  const reason = evaluatePre(input.cwd || process.cwd(), input);
+  const reason = evaluatePre(projectRoot(input.cwd || process.cwd()), input);
   if (reason) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }));
   process.exit(0);
 } else {
   const input = readStdinJson();
-  const d = decideStop(input.cwd || process.cwd(), input);
+  const d = decideStop(projectRoot(input.cwd || process.cwd()), input);
   if (d.block) process.stdout.write(JSON.stringify({ decision: 'block', reason: d.reason }));
   else if (d.note) process.stderr.write(`power-platform build gate: handing back with steps still missing (blocked ${MAX_BLOCKS} times):\n${d.note}\n`);
   process.exit(0);
@@ -735,6 +750,10 @@ function selftest() {
     rm('.claude/hooks/audit-stop.mjs');
     put('scripts/canvas-app.json', JSON.stringify({ pluginGate: false }));
     check('opt-out in canvas-app.json passes', evaluate(tmp, {}, env), silent);
+    fs.mkdirSync(path.join(tmp, 'canvas', 'app', 'Src'), { recursive: true });
+    check('a working directory inside canvas/<app>/Src resolves to the project root',
+      projectRoot(path.join(tmp, 'canvas', 'app', 'Src')), (g) => path.resolve(g) === path.resolve(tmp));
+    check('opt-out still read from a drifted working directory', evaluate(projectRoot(path.join(tmp, 'canvas', 'app', 'Src')), {}, env), silent);
     put('scripts/canvas-app.json', JSON.stringify({}));
     put('.claude/hooks/standards.config.json', JSON.stringify({ pluginGate: false }));
     check('opt-out in standards.config.json passes', evaluate(tmp, {}, env), silent);

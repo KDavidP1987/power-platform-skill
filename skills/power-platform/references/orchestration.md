@@ -162,6 +162,10 @@ Give each helper this, in its prompt, and nothing it does not need:
 | What "done" means | a stated check passes and its output is quoted |
 | What it must never do | delete rows, change another lane's files, publish, email anyone but the owner |
 
+- **One owner per screen file; shared edits first.** A 25-item change list became three clean
+  parallel batches and one push with one helper per screen file, the lead owning `App.pa.yaml` and
+  the shared projections, and every shared-projection edit made before the helpers start. The push is
+  the batch's first compile, so plan one fix round after it.
 - **One owner per lock.** Studio holds one co-authoring session per app: only the canvas lane holds
   it, and only for compile and push. A solution import from one lane while another holds Studio
   discards work. Fabric model refreshes run once, from the reporting lane.

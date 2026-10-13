@@ -275,6 +275,14 @@ in Preview, against the same data, before theorising (`browser-verification.md` 
   `GroupBy(t, Col, grp)`, not `GroupBy(t, "Col", "grp")`. Much published documentation shows the
   quoted form. `Distinct(...)` returns a column named `Value`, not `Result`, in at least one build;
   `GroupBy` keeps the real column name and reads more cleanly.
+- **A synthetic row in a Dataverse-shaped collection: `Blank()` for Yes/No and decimal fields.**
+  Appending `{..., Locked: false}` to a collection built from Dataverse rows, where the app surfaced
+  that Yes/No column as an option set, failed BOTH the `ClearCollect` and the `Collect` with only
+  "Invalid argument type" - no field, no line - and every control reading the collection cascaded into
+  dozens of errors. Use `Blank()` (or copy a typed value from a real row); when a compile names no
+  line, bisect the record by dropping fields.
+- **`GroupBy` cannot group on a lookup (record) column**: "Expected a text, numeric, boolean, or
+  date/time value". Group by the display text and take the record back with `First(<group>).<Lookup>`.
 - **`GroupBy` on a display name with a space fails over a collection of Dataverse rows.**
   `GroupBy(colRows, 'Account Code', grp)` failed to compile with "'Account Code' isn't recognized".
   Add a plain key first: `GroupBy(AddColumns(colRows, AcKey, 'Account Code'), AcKey, grp)`.
@@ -537,6 +545,10 @@ duplicate**.
 - **The same holds for a variable that has not been set yet.** `If(gblTotal = 0, 0, done / gblTotal)`
   divided by Blank in Studio before any record was opened, and Studio showed "Invalid operation:
   division by zero" on the first compile. Guard with `Coalesce(gblTotal, 0) = 0`.
+- **A blank is "in" every delimited list.** `"" in "a@x.com;b@y.com"` is true, and so is a flow's
+  `contains(list, '')`: a person with no email counted as listed, or in an exclude filter was silently
+  dropped. Guard first (`!IsBlank(x) && x in list`; in a flow, coalesce '' to a value no list holds),
+  or split the list into a table and compare exact values.
 - **Search with `in`, not `StartsWith`, when people type a surname.** `StartsWith('Person Name', x)`
   cannot find "Lee" in "Ada Lee". On Dataverse `x in 'Person Name'` (substring) delegates - measured:
   the compile's warning count did not change. Keep `StartsWith` for emails and codes.
@@ -703,6 +715,11 @@ seven at write time, and the continuation-indent fault below.
 - **Changing a control's type under the same name** silently keeps the old control
   (`canvas-controls-and-patterns.md`, section 9).
 
+- **Generated YAML through a shell heredoc can lose `$`.** An unquoted heredoc expanded `$-en` in
+  `"[$-en-US]"` into garbage. Write generated `.pa.yaml` with a file tool or a quoted heredoc
+  (`<<'EOF'`). The hook also refuses two more unknown properties: `Tooltip` on a modern TextInput and
+  `Self.Items` inside a modern DropDown (repeat the Items expression or use a named formula).
+
 ## 12. Reading compile output
 
 - **Read the first line.** `No active coauthoring canvas designer session detected` means the
@@ -710,6 +727,10 @@ seven at write time, and the continuation-indent fault below.
 - **Read the first diagnostic, not the loudest.** Everything after a failed `OnStart` or a failed
   record literal is consequence. One `Sort` with two keys ("Invalid number of arguments: received
   5") produced about 120 "Name isn't valid" errors below it (section 4).
+- **A bad record type in a loader cascades.** The authoring server's errors carry a control and a
+  property but no line, and one loader that built a collection with a wrong-typed field produced 60+
+  errors on every control that reads it. Find the earliest control that builds the collection and
+  read its errors first.
 - **A wall of `'X' isn't recognized`** almost always means the session, not the source.
 - **FAILED is printed for warnings too.** Count `: error` lines; anchor on `Files validated: N`.
 - **Zero errors is not a clean compile.** Type mismatches inside `Filter` (section 4) and

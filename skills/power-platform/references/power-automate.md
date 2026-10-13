@@ -252,6 +252,11 @@ then **false**. Two consequences worth knowing:
   and an unknown never passes a write. Rewrite the guard in plain `equals`/`not`/`coalesce`/`empty`
   terms rather than suppressing the finding.
 
+- **Opening a record can start flows.** A canvas app that stamps an "editing by / since" marker when a
+  record opens fires every update-triggered flow on that table without `filteringattributes` - just
+  viewing a record started runs. `lint-flows.mjs` fails such a trigger; when a presence or marker
+  write exists, give every update trigger on the table the columns it cares about.
+
 ## 4. Loops between flows, and bookkeeping writes
 
 **The loop rules, all enforced by `lint-flows.mjs` as errors:**
@@ -612,6 +617,11 @@ ownership may have moved. Keep the cadence (immediate, daily, weekly) in a setti
   the account and environment, finishes OAuth consent in the signed-in browser, and prints the id
   with `--json`), put the ids in the flows manifest, and bind them with `scripts/deploy-flows.py`.
   Never ask the person to create a connection (`tooling-and-auth.md` section 6).
+
+- **The Teams Flow bot cannot flag importance.** Posting as the Flow bot has no importance setting, so
+  a "high importance Teams message" cannot be sent that way. Say so before building and choose: a
+  priority heading in the text plus an email with Importance High, or a Graph `chatMessage` post with
+  importance from a named or service account.
 
 ## 11. Testing a sending or scheduled flow without mailing anyone
 

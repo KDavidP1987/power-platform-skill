@@ -376,6 +376,18 @@ evidence. Design each one so the broken version gives a different answer.
 - **Grid cells often share one accessible name** (every cell reporting "lock"); address by index
   within the frame, and blur to commit.
 
+- **A click by caption can land on the container.** When a Button's `AccessibleLabel` does not
+  contain its caption, a click by that caption matched the surrounding `div[data-control-name]`: the
+  step reported OK and nothing happened. The same button fails WCAG 2.5.3 (Label in Name);
+  `check-canvas-format.mjs` notes it as `label-not-in-name`. Help text that quotes a caption can also
+  match first - give `nth` or a more exact name.
+- **Text in an input is its value, not text.** `expect` also reads the values of visible inputs, so a
+  correctly filled currency box no longer reads as missing. In your own scripts, match the whole
+  success line: a poll that greps for `VERIFIED` stops on `NOT VERIFIED`.
+- **Clicking from a screenshot: divide by `devicePixelRatio`.** At 2.5 a coordinate read off a capture
+  missed by that factor. The driver closes stale Studio notifications ("Publish successful" from hours
+  earlier, stacked) before Save and the formula bar, which they had covered.
+
 ## 10. Stale player, the build stamp, and Preview vs published
 
 - The player serves a **cached build** and may show a small *"You're using an old version of this
@@ -508,6 +520,13 @@ negative. Use it for "is my code right?" and the player for "what do users get?"
 
 Same kind of drive: Data pane, Add data, search the table, confirm the **logical name** in the
 selector (section 5), then save and publish. What goes wrong:
+
+Both are scriptable, including for an app that is not in a solution (where a solution import cannot
+add the table). Add: Add data, type in the search box, pick the list item whose description names
+`Table <logical name>`, wait for "successfully added", Save. Refresh after new columns: in the Data
+pane, hover the list item reading `<Name> Microsoft Dataverse`, open its last button, choose the
+`Refresh` menu item; the next compile binds the new columns. Keep such helpers in the repo (a
+`scripts/studio/` folder), never in a session scratchpad, where a restart loses them.
 
 - **Picking another team's table by label.** An app acquired a sibling app's table, probably by
   accident in Add data. In a shared environment, check every bound source against the app's own

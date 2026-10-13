@@ -1,5 +1,12 @@
 # Rules and their scope
 
+## Contents
+
+1. Surfaces
+2. When a rule becomes a hook
+3. The matrix
+4. Known gaps
+
 Every rule this skill carries, the surfaces it applies to, and how it is enforced: by a **hook** (runs
 whether or not anyone remembers it), by a **script check** (runs when its tool runs, and refuses), or as
 an **instruction** (in SKILL.md or a reference, which an agent can forget as its context fills). Read
@@ -75,6 +82,9 @@ matters.
 | Screen-file ceiling | hook (Stop) | `audit-stop.mjs` | a compile refused at 50 files |
 | No critique floor | none, deliberately | | no canvas build has been measured against a floor yet; record the score, add a floor when the evidence exists |
 | Know which build runs (5); delegation (10) | instruction, plus `check-drift.py`, build-stamp read-back in `ship-canvas.py` | SKILL.md 5, 10 | per screen judgement |
+| A gallery the live app does not have is not shipped from source (Studio 3.26094.x regression) | script check | `check-new-galleries.py` | a new gallery broke a published app and tore Studio down while every package check passed |
+| A button's AccessibleLabel contains its caption (WCAG 2.5.3) | hook note (each write), never blocks | `check-canvas-format.mjs` `label-not-in-name` | a walk click by caption landed on the container and reported OK |
+| After every publish, the first screen renders signed-in data | instruction | `canvas-shipping.md` 7 | package checks passed on a build where OnStart stopped part-way |
 
 ### Power Pages
 
@@ -102,6 +112,7 @@ matters.
 |---|---|---|---|
 | No flow ships that could loop (8): lint over every flow, no waiver | hook (before `pac solution import`) and script check | `plugin-gate.mjs` rule C reads `.ship-work/flow-lint.json`; `deploy-flows.py` lints and refuses when the lint cannot run; `--skip-lint` is refused on a live run | 1,203 runs in 45 minutes in one project; before 0.25 a plain import skipped the lint |
 | No message to anyone but the permitted address during a build | script check | `lint-flows.mjs --require-safe-recipients` | standard |
+| Whoever a flow notifies about a row is also granted the row | instruction | `security-and-access.md` 7 | delegates were emailed about rows they could not open |
 
 ### Power BI and Fabric
 

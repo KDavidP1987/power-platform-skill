@@ -11,6 +11,44 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-12
+
+Thirty-one lessons from three apps, most of them from one week in which new galleries and new screens
+tore Studio down after clean pushes and one broke a published app while every package check passed.
+
+### Added
+
+- `check-new-galleries.py`: names every gallery in the repo's source that the live app does not have
+  (reading both the package's compiled controls and the unpacked live `Src`, which `pac` writes beside
+  the `.msapr`), with the Studio-insert workaround. Exit 2 when nothing was compared.
+- `check-pa-yaml`: `Tooltip` on a modern TextInput and `Self.Items` inside a modern DropDown are
+  compile faults.
+- `check-canvas-format.mjs label-not-in-name` (a note, never blocks): a button whose `AccessibleLabel`
+  does not contain its caption (WCAG 2.5.3); a walk click by that caption had landed on the container.
+- `seed-data.py list`: the cleanup plan as a command that can never write (it refuses `--apply`); an
+  agent's permission check had refused the plan-only `cleanup` because the script can delete.
+- References: the October 2026 Studio teardown triggers and the shipping rules around them; a load smoke
+  after every publish; Add data and Refresh driven through Studio, for apps outside a solution; a role
+  flag read from a table the role cannot read is an error; grant whoever a flow notifies; impersonate
+  someone with only the role under test; `ownerid` in shared-principal results; synthetic rows in a
+  Dataverse-shaped collection; `GroupBy` on a lookup; a blank is "in" every delimited list; the Teams
+  Flow bot cannot flag importance; a presence marker starts update-triggered flows; a modern DropDown
+  with no default; a control hidden for every live record; one owner per screen file; contents lists on
+  the Power Pages and rules references.
+
+### Changed
+
+- `canvas-browser.mjs`: `expect` also reads the values of visible inputs; Studio's stale notifications
+  are closed before Save, Publish and the formula bar.
+- `check-pa-yaml`'s Yes/No note stays silent for a column the same file already uses as a boolean
+  condition: a Yes/No column is a two-option set in some apps and a boolean in others.
+
+### Fixed
+
+- The plugin gate read the app config from the shell's current directory; after a `cd` into
+  `canvas/<app>/Src` it missed `"pluginGate": false` and refused a write. It now resolves the project
+  root by walking up to the config or `.git`.
+
 ## [0.29.0] - 2026-10-09
 
 Thirty-three lessons from three apps, a portal and a medallion workspace, plus what a live portal

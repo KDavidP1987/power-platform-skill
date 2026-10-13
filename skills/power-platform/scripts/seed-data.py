@@ -56,7 +56,9 @@ Cleanup is list-only without --apply. "cleanup": "delete" deletes the seed rows 
 with "cleanupFilter", every row matching that OData filter - test rows a walk created);
 "cleanup": "restore" puts the "restore" columns back to their seed values. Tables run in reverse
 order for deletes, so children go before parents. Deleting rows is the owner's step in this skill:
-print the list, hand the person the --apply line, never run it on their behalf.
+print the list, hand the person the --apply line, never run it on their behalf. "list" prints the same
+plan and can never write (it refuses --apply): an agent's permission check refused the plan-only
+cleanup run because the script can delete, and allowed a read-only listing of the same rows.
 
 Options:
     --org URL           environment URL (or "org" in the seed file)
@@ -362,7 +364,7 @@ def cmd_cleanup(dv, meta, seed, only, apply, today, seed_path):
 def run(argv, transport=None, today=None):
     ap = argparse.ArgumentParser(prog="seed-data.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
-    ap.add_argument("command", nargs="?", choices=["seed", "check", "cleanup"])
+    ap.add_argument("command", nargs="?", choices=["seed", "check", "cleanup", "list"])
     ap.add_argument("--seed")
     ap.add_argument("--org")
     ap.add_argument("--only", action="append")
@@ -377,6 +379,9 @@ def run(argv, transport=None, today=None):
     if not a.command or not a.seed:
         ap.print_help()
         return 2
+    if a.command == "list" and a.apply:
+        print("list never writes; run cleanup --apply to delete or restore")
+        return 2
     try:
         seed = load_seed(a.seed)
     except SeedError as e:
@@ -388,7 +393,7 @@ def run(argv, transport=None, today=None):
         return 2
     try:
         token = "fixture" if transport else get_token(org, a.token_cmd, a.token_env, org)[0]
-        dv = dataverse(org, token, read_only=(a.command == "check") or not a.apply, transport=transport,
+        dv = dataverse(org, token, read_only=(a.command in ("check", "list")) or not a.apply, transport=transport,
                        sleep=(lambda s: None) if transport else None)
         meta = Meta(dv)
         day = today or today_in(seed.get("timezone"))
@@ -407,7 +412,7 @@ def run(argv, transport=None, today=None):
             if not transport and not only:
                 record_check(rc, a.seed)
             return rc
-        return cmd_cleanup(dv, meta, seed, only, a.apply, day, a.seed)
+        return cmd_cleanup(dv, meta, seed, only, a.apply and a.command == "cleanup", day, a.seed)
     except Finding as e:
         print("FINDING %s" % e)
         return 1
@@ -560,6 +565,10 @@ def selftest():
               and "would restore app_asset A-02" in out)
         check("cleanup lists the filter's test rows but not real rows", "[SAMPLE] walk row" in out and "Real person" not in out)
         check("cleanup hands over the owner line", "! python" in out and "--apply" in out)
+        rc, out2 = go(t, "list", "--seed", p)
+        check("list prints the cleanup plan and writes nothing", rc == 0 and len(t.writes()) == n and "would delete app_loan" in out2)
+        rc, out2 = go(t, "list", "--seed", p, "--apply")
+        check("list refuses --apply", rc == 2 and len(t.writes()) == n)
         rc, out = go(t, "cleanup", "--seed", p, "--apply")
         check("cleanup --apply deletes seed and test rows only",
               [r["app_borrower"] for r in db["app_loans"]] == ["Real person"])

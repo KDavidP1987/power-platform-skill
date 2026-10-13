@@ -207,6 +207,7 @@ const SELECTOR_DEFAULTS = {
   'studio.gotIt':             { surface: 'studio', kind: 'anyOf', check: 'conditional', anyOf: [
     { kind: 'role', role: 'button', name: '^got it$', flags: 'i' },
     { kind: 'css', value: 'button:has-text("Got it")' }] },
+  'studio.notificationClose': { surface: 'studio', kind: 'role', role: 'button', name: 'notification close$', flags: 'i', check: 'conditional' },
   'studio.welcomeSkip':       { surface: 'studio', kind: 'css', value: '[role="dialog"]:has-text("Welcome to Power Apps Studio") button:has-text("Skip")', check: 'conditional' },
   'studio.welcomeDontShow':   { surface: 'studio', kind: 'css', value: '[role="dialog"]:has-text("Welcome to Power Apps Studio") input[type="checkbox"]', check: 'conditional' },
   'studio.appSettings':       { surface: 'studio', kind: 'role', role: 'menuitem', name: '^app settings$', flags: 'i', check: 'conditional' },
@@ -613,6 +614,10 @@ function attachTrace(page, sink) {
 async function onScreen(frame, text) {
   const inApp = await visibleIn(frame, text);
   if (inApp.ok || inApp.n > 0) return inApp;
+  // Text inside an input is its value, not text, so getByText never finds it: a correct currency input
+  // read as a failure. Look at the values of visible inputs before giving up.
+  const inInput = await valueIn(frame, text).catch(() => null);
+  if (inInput) return inInput;
   // Notify() banners are drawn by the player, above the app and outside its frame (seen
   // 2026-10-02: "Saved - ..." was on screen while the app frame held no such text).
   for (const f of frame.page().frames()) {
@@ -621,6 +626,19 @@ async function onScreen(frame, text) {
     if (other.ok) return { ok: true, why: other.why + ' (in the player\'s notification bar, outside the app frame)' };
   }
   return inApp;
+}
+export const valueHolds = (value, text) => String(value || '').replace(/\s+/g, ' ').toLowerCase().includes(String(text).replace(/\s+/g, ' ').toLowerCase());
+async function valueIn(frame, text) {
+  const loc = frame.locator('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea');
+  const n = Math.min(await loc.count(), 200);
+  for (let i = 0; i < n; i++) {
+    const el = loc.nth(i);
+    if (!valueHolds(await el.inputValue().catch(() => ''), text)) continue;
+    if (!(await el.isVisible().catch(() => false))) continue;
+    const b = await el.boundingBox().catch(() => null);
+    if (b && b.width >= 1 && b.height >= 1) return { ok: true, n: 1, why: 'in an input\'s value at ' + Math.round(b.x) + ',' + Math.round(b.y) };
+  }
+  return null;
 }
 async function visibleIn(frame, text) {
   const loc = frame.getByText(text, { exact: false });
@@ -1521,6 +1539,7 @@ function selftest() {
     ['exactOnly refuses a substring-only match', rankTargets('City', [box(['Search city'])], { exactOnly: true }).best === -1],
     ['two exact matches are reported as tied', rankTargets('Close', [box(['Close']), box(['Dismiss']), box(['Close'])]).tied.length === 2],
     ['placeholder counts as a name', rankTargets('Reason', [box(['txtNotes', 'Notes']), box(['txtReason', 'Reason'])]).best === 1],
+    ['expect finds text held in an input value', valueHolds('$1,250.00', '$1,250') && valueHolds('Due  31 Oct', 'due 31 oct') && !valueHolds('', 'x') && !valueHolds('1,25', '$1,250')],
     ['a visible match beats a hidden exact one', rankTargets('City', [box(['City'], false), box(['Search city'])]).best === 1],
     ['hidden matches count when none is visible', rankTargets('City', [box(['City'], false)]).best === 0],
     ['no match', rankTargets('City', [box(['Country'])]).best === -1],
@@ -1811,6 +1830,17 @@ async function dismissBubbles(frame) {
   for (const c of locsOf(frame, 'studio.gotIt')) {
     try { if (await c.first().count() > 0 && await c.first().isVisible()) { await c.first().click({ timeout: 5000 }); n++; log('  dismissed a teaching bubble ("Got it")'); } }
     catch { /* none */ }
+  }
+  // Stale notifications ("Publish successful" from hours earlier, "You have N new notifications") stack
+  // over the command bar: Save clicked nothing, and dirty timed out reaching the formula bar. Closing
+  // one reveals the next, so close until none is left.
+  for (let k = 0; k < 20; k++) {
+    const c = locsOf(frame, 'studio.notificationClose')[0].first();
+    try {
+      if (!(await c.count() > 0 && await c.isVisible())) break;
+      await c.click({ timeout: 3000 }); n++;
+      if (k === 0) log('  closing stale Studio notifications');
+    } catch { break; }
   }
   n += await coauthoringTerms(frame);
   return n;

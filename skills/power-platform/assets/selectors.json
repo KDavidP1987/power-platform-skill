@@ -117,6 +117,7 @@
       "surface": "studio", "kind": "css", "value": "button[aria-label^=\"Back\" i]",
       "purpose": "Leaves the editor and releases the edit lock", "check": "required", "lastVerified": "0.1.0"
     },
+    "studio.notificationClose": {"surface": "studio", "kind": "role", "role": "button", "name": "notification close$", "flags": "i", "purpose": "Closes a stale Studio notification; a stack of them covered Save and the formula bar", "check": "conditional", "lastVerified": "0.30.0"},
     "studio.gotIt": {
       "surface": "studio", "kind": "anyOf",
       "anyOf": [

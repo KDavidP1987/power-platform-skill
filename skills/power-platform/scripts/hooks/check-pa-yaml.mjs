@@ -126,6 +126,11 @@ export function checkPaYaml(text) {
     if (/^\s+Tooltip: =/.test(line) && /^Button(@|$)/.test(controlAbove(lines, i) || '')) {
       problems.push(`${n}: the modern Button has no Tooltip property - a bind error, not a warning. Use AccessibleLabel.`);
     }
+    // 3b. The modern TextInput has no Tooltip either: a compile error. Put the hint in Placeholder or a
+    //     label beside it, and the name in AccessibleLabel.
+    if (/^\s+Tooltip: /.test(line) && /^TextInput(@|$)/.test(controlAbove(lines, i) || '')) {
+      problems.push(`${n}: the modern TextInput has no Tooltip property - a compile error. Use Placeholder or a label beside it, and AccessibleLabel for its name.`);
+    }
 
     // 5. AccessibleLabel on a classic Label: "Unknown property", a compile error, although the
     //    same Label takes Tooltip. Its Text is its name; a clickable tab is better built as a Button.
@@ -138,6 +143,16 @@ export function checkPaYaml(text) {
     const b = line.match(/^(\s*)([A-Za-z0-9_]+):\s*[|>][-+]?\s*$/);
     if (b) block = { keyIndent: b[1].length, baseIndent: null, key: b[2], props: props !== null && b[1].length > props, first: true };
   });
+
+  // 9. Self.Items inside a modern DropDown: the control has no Items output, so the formula does not
+  //    compile. Repeat the Items expression (or keep it in a named formula and use that in both places).
+  for (const f of propertyFormulas(lines)) {
+    if (!/(^|[^A-Za-z0-9_.])Self\.Items\b/.test(codeOf(f.src))) continue;
+    if (/^DropDown(@|$)/.test(controlAbove(lines, f.line) || '')) {
+      problems.push(`${f.line}: ${f.key} reads Self.Items, which the modern DropDown does not have - a compile error. ` +
+        `Repeat its Items expression, or keep the list in a named formula and read that in both places.`);
+    }
+  }
 
   // 6. A zero guard on an aggregate. Sum, Average, Min and Max over an empty (or not yet loaded)
   //    table return Blank, and Blank = 0 is false while Blank <> 0 is true: If(Sum(t, x) = 0, "-",
@@ -267,6 +282,15 @@ export function zeroGuards(src) {
 const CONTROL_OUTPUTS = /^(Value|Checked|Selected|SelectedDate|Pressed|IsSelected|Default|Visible|Text)$/i;
 export function formulaNotes(text) {
   const notes = [];
+  // Columns this file already uses as a bare condition (Filter(t, Active, 'Flag'), !'Flag', 'Flag' &&,
+  // 'Flag' = true). That compiles only when the app surfaces the column as a boolean, which many apps
+  // do - a Yes/No column is a two-option set in some apps and a boolean in others - so note a. stays
+  // silent for those columns (a correct boolean column was flagged on every edit of its file).
+  const boolCols = new Set();
+  for (const m of text.matchAll(/(?:[,(!]|&&|\|\||\bNot\s*\()\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?'([^']+)'\s*(?=[,)]|&&|\|\||$)/gm)) {
+    if (!/Coalesce\s*\($/.test(text.slice(Math.max(0, m.index - 12), m.index + 1))) boolCols.add(m[1]);
+  }
+  for (const m of text.matchAll(/'([^']+)'\s*(?:=|<>)\s*(?:true|false)\b/gi)) boolCols.add(m[1]);
   for (const f of propertyFormulas(text.split(/\r?\n/))) {
     const code = codeOf(f.src);
     // a. Coalesce(<row>.'Yes/No column', false) compiles and always reads false: a Dataverse Yes/No
@@ -281,10 +305,11 @@ export function formulaNotes(text) {
       // column the app built as a real boolean, and LookUp(...).Flag with a fallback is the right
       // spelling for a row that may be missing - both measured as false alarms on a real app.
       const col = args[0].match(/^[A-Za-z_][A-Za-z0-9_]*\s*\.\s*'([^']+)'$/);
-      if (!col || CONTROL_OUTPUTS.test(col[1])) continue;
-      notes.push(`${lineAt(f, code, m.index + m[1].length)}: ${f.key} reads ${args[0].slice(0, 50)} through Coalesce(..., ${args[1]}). On a Dataverse Yes/No column this ` +
-        `compiles and always reads ${args[1].toLowerCase()} (the column is a two-option set, not a boolean). Compare with the option: ` +
-        `<row>.'Flag' = 'Flag (Table)'.Yes, and patch If(x, 'Flag (Table)'.Yes, 'Flag (Table)'.No). A boolean column you built yourself is fine.`);
+      if (!col || CONTROL_OUTPUTS.test(col[1]) || boolCols.has(col[1])) continue;
+      notes.push(`${lineAt(f, code, m.index + m[1].length)}: ${f.key} reads ${args[0].slice(0, 50)} through Coalesce(..., ${args[1]}). Where the app surfaces this ` +
+        `Dataverse Yes/No column as a two-option set, this compiles and always reads ${args[1].toLowerCase()}: compare with the option ` +
+        `(<row>.'Flag' = 'Flag (Table)'.Yes) and patch If(x, 'Flag (Table)'.Yes, 'Flag (Table)'.No). Where it surfaces as a boolean ` +
+        `(the bare column works as a Filter condition), this is fine.`);
     }
     // c. A month name from a period's start date: a 4-4-5 fiscal period can begin in the last days of
     //    the previous month, so Text(Begins, "mmm") labelled the October period "Sep".
@@ -389,6 +414,16 @@ function selftest() {
     '            Visible: true',
     '            OnSelect: |-',
     '              Set(locDone, true)',
+    '      - txtFind:',
+    '          Control: TextInput',
+    '          Properties:',
+    '            Tooltip: ="Type a name"',
+    '      - ddYear:',
+    '          Control: DropDown',
+    '          Properties:',
+    '            Items: =["All years", "2026"]',
+    '            DefaultSelectedItems: |-',
+    '              =[First(Self.Items).Value]',
   ].join('\n');
   const good = [
     'Screens:',
@@ -434,7 +469,8 @@ function selftest() {
   const pb = checkPaYaml(bad);
   const pg = checkPaYaml(good);
   const want = ['colon-space', 'starts a YAML comment', 'not a Power Fx comment', 'Tooltip', 'indented', 'classic Label has no AccessibleLabel',
-    'with = 0', 'with <> 0', 'duplicate key "AccessibleLabel"', 'Visible: true has no leading', 'OnSelect\'s formula does not start'];
+    'with = 0', 'with <> 0', 'duplicate key "AccessibleLabel"', 'Visible: true has no leading', 'OnSelect\'s formula does not start',
+    'modern TextInput has no Tooltip', 'reads Self.Items'];
   const missing = want.filter((w) => !pb.some((p) => p.includes(w)));
   // Same key under different controls, and a control named like a property, are not duplicates.
   if (pb.filter((p) => p.includes('duplicate key')).length !== 1) missing.push('exactly one duplicate key');
@@ -476,6 +512,9 @@ function selftest() {
     '            Formulas: |-',
     '              =MoneyShort(v: Number): Text = If(IsBlank(v) || v = 0, "-", "$" & Text(v / 1000, "#,##0") & "K");',
     '            Width: =With({w: Parent.Width}, w - 24)',
+    // A Yes/No column this app surfaces as a boolean: used bare in a Filter, so Coalesce(..., false) is right.
+    "            Items: =Filter(People, Active, 'Completes A Timesheet')",
+    "            Default: =Coalesce(ThisItem.'Completes A Timesheet', false)",
   ].join('\n');
   const nb = formulaNotes(noteBad), ng = formulaNotes(noteGood);
   const notesOk = nb.length === 6 && ['through Coalesce', 'Select()', 'names a month', 'before Text(Sum', 'MoneyShort()', 'With() alias']

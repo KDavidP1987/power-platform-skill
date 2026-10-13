@@ -92,6 +92,15 @@ touches, for one user of each role.
   app gate as yourself says nothing about Dataverse access - keep the two claims separate
   (`browser-verification.md`).
 
+- **Impersonate someone who holds only the role under test.** Impersonating a user who also holds an
+  admin role reads everything and proves nothing about the narrow role; pick a user with that role
+  alone, or read the share records.
+- **A role flag from a table the role cannot read is an ERROR, not blank.** `Set(gblIsAdmin,
+  !IsBlank(LookUp(Admins, Email = User().Email)))` errored for one role with no Read on `Admins`, and
+  `Filter(col, gblIsAdmin || ...)` then rendered one blank row per record with live buttons. Only
+  people holding that role saw it. Wrap role lookups in `IfError(..., false)`, and probe every role
+  against every table the app reads at start.
+
 ## 4. Roles as code: `ReplacePrivilegesRole` converges
 
 Keep the privilege matrix (table x role x privilege x depth) in a script and apply it through the Web
@@ -168,11 +177,18 @@ emailed about, and showed the addressee nothing.
   `@@odata.type` (`power-automate.md`).
 - **Share outside any notification branch**, so turning notification channels off cannot remove
   access.
+- **Grant wherever you notify.** Under Basic-depth roles a flow that emails someone about a row must
+  also `GrantAccess` it to them, or they are told about a row they cannot open: a submit flow emailed
+  an approver's delegates and never shared, and a delegate added later got nothing. Share every
+  notified principal, and when a delegation is created, share what is already waiting.
 - **Verify with `RetrieveSharedPrincipalsAndAccess` and impersonation**, not by reading the flow.
   For "the approver sees nothing", start from the row: `RetrievePrincipalAccess` for that user on it
   (an answer of `None` means no role, owner or share reaches them), then
   `RetrieveSharedPrincipalsAndAccess` on the row. Both together named a share flow that never ran in
   minutes.
+  It returns each principal as `{"@odata.type": "#Microsoft.Dynamics.CRM.systemuser", "ownerid": <id>}`,
+  keyed by `ownerid`, not `systemuserid`: a check keyed on `systemuserid` reported 0 of 12 shares that
+  all existed.
 - **The share mask follows what the person will do.** Read alone lets them see the row; Write lets
   them change plain columns; a save that sets a LOOKUP on the row (Approve writing "Decision By")
   also needs `AppendAccess` on the row and AppendTo on the target table. With Read and Write only,

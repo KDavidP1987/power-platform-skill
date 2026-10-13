@@ -470,6 +470,26 @@ save, and diff a fresh sync before trusting the clean push; a re-push of the fix
   read `ThisItem.Person.Person` through a lookup whose display name equalled its target table's;
   renaming the lookup's display name ended the crash. Whether that name pattern always crashes is not
   established: the same app read `Person.Person` in a `Filter` elsewhere without trouble.
+- **New galleries and new screens tore Studio down after clean pushes (October 2026, Studio
+  3.26094.x).** Same console error as above, measured over more than twenty push cycles in two apps
+  in one week, every push compiling with 0 errors:
+  - a NEW gallery, even a fixed-height one holding one label over a global collection, in a new
+    screen or as an overlay on an existing one; updating a gallery the app already had was fine;
+  - a new modern Button inside a newly added gallery (outlined classic Labels with `OnSelect` in the
+    same place were fine);
+  - a new screen pushed together with `Navigate()` links to it from existing screens; the screen
+    alone survived, and after it was saved the links pushed cleanly;
+  - a gallery whose `Items` was `Switch(x, "a", ShowColumns(colA, ...), "b", ShowColumns(colB, ...))`;
+    one collection built in the loader plus `Filter(col, Form = x)` was stable.
+
+  The same source shipped by solution import broke the published app (it stopped part-way through
+  `App.OnStart`) while every package check passed. Until it is shown fixed: run
+  `scripts/check-new-galleries.py <live package> <Src> --live-src <unpacked live Src>` before a ship
+  that adds a gallery, and for each one it names, insert the gallery in Studio (Insert > Vertical
+  gallery, renamed to the source's name), push the source, Save and Publish from Studio, then re-ship
+  from git. Push a new screen alone and save before linking to it; push one screen per cycle while
+  galleries are being added and save after each push that survives; keep each cycle's diff so the
+  bisect can be repeated, and capture the console stack for a support case.
 - **Never import a solution while a push is held.** An import republishes every customisation and
   kills the session holding the push.
 - **The hold has a timer, and expiry discards the push.** A 60-minute default expired while waiting
@@ -643,6 +663,15 @@ build the zip in git and self-import it (or hand the zip to IT for higher enviro
 - **Marker presence proves a control exists, not that it works.** A Refresh button shipped and was
   "verified live" by marker while it `Select()`ed a label with no `OnSelect`. The last step is
   performing the task (`browser-verification.md`).
+- **Package checks cannot prove the app runs.** A build passed `LoadFromYaml`, the markers, the stamp
+  and the column cache while every user was told they were not in the app's roster: `App.OnStart`
+  stopped part-way. Only opening the published app caught it. After every publish, whatever it
+  changed, open the play URL, wait for the build stamp, and check the first screen renders signed-in
+  data (the person's name, the current period) before anything else is called done.
+- **`pac canvas unpack --layout SourceCode` writes the live `Src` BESIDE the `.msapr`, not inside it**,
+  and the `.msapr`'s `Controls/*.json` holds controls only as of the last Studio publish. The live
+  app's control list is the union of the two; reading one made four healthy galleries created from
+  source read as missing.
 - **After any Studio surgery, re-ship from git and check `LoadFromYaml`.** Publishing from Studio
   writes the app back in `Controls/*.json` form: `LoadFromYaml` flips to false, the build stamp
   vanishes, and if the Studio session predated recent imports, the live app silently loses that
