@@ -13,6 +13,8 @@ S = os.path.normpath(os.path.join(HERE, "..", "skills", "power-platform", "scrip
 # On Windows prefer the native binary over the npm .cmd shim, which re-parses arguments through cmd.exe.
 _EXE = os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
 CLAUDE = _EXE if os.path.exists(_EXE) else shutil.which("claude") or "claude"
+# A user-scope install of this plugin would put a second copy of the skill in every run, baseline included.
+NO_PLUGIN = ["--settings", '{"enabledPlugins":{"power-platform@power-platform-skill":false}}']
 GROOT = os.path.join(tempfile.gettempdir(), "ppe", "g")
 PA_HOOK = os.path.join(S, "hooks", "check-pa-yaml.mjs")
 
@@ -171,7 +173,7 @@ def grade_one(job):
     prompt = GRADER.format(assertions="\n".join(f"{i+1}. {a}" for i, a in enumerate(A)))
     last = ""
     for attempt in range(3):
-        p = subprocess.run([CLAUDE, "-p", "--output-format", "json", "--dangerously-skip-permissions"], input=prompt,
+        p = subprocess.run([CLAUDE, "-p", *NO_PLUGIN, "--output-format", "json", "--dangerously-skip-permissions"], input=prompt,
                            cwd=g, capture_output=True, text=True, encoding="utf-8", timeout=1200)
         try:
             txt = json.loads(p.stdout)["result"]

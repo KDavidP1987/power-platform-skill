@@ -86,7 +86,7 @@ footer { margin-top: 24px; color: var(--muted); font-size: .9rem; }
   <section class="drawing" aria-labelledby="status">
     <h2 id="status">Where it stands</h2>
     <dl class="facts">
-      <div><dt>Release</dt><dd>0.30.0</dd></div>
+      <div><dt>Release</dt><dd>0.31.0</dd></div>
       <div><dt>Last graded evaluation</dt><dd>217/222 with, 136/222 without (0.7.1)</dd></div>
       <div><dt>Scripts with a self-test in CI</dt><dd>Every bundled script</dd></div>
       <div><dt>Licence</dt><dd>MIT</dd></div>
@@ -114,7 +114,7 @@ footer { margin-top: 24px; color: var(--muted); font-size: .9rem; }
 <tr><td class="n" data-label="#">10</td><td data-label="Item">Approvals in Teams and Outlook, and the one-Approvals-connection-per-person limit</td><td data-label="Why it matters">Every approval flow meets it</td><td data-label="Status">Open</td></tr>
 <tr><td class="n" data-label="#">11</td><td data-label="Item">Two independent real builds in different tenants</td><td data-label="Why it matters">A 1.0 criterion; every build so far ran in one tenant</td><td data-label="Status">Open: needs a second tenant</td></tr>
 <tr><td class="n" data-label="#">12</td><td data-label="Item">Driver commands <code>add-data</code> and <code>refresh-source</code> for an existing app</td><td data-label="Why it matters">Both were done by hand-written browser helpers in two projects; the recipe is in <code>browser-verification.md</code> section 12</td><td data-label="Status">Open: port and prove against a live Studio session before release</td></tr>
-<tr><td class="n" data-label="#">13</td><td data-label="Item">SKILL.md against Anthropic's current skill guidance: body under 5,000 tokens with the must-hold rules first (Claude Code keeps only the first 5,000 tokens of a skill after compaction), and a measured check that the newest models do not need the prescriptive passages</td><td data-label="Why it matters">The body is about 10,500 tokens; after compaction everything from the tool table down is lost</td><td data-label="Status">Open: restructure, then re-run the graded evaluation (item 6) on the result</td></tr>
+<tr><td class="n" data-label="#">13</td><td data-label="Item">SKILL.md against Anthropic's current skill guidance: body under 5,000 tokens with the must-hold rules first (Claude Code keeps only the first 5,000 tokens of a skill after compaction), and a measured check that the newest models do not need the prescriptive passages</td><td data-label="Why it matters">The body is about 10,500 tokens; after compaction everything from the tool table down is lost</td><td data-label="Status">Done in 0.31: about 4,100 tokens, 141 of 148 graded checks as before, 9% cheaper; CI fails a body over 20,000 characters</td></tr>
 </tbody>
 </table>
 <!-- backlog:end -->
