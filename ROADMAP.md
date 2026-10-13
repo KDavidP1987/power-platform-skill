@@ -24,6 +24,8 @@ README and the documentation front page, and CI fails when they differ. Update i
 | 9 | SharePoint as a data source: delegation, the 5,000-item threshold, staying on a standard licence | Common in real tenants; written down nowhere yet | Open |
 | 10 | Approvals in Teams and Outlook, and the one-Approvals-connection-per-person limit | Every approval flow meets it | Open |
 | 11 | Two independent real builds in different tenants | A 1.0 criterion; every build so far ran in one tenant | Open: needs a second tenant |
+| 12 | Driver commands `add-data` and `refresh-source` for an existing app | Both were done by hand-written browser helpers in two projects; the recipe is in `browser-verification.md` section 12 | Open: port and prove against a live Studio session before release |
+| 13 | SKILL.md against Anthropic's current skill guidance: body under 5,000 tokens with the must-hold rules first (Claude Code keeps only the first 5,000 tokens of a skill after compaction), and a measured check that the newest models do not need the prescriptive passages | The body is about 10,500 tokens; after compaction everything from the tool table down is lost | Open: restructure, then re-run the graded evaluation (item 6) on the result |
 <!-- backlog:end -->
 
 ## 0.6.0 (done 2026-10-02)

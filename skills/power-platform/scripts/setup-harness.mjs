@@ -38,6 +38,7 @@ export const MANIFEST = [
   ['scripts/ship-canvas.py', 'scripts/ship-canvas.py', 'tools', 'ship a canvas app by solution import, build stamp read back'],
   ['scripts/inspect-artifact.py', 'scripts/inspect-artifact.py', 'tools', 'assert on the packed artifact (used by ship-canvas)'],
   ['scripts/check-published-order.py', 'scripts/check-published-order.py', 'tools', 'published control order against the repo'],
+  ['scripts/check-new-galleries.py', 'scripts/check-new-galleries.py', 'tools', 'galleries the live app does not have yet'],
   ['scripts/canvas-browser.mjs', 'scripts/canvas-browser.mjs', 'tools', 'drive Studio and the published app; walk scenarios with Dataverse confirms'],
   ['scripts/contract-to-walk.mjs', 'scripts/contract-to-walk.mjs', 'tools', 'acceptance contract to walk scenarios'],
   ['scripts/deploy-tables.py', 'scripts/deploy-tables.py', 'tools', 'schema manifest to Dataverse, plan first'],

@@ -238,6 +238,14 @@ copying a working control from the same app.
   screens need an explicit Clear that resets every filter.
 - **`DefaultSelectedItems` fed from a lookup read off a row is a partial record**
   (`power-fx-and-pa-yaml.md`, section 5): blank second columns, or a GUID.
+- **A modern DropDown with no `DefaultSelectedItems` shows blank**, and `dd.Selected.Value = "All"`
+  then filters every row out. Self-describing items ("All years", "Any budget status") with a default
+  and `Coalesce(dd.Selected.Value, "<all>")` fixed it and removed the side labels, which were
+  truncating.
+- **A control whose `Visible` is false for every live record looks unbuilt.** An update-request tick
+  showed only on unlocked records, and every real thread was on a locked one, so the owner reported it
+  missing. Before calling a conditional control done, count the live records that meet the condition;
+  if it is near zero, show it disabled with the reason instead of hiding it.
 - **One picker for "All", "None" and real records: sentinel ids.** A filter that needs "All work",
   "No project" and each project builds one collection with two fixed rows ahead of the records, so
   the selection is always an id and every formula compares ids:

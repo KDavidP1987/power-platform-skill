@@ -942,6 +942,19 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
         `Set AccessibleLabel to what it does or asks for ("Search requests", "Close", "Due date").` +
         (CLICK_SHAPES.test(c.control) ? ' A shape that only repeats the click of a labelled control can leave the tab order instead (TabIndex: =-1).' : '') });
   }
+  // Label in name (WCAG 2.5.3): a button whose literal AccessibleLabel does not contain its literal
+  // caption. Speech users say what they see and get nothing, and a walk that clicks by the caption missed
+  // the button and landed on its container: the step reported OK and nothing happened.
+  const lit = (v) => { const m = (v || '').trim().match(/^=\s*"((?:[^"]|"")*)"\s*$/); return m ? m[1].replace(/""/g, '"').trim() : null; };
+  const squash = (s) => s.toLowerCase().replace(/\s+/g, ' ');
+  for (const c of all) {
+    if (hidden(c) || !/^(Button|Classic\/Button|ModernButton)(@|$)/i.test(c.control)) continue;
+    const t = lit(c.props.Text?.v), a = lit(c.props.AccessibleLabel?.v);
+    if (!t || !a || squash(a).includes(squash(t))) continue;
+    findings.push({ level: 'error', code: 'label-not-in-name', file: c.file, line: c.props.AccessibleLabel.line || c.line, control: c.name,
+      msg: `${c.name} shows "${t}" but its AccessibleLabel "${a}" does not contain it (WCAG 2.5.3 Label in Name): a person who says "${t}" ` +
+        `reaches nothing, and a walk that clicks "${t}" can land on the container instead. Start the label with the caption ("${t} - ...").` });
+  }
   // ---- text contrast ----
   const WIDTHS = [...new Set([screenWidth, 390])];
   const constsAt = new Map(WIDTHS.map((w) => [w, evalFormulaConstants(appText, readConstants(appText), w, screenHeight)]));
@@ -1269,7 +1282,7 @@ function hookMode() {
   const mine = res.findings.filter((f) => f.level === 'error' && path.resolve(f.file) === path.resolve(file) && !(f.guessed && !schema));
   // Two tiers (project-setup.md section 4): a missing accessible name is real but not fatal, and an
   // existing app can have one on every screen - blocking would get the hook switched off. Note it.
-  const NOTE_ONLY = new Set(['no-accessible-name']);
+  const NOTE_ONLY = new Set(['no-accessible-name', 'label-not-in-name']);
   const bad = mine.filter((f) => !NOTE_ONLY.has(f.code));
   const notes = mine.filter((f) => NOTE_ONLY.has(f.code));
   if (!bad.length) {
@@ -1391,6 +1404,8 @@ function selftest() {
   expect('name: button named by its text', free([['btnSave', 'Button', { ...box, Text: '="Save"', OnSelect: '=Set(x, 1)' }]]), []);
   expect('name: button with no text', free([['btnGo', 'Button', { ...box, Text: '=""', OnSelect: '=Set(x, 1)' }]]), ['no-accessible-name']);
   expect('name: hidden input', free([['txtOld', 'TextInput', { ...box, Visible: '=false' }]]), []);
+  expect('name: label that does not contain the caption', free([['btnAdd', 'Button', { ...box, Text: '="Add manual actual"', AccessibleLabel: '="Record a cost"', OnSelect: '=Set(x, 1)' }]]), ['label-not-in-name']);
+  expect('name: label that starts with the caption', free([['btnAdd', 'Button', { ...box, Text: '="Add manual actual"', AccessibleLabel: '="Add manual actual - opens the cost form"', OnSelect: '=Set(x, 1)' }]]), []);
   // Contrast: grey 150 on the default white screen is 2.96:1, grey 130 is 3.95:1 (fails normal, passes large).
   expect('contrast: light grey on white', free([['lblHint', 'Label', { ...box, Text: '="Due"', Color: '=RGBA(150, 150, 150, 1)' }]]), ['low-contrast'],
     (r) => (r.stats.lowContrast === 1 ? null : `lowContrast ${r.stats.lowContrast}`));
@@ -1521,7 +1536,7 @@ function selftest() {
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 10 name, 15 contrast, 6 literal-fit, 2 vertical-fit, 5 build-stamp, 4 phone-width, ${fmtCases.length + 1} format-string, comment-before-layout, vacuity, per-file floor and control-trap cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 12 name, 15 contrast, 6 literal-fit, 2 vertical-fit, 5 build-stamp, 4 phone-width, ${fmtCases.length + 1} format-string, comment-before-layout, vacuity, per-file floor and control-trap cases decided as expected`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }

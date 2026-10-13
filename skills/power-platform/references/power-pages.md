@@ -1,5 +1,27 @@
 # Power Pages sites
 
+## Contents
+
+1. Choose the app type before the first screen
+2. Keep the site in git
+3. Security: two guards on every write
+4. Sign-in
+5. Pages that read and write: Liquid plus the Web API
+6. The cache
+7. Verify by performing the task, then prove the refusals
+8. Security review before release
+9. Designing the site: the organisation's identity, not the platform's
+10. Classic site or code site
+11. Row-level visibility: when a column decides who sees a row
+12. "My records": the contact lookup, scopes, Append and Append To
+13. Web API settings, the anti-forgery token and the errors
+14. Private sites, granting access, and the trial
+15. Creating, activating and restarting a site without the Azure CLI
+16. Teardown
+17. The go-live decisions to settle up front
+18. Name and email for people who are not Dataverse users
+19. A write path that held every refusal
+
 A Power Pages site is a website over Dataverse: its own address, its own sign-in, and security by
 web roles and table permissions instead of Dataverse security roles. This reference covers when to
 choose one, how to keep it in git, how to secure it, how to build pages that read and write, and how
