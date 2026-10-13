@@ -11,3 +11,6 @@ PRODUCT.md
 DESIGN.md
 DESIGN.*.json
 .impeccable/
+
+# Written by lint-flows.mjs and the build gate in whatever folder they run from
+.ship-work/
