@@ -65,6 +65,11 @@
 //
 // Flags: --config <path>  --profile <dir>  --out <dir>  --headless  --keep-open  --channel <chrome|msedge|chromium>
 //        --timeout <ms>   --port <n>  --settle <ms>  --continue-on-fail  --trace
+//        --trace-body <text>  play/walk: record each $batch response part whose body holds <text>, with its
+//                         @odata.context (the player may send $batch from a web worker, so the request
+//                         body is not visible; the response part is the record)
+//   walk verbs for tall screens: "scroll" falls back to the largest inner scroller when the document does
+//        not move; "scrollto": "<text>" brings below-fold text to the centre (see the verb list below)
 //        --fresh          delete the player's IndexedDB/Cache Storage before loading (stale build)
 //        --allow-writes   required to walk a scenario that declares "writes": true
 //        --skip-writes    skip those scenarios instead (a read-only pass, e.g. the reviewer's)
@@ -148,7 +153,7 @@ const has = (name) => argv.includes('--' + name);
 // The flags that take a value. A positional filter that drops "--x" tokens but keeps their values
 // read `walk a.json --config cfg.json` as two scenarios, the second being the config file.
 export const VALUED_FLAGS = new Set(['after', 'batch', 'channel', 'config', 'connector', 'expect', 'form-factor', 'hold', 'layout', 'name',
-  'out', 'port', 'profile', 'screen', 'selectors', 'settle', 'settle-dv', 'since', 'solution-id', 'tables', 'timeout', 'toggle',
+  'out', 'port', 'profile', 'screen', 'selectors', 'settle', 'settle-dv', 'since', 'solution-id', 'tables', 'timeout', 'toggle', 'trace-body',
   'unreviewed', 'wait-for']);
 export function positionals(args, valued = VALUED_FLAGS) {
   const out = [];
@@ -587,11 +592,37 @@ function reportConsole(errors, name) {
 // --trace: record which tables each $batch read touched and how many rows came back. Monitor
 // is unavailable while live updates is on; this is the substitute, and a table missing from
 // the trace means the query was never issued.
-function attachTrace(page, sink) {
+// The parts of a $batch response whose body contains `text` (case-insensitive), each with its
+// @odata.context and inner HTTP status. Pure, so --selftest proves it on a canned response.
+export function bodyHits(body, text) {
+  const want = String(text || '').toLowerCase();
+  if (!want) return [];
+  const out = [];
+  String(body || '').split(/^--[^\r\n]*\r?$/m).forEach((part, k) => {
+    const at = part.toLowerCase().indexOf(want);
+    if (at === -1) return;
+    const ctx = part.match(/"@odata\.context"\s*:\s*"([^"]*)"/);
+    const st = part.match(/HTTP\/1\.1 (\d{3})/);
+    out.push({ part: k, status: st ? Number(st[1]) : null, context: ctx ? ctx[1] : null,
+      text: part.slice(Math.max(0, at - 120), at + want.length + 120).replace(/\s+/g, ' ').trim() });
+  });
+  return out;
+}
+export const NO_REQUEST_BODY = 'request body not visible (sent from a web worker)';
+function attachTrace(page, sink, bodyText = null) {
+  let warned = false;
   page.on('response', async (res) => {
     if (!rx('player.batchUrl').test(res.url())) return;
     try {
       const body = await res.text();
+      // --trace-body: the player can send its $batch from a web worker; the response is seen here, but
+      // postData() is empty, so the response part is the only record of which query carried the value.
+      if (bodyText) {
+        let req = '';
+        try { req = (res.request().postData() || '').slice(0, 4000); } catch { /* no body */ }
+        if (!req && !warned) { warned = true; log('  trace-body: ' + NO_REQUEST_BODY + ' - recording the response parts only'); }
+        for (const h of bodyHits(body, bodyText)) sink.push({ at: new Date().toISOString(), set: '(body hit)', count: null, hit: h, request: req || NO_REQUEST_BODY });
+      }
       for (const m of body.matchAll(/"@odata\.context":"[^"#]*#([^"(/]+)[^"]*"(?:,"@odata\.count":(\d+))?/g)) {
         sink.push({ at: new Date().toISOString(), set: m[1], count: m[2] ? Number(m[2]) : null });
       }
@@ -603,7 +634,7 @@ function attachTrace(page, sink) {
         const msgs = [...body.matchAll(/"message":"((?:[^"\\]|\\.){0,300})/g)].map((m) => m[1]);
         let req = '';
         try { req = (res.request().postData() || '').slice(0, 4000); } catch { /* no body */ }
-        sink.push({ at: new Date().toISOString(), set: '(FAILED inner call)', count: null, status: inner, errors: msgs, request: req });
+        sink.push({ at: new Date().toISOString(), set: '(FAILED inner call)', count: null, status: inner, errors: msgs, request: req || NO_REQUEST_BODY });
       }
     } catch { /* body unavailable */ }
   });
@@ -783,6 +814,54 @@ const MEASURE = {
       rows.push({ ratio: r.width / (txt.length * fs), fs, bold: Number(cs.fontWeight) >= 600 });
     }
     return rows;
+  },
+};
+
+// A screen taller than App.Height scrolls inside an inner element: document.scrollingElement does not
+// move and below-fold text reads "in the DOM but not visible". cands: [{ overflowY, scrollHeight,
+// clientHeight, clientWidth }]; the index of the largest box that scrolls vertically, or -1. Pure.
+export function pickScroller(cands) {
+  let best = -1, area = 0;
+  (cands || []).forEach((c, k) => {
+    if (!c || !/^(auto|scroll)$/.test(String(c.overflowY || ''))) return;
+    if (!(Number(c.scrollHeight) > Number(c.clientHeight) + 1) || !(Number(c.clientHeight) > 0)) return;
+    const a = Number(c.clientHeight) * Math.max(1, Number(c.clientWidth) || 1);
+    if (a > area) { area = a; best = k; }
+  });
+  return best;
+}
+const SCROLLERS = {
+  // Every element that holds more than it shows, kept on window for `scroll` to address by index.
+  list: (attr) => {
+    const els = [...document.querySelectorAll('div, main, section')].filter((el) => el.scrollHeight > el.clientHeight + 1 && el.clientHeight > 0);
+    window.__cbScrollers = els;
+    return els.map((el) => {
+      const host = el.closest('[' + attr + ']');
+      return { overflowY: getComputedStyle(el).overflowY, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, clientWidth: el.clientWidth,
+        name: host ? host.getAttribute(attr) : '<' + el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? ' class="' + el.className.slice(0, 40) + '"' : '') + '>' };
+    });
+  },
+  scroll: ({ k, y }) => {
+    const el = (window.__cbScrollers || [])[k];
+    if (!el) return { from: null, to: null };
+    const from = el.scrollTop;
+    el.scrollTop = y === 'bottom' ? el.scrollHeight : Number(y);
+    return { from, to: el.scrollTop };
+  },
+  // The deepest visible element whose text holds `text` (case and spacing ignored), scrolled to the centre.
+  to: ({ text, attr }) => {
+    const n = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const want = n(text);
+    const shows = (el) => { const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); return cs.visibility !== 'hidden' && cs.display !== 'none' && r.width > 0 && r.height > 0; };
+    const holds = (el) => n(el.textContent).includes(want);
+    for (const el of document.querySelectorAll('body *')) {
+      if (!holds(el) || !shows(el)) continue;
+      if ([...el.children].some((ch) => holds(ch) && shows(ch))) continue;
+      el.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const host = el.closest('[' + attr + ']');
+      return 'scrolled ' + (host ? host.getAttribute(attr) : '<' + el.tagName.toLowerCase() + '>') + ' into view';
+    }
+    return null;
   },
 };
 
@@ -985,7 +1064,11 @@ async function typeTarget(frame, into, nth, exactOnly) {
 //   {"fillCell": 3, "value": "7.5"}         fill the nth text input in the frame, then Tab
 //   {"expect": "Saved"}                     FAIL unless that text is visibly on screen
 //   {"absent": "Delete"}                    FAIL if that text IS visibly on screen (gates)
-//   {"scroll": "bottom" | 400}              does the screen scroll at all
+//   {"scroll": "bottom" | 400}              does the screen scroll at all; when the document does not
+//                                           move, scrolls the largest inner element that does (a screen
+//                                           taller than App.Height scrolls inside the app) and names it
+//   {"scrollto": "Grand total"}             scroll the deepest visible element holding that text to the
+//                                           centre, then FAIL unless it is on screen (below-fold text)
 //   {"clipcheck": "screen-name"}            measured clipped text
 //   {"deadclick": "screen-name"}            interactive controls something else is painted over
 //   {"overlapcheck": "screen-name"}         text-bearing controls overlapping as rendered
@@ -1003,6 +1086,8 @@ async function typeTarget(frame, into, nth, exactOnly) {
 //       {"entitySet": "app_requests", "filter": "...", "absent": true}   no row matches (a gate refused)
 //       "changedThisRun": true (the default when the scenario writes): every matched row's modifiedon
 //       is after the walk started, so a row left over from an earlier run cannot pass the check.
+//       With "absent": true it must be given explicitly, and then means "no matching row changed this
+//       run": old rows pass, a row modified since the walk started fails (the siblings of the target row).
 async function runSteps(page, frameRef, steps, results) {
   for (const [i, step] of steps.entries()) {
     const tag = '  step ' + (i + 1) + '/' + steps.length + ' ';
@@ -1137,9 +1222,17 @@ async function runSteps(page, frameRef, steps, results) {
       }
 
       if (step.pick !== undefined) {
-        // A classic DropDown in the current player is a button + listbox, not a <select>: open it
-        // by its accessible name, then choose the option by role (gallery text cannot match).
-        const opener = frame.getByRole('button', { name: step.from, exact: false }).first();
+        // A classic DropDown in the current player is a button + listbox, not a <select>; a modern
+        // DropDown has no native <select> at all and its opener is a combobox. Open it by its accessible
+        // name (combobox first, as `selected` reads it), then choose the option by role (gallery text
+        // cannot match).
+        let opener = null, how = '';
+        for (const role of ['combobox', 'button']) {
+          const el = frame.getByRole(role, { name: String(step.from), exact: false }).first();
+          if (await el.count() === 0) continue;
+          opener = el; how = role; break;
+        }
+        if (!opener) throw new Error('no combo box or dropdown named "' + step.from + '"');
         await opener.waitFor({ state: 'visible', timeout: 30000 });
         await opener.click({ timeout: 15000 });
         await page.waitForTimeout(800);
@@ -1149,9 +1242,12 @@ async function runSteps(page, frameRef, steps, results) {
         if (await opt.count() === 0) opt = page.getByRole(optRole, { name: String(step.pick), exact: true });
         await opt.first().click({ timeout: 15000 });
         await page.waitForTimeout(800);
-        const now = await opener.getAttribute('aria-label').catch(() => '') || await opener.innerText().catch(() => '');
-        if (!String(now).includes(String(step.pick))) throw new Error('dropdown "' + step.from + '" reads "' + now + '" after choosing "' + step.pick + '"');
-        log(tag + 'pick "' + step.pick + '" from "' + step.from + '"  OK');
+        // Read the value back as `selected` does: input value, aria-label and text, judged as a whole
+        // word after the control's name (a substring test passed "Active" for "Inactive").
+        const now = [await opener.inputValue().catch(() => ''), await opener.getAttribute('aria-valuetext').catch(() => ''),
+          await opener.getAttribute('aria-label').catch(() => ''), await opener.innerText().catch(() => '')].filter(Boolean).join(' | ');
+        if (!selectedMatches(now, step.pick, step.from)) throw new Error('dropdown "' + step.from + '" reads "' + now + '" after choosing "' + step.pick + '"');
+        log(tag + 'pick "' + step.pick + '" from "' + step.from + '"  OK (' + how + ')');
         results.passed.push('pick:' + step.pick);
         await page.waitForTimeout(Number(step.settle || 3000));
       }
@@ -1171,7 +1267,7 @@ async function runSteps(page, frameRef, steps, results) {
 
       if (step.expect) {
         const v = await onScreen(frame, step.expect);
-        if (!v.ok) throw new Error('"' + step.expect + '" is not on screen: ' + v.why);
+        if (!v.ok) throw new Error('"' + step.expect + '" is not on screen: ' + v.why + (/but not visible/.test(v.why) ? ' - on a screen taller than the window, try {"scrollto": "' + step.expect + '"} first' : ''));
         log(tag + 'expect "' + step.expect + '"  ON SCREEN');
         results.passed.push(step.expect);
       }
@@ -1188,8 +1284,31 @@ async function runSteps(page, frameRef, steps, results) {
         await frame.evaluate((y) => { const d = document.scrollingElement || document.body; d.scrollTop = y === 'bottom' ? d.scrollHeight : Number(y); }, step.scroll);
         await page.waitForTimeout(1200);
         const after = await frame.evaluate(() => (document.scrollingElement || document.body).scrollTop);
-        log(tag + 'scroll ' + step.scroll + ': scrollTop ' + before.top + ' -> ' + after + ' (content ' + before.h + 'px in ' + before.c + 'px'
-            + (after === before.top ? ', DID NOT MOVE - screen does not scroll)' : ')'));
+        if (after !== before.top) log(tag + 'scroll ' + step.scroll + ': scrollTop ' + before.top + ' -> ' + after + ' (content ' + before.h + 'px in ' + before.c + 'px)');
+        else {
+          // A screen taller than App.Height scrolls inside an inner element, not the document: try the
+          // largest element that scrolls vertically before calling the screen unscrollable.
+          const cands = await frame.evaluate(SCROLLERS.list, CTRL_ATTR);
+          const k = pickScroller(cands);
+          if (k === -1) log(tag + 'scroll ' + step.scroll + ': scrollTop ' + before.top + ' -> ' + after + ' (content ' + before.h + 'px in ' + before.c + 'px, DID NOT MOVE - screen does not scroll, and no inner element scrolls)');
+          else {
+            const moved = await frame.evaluate(SCROLLERS.scroll, { k, y: step.scroll });
+            await page.waitForTimeout(1200);
+            log(tag + 'scroll ' + step.scroll + ': the document did not move; scrolled the inner element ' + cands[k].name + ' (' + cands[k].clientHeight + 'px showing ' + cands[k].scrollHeight + 'px): scrollTop ' + moved.from + ' -> ' + moved.to
+                + (moved.from === moved.to ? ', DID NOT MOVE' : ''));
+          }
+        }
+      }
+
+      if (step.scrollto !== undefined) {
+        // Bring below-fold text into view on a tall screen: the deepest visible element holding the
+        // text is scrolled to the centre of whatever scrolls it (the document or an inner element).
+        const r = await frame.evaluate(SCROLLERS.to, { text: String(step.scrollto), attr: CTRL_ATTR });
+        if (!r) throw new Error('"' + step.scrollto + '" is not in any visible element, so there is nothing to scroll to');
+        await page.waitForTimeout(Number(step.settle || 1200));
+        const v = await visibleIn(frame, String(step.scrollto));
+        if (!v.ok) throw new Error('scrolled to "' + step.scrollto + '" (' + r + ') but it is still not on screen: ' + v.why);
+        log(tag + 'scrollto "' + step.scrollto + '"  OK (' + r + '; ' + v.why + ')');
       }
 
       const sweep = async (key, fn, describe) => {
@@ -1232,7 +1351,7 @@ async function runSteps(page, frameRef, steps, results) {
 
 // --- scenario lint (no browser) ---------------------------------------------------------------
 const VERBS = new Set(['wait', 'viewport', 'radio', 'pick', 'selected', 'from', 'click', 'nth', 'exact', 'type', 'into', 'blur', 'stable', 'within', 'every', 'reads', 'select', 'fillCell', 'value', 'expect', 'absent',
-  'scroll', 'clipcheck', 'deadclick', 'overlapcheck', 'measurefont', 'capture', 'mustBeClean', 'settle', 'note']);
+  'scroll', 'scrollto', 'clipcheck', 'deadclick', 'overlapcheck', 'measurefont', 'capture', 'mustBeClean', 'settle', 'note']);
 export function lintScenario(sc) {
   const errs = [];
   if (!sc || typeof sc !== 'object') return ['scenario is not an object'];
@@ -1251,6 +1370,7 @@ export function lintScenario(sc) {
     if ('from' in st && !('pick' in st || 'selected' in st)) errs.push(`step ${i + 1}: "from" is only used with "pick" or "selected"`);
     if ('selected' in st && !(typeof st.selected === 'string' && st.selected.trim())) errs.push(`step ${i + 1}: "selected" is the value the dropdown must show`);
     if ('radio' in st && !(typeof st.radio === 'string' && st.radio.trim())) errs.push(`step ${i + 1}: "radio" is the option's visible label`);
+    if ('scrollto' in st && !(typeof st.scrollto === 'string' && st.scrollto.trim())) errs.push(`step ${i + 1}: "scrollto" is the text to bring into view`);
     if ('exact' in st && !('click' in st || 'type' in st)) errs.push(`step ${i + 1}: "exact" is only used with "click" or "type"`);
     for (const k of ['within', 'every', 'reads']) if (k in st && !('stable' in st)) errs.push(`step ${i + 1}: "${k}" is only used with "stable"`);
     if ('stable' in st && !(typeof st.stable === 'string' && /^[A-Za-z_][\w]*$/.test(st.stable))) errs.push(`step ${i + 1}: "stable" is the control's name (data-control-name), for example lblTotal`);
@@ -1293,7 +1413,18 @@ const CONFIRM_KEYS = new Set(['entitySet', 'filter', 'select', 'expect', 'count'
 const SKEW_MS = 120000;   // a client clock ahead of the server must not fail a real write
 export function judgeRows(rows, c, runStartMs, writes) {
   const why = [];
-  if (c.absent) { if (rows.length) why.push(rows.length + ' row(s) match; expected none'); return why; }
+  if (c.absent) {
+    // "absent" + "changedThisRun": true asserts that no matching row was written by THIS run (the siblings
+    // of the intended row stay untouched). Measured: a write walk passed while the save landed on a
+    // neighbouring row; only a read-back showed it. Old rows are allowed; a row with no modifiedon counts.
+    if (c.changedThisRun === true && runStartMs) {
+      const touched = rows.filter((r) => { const m = Date.parse(r.modifiedon || ''); return !m || m >= runStartMs - SKEW_MS; });
+      if (touched.length) why.push(touched.length + ' matching row(s) changed during this run; expected none (' + touched.map((r) => r.modifiedon || 'no modifiedon').join(', ') + ')');
+      return why;
+    }
+    if (rows.length) why.push(rows.length + ' row(s) match; expected none');
+    return why;
+  }
   if ('count' in c && rows.length !== c.count) why.push(rows.length + ' row(s) match; expected ' + c.count);
   if (!('count' in c) && rows.length === 0) why.push('no row matches the filter');
   const fresh = c.changedThisRun ?? writes;
@@ -1403,8 +1534,8 @@ function selectorTableProblems() {
 function selftest() {
   const good = { name: 'ok', steps: [{ click: 'Approvals', settle: 3000 }, { type: 'x', into: 'Search' }, { expect: 'Saved' }, { deadclick: 'scr' }] };
   const bad = { name: 'a/b', steps: [{ clik: 'Approvals' }, { type: 'x' }, { nth: 1 }, { click: 'Open', nth: -1 },
-    { viewport: [390] }, { pick: 'Laptop' }, { from: 'Type' }, { selected: '' }, { radio: '' }, { expect: 'x', exact: true }, { stable: 'lbl Total' }, { expect: 'y', within: 1000 }] };
-  const goodPhone = { name: 'phone', steps: [{ viewport: [390, 844] }, { pick: 'Laptop', from: 'Asset type' }, { selected: 'Laptop', from: 'Asset type' }, { selected: 'Open', nth: 1 }, { radio: 'Approved' }, { clipcheck: 'scr' },
+    { viewport: [390] }, { pick: 'Laptop' }, { from: 'Type' }, { selected: '' }, { radio: '' }, { expect: 'x', exact: true }, { stable: 'lbl Total' }, { expect: 'y', within: 1000 }, { scrollto: 400 }] };
+  const goodPhone = { name: 'phone', steps: [{ viewport: [390, 844] }, { pick: 'Laptop', from: 'Asset type' }, { selected: 'Laptop', from: 'Asset type' }, { selected: 'Open', nth: 1 }, { radio: 'Approved' }, { clipcheck: 'scr' }, { scrollto: 'Grand total' },
     { click: 'Close', exact: true }, { type: 'Leeds', into: 'City', exact: true }, { stable: 'lblTotal', within: 300000, every: 10000, reads: 3 }] };
   const goodWrite = { name: 'edit-then-revert', writes: true, restore: 'revert-edit', steps: [{ fillCell: 0, value: '7.5' }, { expect: 'Saved' }],
     confirm: [{ entitySet: 'app_timeentries', filter: "app_name eq 'TEST-1'", expect: { app_hours: 7.5 }, count: 1 }] };
@@ -1416,7 +1547,7 @@ function selftest() {
   const b = [...lintScenario(bad), ...lintScenario(badWrite), ...lintScenario(badConfirm), ...lintScenario(absentOnly)];
   const want = ['file-name safe', 'unknown verb', 'needs "into"', 'no action', '0-based', 'asserts nothing', 'no "restore"', 'no "confirm"',
     'entity set name', '"filter" is required', 'unknown key', 'object of column', 'asserts nothing: give', 'cannot be combined',
-    '[width, height]', '"pick" needs "from"', 'only used with "pick" or "selected"', 'value the dropdown must show', 'visible label', '"exact" is only used', '(data-control-name)', 'only used with "stable"'];
+    '[width, height]', '"pick" needs "from"', 'only used with "pick" or "selected"', 'value the dropdown must show', 'visible label', '"exact" is only used', '(data-control-name)', 'only used with "stable"', '"scrollto" is the text'];
   // Tab hygiene: what tidy treats as blank, as the Studio editor, and as anything else.
   const T = [['about:blank', 'blank'], ['chrome-error://chromewebdata/', 'blank'], ['edge://newtab/', 'blank'],
     ['https://make.powerapps.com/e/E/canvas/?action=edit&app-id=x', 'studio'], ['https://make.powerapps.com/e/E/apps', 'other'],
@@ -1436,6 +1567,11 @@ function selftest() {
     ['stale row', judgeRows([row({ app_hours: 7.5, modifiedon: '2025-12-31T09:00:00Z' })], { expect: { app_hours: 7.5 } }, t0, true), 1],
     ['clock skew tolerated', judgeRows([row({ modifiedon: '2026-01-01T11:59:00Z' })], { count: 1 }, t0, true), 0],
     ['read-only walk ignores age', judgeRows([row({ modifiedon: '2025-01-01T00:00:00Z' })], { count: 1 }, t0, false), 0],
+    // absent + changedThisRun: no sibling of the intended row was written by this run.
+    ['absent this run: an old sibling passes', judgeRows([row({ modifiedon: '2025-12-31T09:00:00Z' })], { absent: true, changedThisRun: true }, t0, true), 0],
+    ['absent this run: a sibling written this run fails', judgeRows([row({ modifiedon: '2025-12-31T09:00:00Z' }), row({})], { absent: true, changedThisRun: true }, t0, true), 1],
+    ['absent this run: inside the skew allowance counts as this run', judgeRows([row({ modifiedon: '2026-01-01T11:59:00Z' })], { absent: true, changedThisRun: true }, t0, true), 1],
+    ['absent this run: no run start counts every row', judgeRows([row({ modifiedon: '2025-12-31T09:00:00Z' })], { absent: true, changedThisRun: true }, 0, false), 1],
   ];
   const judged = J.filter(([, w, n]) => w.length !== n).map(([k, w]) => k + ' -> ' + JSON.stringify(w));
   const missing = want.filter((w) => !b.some((e) => e.includes(w)));
@@ -1554,8 +1690,33 @@ function selftest() {
     ['reads: 3 needs three equal reads', settleVerdict([{ t: 0, text: '$0' }, { t: 10, text: '$0' }], { reads: 3 }).stable === false],
   ];
   tabs.push(...M.filter(([, okc]) => !okc).map(([k]) => 'target matching: ' + k));
+  // A canned $batch response: two parts, the second carries the value; a third part failed.
+  const batch = ['--batchresponse_1', 'Content-Type: application/http', '', 'HTTP/1.1 200 OK', '',
+    '{"@odata.context":"https://org.example/api/data/v9.0/$metadata#app_orders(app_name,app_total)","value":[{"app_name":"ORD-0001","app_total":10}]}',
+    '--batchresponse_1', 'Content-Type: application/http', '', 'HTTP/1.1 200 OK', '',
+    '{"@odata.context":"https://org.example/api/data/v9.0/$metadata#app_vendors(app_name)","value":[{"app_name":"Northwind Supply"}]}',
+    '--batchresponse_1', 'Content-Type: application/http', '', 'HTTP/1.1 400 Bad Request', '', '{"error":{"message":"bad filter"}}',
+    '--batchresponse_1--'].join('\r\n');
+  const hits = bodyHits(batch, 'northwind supply');
+  const sc = (overflowY, scrollHeight, clientHeight, clientWidth = 400) => ({ overflowY, scrollHeight, clientHeight, clientWidth });
+  const X = [
+    ['trace-body: only the part holding the text, with its context', hits.length === 1 && /#app_vendors\(/.test(hits[0].context) && hits[0].status === 200 && /Northwind/.test(hits[0].text)],
+    ['trace-body: a value in two parts is two hits', bodyHits(batch, 'app_name').length === 2],
+    ['trace-body: the failed part is found with its status', (bodyHits(batch, 'bad filter')[0] || {}).status === 400 && bodyHits(batch, 'bad filter')[0].context === null],
+    ['trace-body: no text, no hits', bodyHits(batch, '').length === 0 && bodyHits('', 'x').length === 0],
+    ['trace-body: worker note names the cause', /web worker/.test(NO_REQUEST_BODY)],
+    ['scroll: the largest vertical scroller wins', pickScroller([sc('auto', 900, 300), sc('hidden', 5000, 800), sc('auto', 3000, 700, 1200), sc('scroll', 600, 200)]) === 2],
+    ['scroll: overflow visible or hidden is not a scroller', pickScroller([sc('visible', 2000, 500), sc('hidden', 2000, 500)]) === -1],
+    ['scroll: an element that shows all it holds is not a scroller', pickScroller([sc('auto', 500, 500), sc('auto', 501, 500)]) === -1],
+    ['scroll: nothing to pick', pickScroller([]) === -1 && pickScroller(null) === -1],
+    ['save: an unread stamp is retried, then exits 7 with no proof', (() => { const d = saveDecision('none'); return d.retry && d.exitCode === 7 && !d.proof; })()],
+    ['save: a landed stamp writes proof and exits 0', saveDecision('landed').proof && saveDecision('landed-untimed').exitCode === 0 && !saveDecision('landed').retry],
+    ['save: old and unchanged exit 7, not retried', ['old', 'unchanged'].every((v) => saveDecision(v).exitCode === 7 && !saveDecision(v).proof && !saveDecision(v).retry)],
+    ['pick: opens a combobox before a button and judges the value as selected does', /\['combobox', 'button'\][\s\S]{0,1600}selectedMatches\(now, step\.pick, step\.from\)/.test(runSteps.toString())],
+  ];
+  tabs.push(...X.filter(([, okc]) => !okc).map(([k]) => 'scroll/trace/save/pick: ' + k));
   const ok = g.length === 0 && missing.length === 0 && sel.length === 0 && judged.length === 0 && tabs.length === 0;
-  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 23 publish-guard, review-gate, fix-batch, data-source, profile-copy, terms-dialog and auto-tidy cases, ${S.length} save-stamp, second-tab, clipcheck, channel and Playwright-lookup cases, ${M.length} target-matching and settle cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
+  log(ok ? `selftest ok: bad scenarios -> ${b.length} findings, good scenarios -> 0, ${J.length} Dataverse confirmation cases judged, ${T.length} tab kinds classified, 8 connection cases, 23 publish-guard, review-gate, fix-batch, data-source, profile-copy, terms-dialog and auto-tidy cases, ${S.length} save-stamp, second-tab, clipcheck, channel and Playwright-lookup cases, ${M.length} target-matching and settle cases, ${X.length} scroll, trace-body, save-decision and pick cases, selector table: ${Object.keys(SEL).length} entries valid and in step with the defaults`
          : `selftest FAILED: good -> [${g.join('; ')}], missing on bad -> [${missing.join(', ')}], confirmation -> [${judged.join('; ')}], selector table -> [${sel.join('; ')}], tabs -> [${tabs.join('; ')}]`);
   process.exit(ok ? 0 : 1);
 }
@@ -1589,7 +1750,7 @@ async function openPlayer(ctx, errors, trace) {
   const page = await freshPage(ctx);
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-  if (trace) attachTrace(page, trace);
+  if (trace) attachTrace(page, trace, flag('trace-body') ? String(flag('trace-body')) : null);
   await disableCache(page);
   await page.goto(PLAYER_URL, { waitUntil: 'domcontentloaded' });
   if (!(await isSignedIn(page))) return { page, frame: null, signedIn: false };
@@ -1607,10 +1768,16 @@ async function openPlayer(ctx, errors, trace) {
 }
 
 function writeTrace(trace, name) {
-  if (!trace || !trace.length) return;
+  if (!trace) return;
+  if (flag('trace-body')) {
+    const hits = trace.filter((t) => t.hit);
+    log('  trace-body "' + flag('trace-body') + '": ' + hits.length + ' $batch response part(s) carried it');
+    hits.slice(0, 8).forEach((t) => log('     ' + (t.hit.status || '?') + '  ' + (t.hit.context || '(no @odata.context)') + '  ...' + t.hit.text.slice(0, 160)));
+  }
+  if (!trace.length) return;
   writeFileSync(join(OUT, name + '.odata-trace.json'), JSON.stringify(trace, null, 2), 'utf8');
   const by = {};
-  for (const t of trace) by[t.set] = (by[t.set] || 0) + 1;
+  for (const t of trace) if (!t.hit) by[t.set] = (by[t.set] || 0) + 1;
   log('  OData reads by entity set: ' + Object.entries(by).map(([k, v]) => k + ' x' + v).join(', '));
   const failed = trace.filter((t) => t.status);
   if (failed.length) {
@@ -1624,7 +1791,7 @@ function writeTrace(trace, name) {
 async function cmdPlay() {
   needApp();
   const ctx = await launch({ headless: has('headless') });
-  const errors = []; const trace = has('trace') ? [] : null;
+  const errors = []; const trace = has('trace') || flag('trace-body') ? [] : null;
   log('Opening the PUBLISHED app (what a user gets):\n  ' + PLAYER_URL);
   const { page, frame, signedIn } = await openPlayer(ctx, errors, trace);
   if (!signedIn) { log('NOT SIGNED IN - run `login` first.'); await ctx.close(); process.exitCode = 2; return; }
@@ -1698,7 +1865,7 @@ async function walkOne(file) {
   log('SCENARIO: ' + scenario.name + (scenario.description ? '\n  ' + scenario.description : ''));
   if (scenario.writes === true) log('  WRITES production data - restore afterwards with: ' + scenario.restore);
   const ctx = await launch({ headless: has('headless') });
-  const errors = []; const trace = has('trace') ? [] : null;
+  const errors = []; const trace = has('trace') || flag('trace-body') ? [] : null;
   const { page, frame, signedIn } = await openPlayer(ctx, errors, trace);
   if (!signedIn) { log('NOT SIGNED IN - run `login` first.'); await ctx.close(); process.exitCode = 2; return; }
   if (!frame) { log('App frame never appeared. Cannot perform the task.'); await ctx.close(); process.exitCode = 3; return; }
@@ -2225,9 +2392,17 @@ async function cmdSave() {
   await hit.ctl.click({ timeout: 20000 });
   log('  clicked Save at ' + clickedAt.toLocaleTimeString() + '; waiting for it to land ...');
   await studio.waitForTimeout(Number(flag('after', 25000)));
-  const after = await readSaveStamp(studio, hit.frame);
+  let after = await readSaveStamp(studio, hit.frame);
+  let verdict = stampVerdict(after, before, clickedAt);
+  // Measured: the flyout could not be read on two saves that had in fact landed. Read it again (the
+  // flyout is reopened each time) before calling the save unproven.
+  for (let k = 0; k < SAVE_STAMP_RETRIES && saveDecision(verdict).retry; k++) {
+    log('  could not read "Saved: <time>" yet; reading again in 10 s (' + (k + 2) + '/' + (SAVE_STAMP_RETRIES + 1) + ')');
+    await studio.waitForTimeout(10000);
+    after = await readSaveStamp(studio, hit.frame);
+    verdict = stampVerdict(after, before, clickedAt);
+  }
   await capture(studio, 'save-after');
-  const verdict = stampVerdict(after, before, clickedAt);
   if (verdict === 'old') {
     // Measured: "SAVE LANDED: Saved: 10:28:27" printed at 10:40 - the flyout's OLD stamp, after a click
     // that saved nothing (a clean push had not marked Studio dirty). A stamp older than the click is
@@ -2249,12 +2424,25 @@ async function cmdSave() {
     log('     co-authoring session (was Studio in Preview when it arrived?). Treat the save as NOT done.');
     process.exitCode = 7;
   } else {
-    log('  !! could not read "Saved: <time>" from the Save flyout - open it by hand. Until then the save is UNPROVEN.');
+    // No save-proof.json: a held push must not be released on a save nobody has seen land.
+    log('  !! could not read "Saved: <time>" from the Save flyout in ' + (SAVE_STAMP_RETRIES + 1) + ' tries. The save is UNPROVEN.');
+    log('     Do NOT reload Studio while the save is unproven: a reload discards an unsaved push.');
+    log('     Read the stamp by eye in the Save flyout, or run `doctor --studio-only`; once it reads at or after');
+    log('     ' + clickedAt.toLocaleTimeString() + ', confirm with a reload plus `canvas-mcp.py sync <scratch> --diff`.');
+    process.exitCode = saveDecision(verdict).exitCode;
   }
-  log('  Independent proof: reload Studio, `canvas-mcp.py sync <scratch> --diff` (0 differences), or a pac canvas download after publish.');
+  if (!saveDecision(verdict).retry) log('  Independent proof: reload Studio, `canvas-mcp.py sync <scratch> --diff` (0 differences), or a pac canvas download after publish.');
   await browser.close();
 }
 const SAVE_PROOF = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'save-proof.json');
+const SAVE_STAMP_RETRIES = 2;
+// What a save verdict means: only a stamp at or after the click writes save-proof.json and exits 0;
+// every other outcome is UNPROVEN and exits 7, an unread stamp included (it once exited 0 while the
+// docs promised 7). An unread stamp is read again before that verdict stands. Pure.
+export function saveDecision(verdict) {
+  const landed = verdict === 'landed' || verdict === 'landed-untimed';
+  return { proof: landed, exitCode: landed ? 0 : 7, retry: verdict === 'none' };
+}
 
 // Publish once per batch. A measured build published 21 times; a publish costs minutes and proves
 // nothing new when the source has not changed. The hash recorded after each publish (in the work folder)
@@ -3108,7 +3296,7 @@ const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, connecti
 if (argv.includes('--selftest')) selftest();
 else if (!commands[cmd]) {
   log('canvas-browser - drive Power Apps Studio and the published player\n');
-  log('  login | check | play [--screen N] [--trace] [--fresh] | walk <scenario.json|folder> [...] [--trace] [--fresh] [--allow-writes | --skip-writes]');
+  log('  login | check | play [--screen N] [--trace] [--trace-body <text>] [--fresh] | walk <scenario.json|folder> [...] [--trace] [--trace-body <text>] [--fresh] [--allow-writes | --skip-writes]');
   log('  confirm <scenario.json> [--since ISO]   run only the scenario\'s Dataverse checks');
   log('  connection --connector dataverse|outlook|approvals|<api> --name N [--apply] [--json]');
   log('  create --name N --solution-id GUID [--form-factor tablet|phone] [--layout responsive|fixed] [--tables a,b] [--publish] [--close]');

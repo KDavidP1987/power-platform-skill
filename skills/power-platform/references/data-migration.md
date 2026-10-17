@@ -23,7 +23,15 @@ when you write is in `power-automate.md`, section 8.
 
 - **Dry-run first, always**, printing the actual rows it would touch, not just a count. Make dry run
   the default and require `-Apply`. Dry runs must model rows that earlier steps of the same run would
-  create - one reported 18 phantom creates.
+  create - one reported 18 phantom creates. The dry run and the apply must build their requests on
+  one code path, and the dry run prints the exact bodies: a loader's plan listed an unmatched code as
+  "left blank" while the apply bound it as `(None)` and failed after 46 creates. The apply acts on
+  the rows the dry run selected and refuses if they changed (`dataverse-web-api.md` section 16).
+- **Before a load lands in a table, find every read of it in the apps.** Grep for `ClearCollect`,
+  `ForAll` and unscoped `Filter` over the table and size each read at the post-load row count. A
+  reference table of 6 rows became 3,348 with the first feed load; a whole-table read at start-up
+  would have returned a silent 2,000-row prefix. Scope those reads before the apply, and prove the
+  new filters delegate (`power-fx-and-pa-yaml.md` section 6: a missing warning is not proof).
 - **Fill blanks freely; never silently overwrite a value that disagrees.** Report disagreements for a
   person to decide. If an overwrite rule is needed, make it narrow and stated ("replace only where the
   current value points at a deactivated row"); "latest wins" is not a rule. For messy clean-ups, work

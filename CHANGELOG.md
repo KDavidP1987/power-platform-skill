@@ -11,6 +11,53 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-17
+
+Select before apply, as a must-hold rule and as enforcement. Several Dataverse applies in real projects
+failed part-way or wrote wrong rows and the scripts had to be fixed and re-run: a plan and an apply that
+built their requests on different paths (HTTP 400 after 46 creates), labels that were never requested
+(322 rows written with a blank status while the totals reconciled), and a reconcile script that wrote
+on every run with no plan at all. Now an apply acts only on what a plan showed. This release also folds
+in the lessons logged from three projects since 0.31.0 (31 accepted in whole or part; 10 rejected as already covered;
+2 held for the planned Power BI skill; 6 kept as suspected until proved).
+
+### Added
+
+- SKILL.md must-hold 12, **select before you apply**: run the read-only selection the change will act
+  on (same `$filter`, same code path), read every row or component touched and the exact request
+  bodies, and for a delete or retype what holds data or depends on it; plan is the default and the
+  apply needs `--apply`. Full procedure: `dataverse-web-api.md` section 16.
+- `deploy-tables.py` and `seed-data.py`: a plan run records its change list in `.ship-work/plans/`; an
+  apply selects again, read-only, and refuses (exit 1, nothing written) unless a plan of the same
+  inputs in the same environment, under 24 hours old and not yet used, lists exactly the same changes.
+  A test row that appears between `list` and `cleanup --apply` stops the delete. Helpers in `_ppapi.py`.
+- Plugin gate rule D: refuses an inline shell write (POST, PATCH, PUT, DELETE) to the Dataverse Web
+  API, and refuses writing a script that sends one with no plan mode.
+- `check-pa-yaml.mjs`: `Navigate()` in `OnVisible` (a compile error even inside `If()`).
+- `check-canvas-overlap.mjs` and `check-canvas-format.mjs` hooks list the findings an edit introduced
+  first ("N NEW since the last commit"), then those already committed.
+- `canvas-browser.mjs`: `scrollto` step and an inner-scroller fallback for screens taller than the
+  window; `pick` opens a modern DropDown exposed as a combobox and verifies the chosen value;
+  `--trace-body <text>` finds a query by its response when the player sends `$batch` from a web worker;
+  an `absent` check with `changedThisRun` counts only rows written in this run, so a write that landed
+  on a neighbouring row fails the walk.
+- References: delegation is not proved by a missing warning; never `Patch` onto a name `LookUp` of a
+  large table (a silent no-op) or keep the record `Patch` returns; `Ungroup` unions yield a blank row for
+  an empty group; hide inputs under an overlay; grep the apps before a load grows a table; labels come
+  back only when requested; `[` is a wildcard in `startswith`; privilege types per table (Append and
+  AppendTo) proved by impersonation; a client-side import timeout can leave flows in Draft; the
+  measured new-gallery workaround order; reading another team's Gen1 dataflow into bronze; two
+  PowerShell 5.1 traps; forms added after the app module.
+
+### Changed
+
+- `check-canvas-format.mjs`: `number-spin-arrows` is now `number-input-entry`. Its advice (`Step: =0`)
+  was wrong for data entry: a modern NumberInput does not commit its value when a button is clicked
+  straight after typing, and Save writes the previous value. Use a classic TextInput with
+  `Format: =TextFormat.Number`. The earlier test had pressed Tab before saving.
+- `canvas-browser.mjs save` exits 7 when the "Saved:" time cannot be read after two retries (it exited
+  0), and says not to reload while the save is unproven.
+
 ## [0.31.0] - 2026-10-13
 
 SKILL.md restructured to Anthropic's current skill guidance. After compaction Claude Code keeps only the

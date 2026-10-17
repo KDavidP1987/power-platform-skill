@@ -17,6 +17,10 @@
 //   C. no `pac solution import` while the folder holds flows and no clean lint-flows.mjs run over all
 //      of them, newer than the newest flow, is recorded in .ship-work/flow-lint.json (non-negotiable 8;
 //      deploy-flows.py lints itself, a plain import did not).
+//   D. select before apply (must-hold 12): no Dataverse write (POST, PATCH, PUT, DELETE to /api/data/)
+//      sent inline from a shell command, and no script written that sends one without a plan mode
+//      (--apply, -Apply, --plan, -WhatIf, a dry run). deploy-tables.py and seed-data.py also refuse an
+//      apply that no matching plan preceded.
 // The Stop gate blocks up to three times per session (counted per session_id in the temp folder), so
 // one listed summary does not end the build; after that it lets the stop through and writes the gaps
 // to stderr, so it can never trap a session.
@@ -646,6 +650,21 @@ export function evaluatePre(root, input = {}, env = process.env) {
         'No finding is waived (SKILL.md non-negotiable 8).';
     }
   }
+  // D. select before apply (SKILL.md must-hold 12): a Dataverse write is never sent inline from the shell,
+  //    and a script that sends one plans by default. One loader's plan took another path than its apply and
+  //    failed part-way; another wrote hundreds of wrong rows; an old reconcile script wrote with no plan at all.
+  if (isShell && inlineDataverseWrite(cmd)) {
+    return 'Power Platform order gate (power-platform plugin) [Dataverse]: select before apply. This command sends a Dataverse write ' +
+      'inline, so nothing has shown which rows or components it touches. Run the same URL and $filter as a GET first and read the rows; ' +
+      'then put the write in a script that plans by default (prints every row and the exact request body) and writes only with --apply ' +
+      '(references/dataverse-web-api.md section 16).';
+  }
+  if (tool === 'Write' && /\.(py|ps1|psm1|mjs|js|cjs|ts|sh)$/i.test(String(ti.file_path || '')) && writeScriptWithoutPlan(String(ti.content || ''))) {
+    return 'Power Platform order gate (power-platform plugin) [Dataverse]: select before apply. This script sends Dataverse writes ' +
+      '(POST, PATCH, PUT or DELETE to /api/data/) but has no plan mode. Make plan the default: select the target rows with the same ' +
+      'filter the write will use, print them and the exact request bodies, and write only with --apply (or -Apply); the apply acts on ' +
+      'the rows the plan selected and refuses if they changed (references/dataverse-web-api.md section 16).';
+  }
   // B. plan before schema
   if (isShell && runsDeployer(cmd)) {
     const ok = planReady(root);
@@ -672,6 +691,25 @@ export function runsDeployer(cmd) {
     return true;
   }
   return false;
+}
+
+// A shell command that itself sends POST, PATCH, PUT or DELETE to a Dataverse Web API URL (curl,
+// Invoke-RestMethod / Invoke-WebRequest, an inline python or node one-liner). Running a script that does
+// the write is not matched here; the script's own plan mode is (writeScriptWithoutPlan).
+const DV_URL = /\/api\/data\/v\d/i;
+const WRITE_METHOD = /(?:-X\s*|--request\s+|-Method\s+['"]?|method\s*[:=]\s*['"]|requests\.)(POST|PATCH|PUT|DELETE|MERGE)\b/i;
+export function inlineDataverseWrite(cmd) {
+  const c = String(cmd);
+  return DV_URL.test(c) && WRITE_METHOD.test(c);
+}
+
+// Script source that sends Dataverse writes and has no plan/apply switch.
+export function writeScriptWithoutPlan(src) {
+  const s = String(src);
+  if (!DV_URL.test(s) && !/crm[0-9]*\.dynamics\.com/i.test(s)) return false;
+  const writes = /(?:-Method\s+['"]?|method\s*[:=]\s*['"]|-X\s*|\b(?:call|request|_req|send)\(\s*['"])(POST|PATCH|PUT|DELETE|MERGE)\b|requests\.(post|patch|put|delete)\(/i;
+  if (!writes.test(s)) return false;
+  return !/--apply|-Apply\b|-WhatIf|SupportsShouldProcess|--plan\b|dry[-_ ]?run|read_only\s*=|plan[-_ ]?only/i.test(s);
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -736,6 +774,18 @@ function selftest() {
     check('B: reading or diffing the deployer is not a deploy', pre('Bash', { command: 'git diff main -- scripts/deploy-tables.py && grep -n default scripts/deploy-tables.py' }), silent);
     check('B: the deployer selftest is not a deploy', pre('Bash', { command: 'cd x && python scripts/deploy-tables.py --selftest' }), silent);
     check('B: a deploy after a cd is still a deploy', pre('Bash', { command: 'cd x && python3 "scripts/deploy-tables.py" --manifest t.json' }), denies('plan before schema'));
+    check('D: an inline curl DELETE to the Web API is denied', pre('Bash', { command: "curl -s -X DELETE -H \"Authorization: Bearer $T\" 'https://org.crm.dynamics.com/api/data/v9.2/app_orders(1f0e)'" }), denies('select before apply', 'GET first'));
+    check('D: an inline Invoke-RestMethod PATCH is denied', pre('PowerShell', { command: 'Invoke-RestMethod -Uri "$org/api/data/v9.2/app_orders($id)" -Method Patch -Body $b -Headers $h' }), denies('select before apply'));
+    check('D: an inline python requests.delete is denied', pre('Bash', { command: "python -c \"import requests; requests.delete(o + '/api/data/v9.2/app_orders(1)')\"" }), denies('select before apply'));
+    check('D: an inline GET (the selection) is allowed', pre('Bash', { command: "curl -s 'https://org.crm.dynamics.com/api/data/v9.2/app_orders?$filter=app_status eq 1&$select=app_name'" }), silent);
+    check('D: Invoke-RestMethod GET is allowed', pre('PowerShell', { command: 'Invoke-RestMethod -Uri "$org/api/data/v9.2/app_orders?`$top=5" -Method Get -Headers $h' }), silent);
+    check('D: running a write script is not an inline write', pre('Bash', { command: 'python scripts/close-orders.py --apply' }), silent);
+    const noPlan = "import requests\nORG='https://org.crm.dynamics.com/api/data/v9.2/'\nfor r in rows:\n    requests.patch(ORG + 'app_orders(%s)' % r, json=b)\n";
+    check('D: writing a Web API write script with no plan mode is denied', pre('Write', { file_path: path.join(tmp, 'scripts/close.py'), content: noPlan }), denies('select before apply', 'no plan mode'));
+    check('D: the same script with --apply is allowed', pre('Write', { file_path: path.join(tmp, 'scripts/close.py'), content: noPlan + "if '--apply' in sys.argv: pass\n" }), silent);
+    check('D: a PowerShell write script with -WhatIf is allowed', pre('Write', { file_path: path.join(tmp, 'scripts/Fix.ps1'), content: '[CmdletBinding(SupportsShouldProcess)]\nInvoke-RestMethod -Uri "$org/api/data/v9.2/x" -Method Delete\n' }), silent);
+    check('D: a read-only script is allowed', pre('Write', { file_path: path.join(tmp, 'scripts/read.py'), content: "requests.get('https://org.crm.dynamics.com/api/data/v9.2/app_orders')\n" }), silent);
+    check('D: a doc naming a DELETE is not a script', pre('Write', { file_path: path.join(tmp, 'docs/notes.md'), content: '-Method Delete /api/data/v9.2/x' }), silent);
     check('B: deploy-tables --plan is allowed', pre('Bash', { command: 'python scripts/deploy-tables.py --plan' }), silent);
     fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });
     fs.copyFileSync(TEMPLATE, path.join(tmp, 'docs', 'acceptance-contract.md'));

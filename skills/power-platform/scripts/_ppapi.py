@@ -16,6 +16,7 @@ ever opens a socket.
 
 Python 3 standard library only.
 """
+import hashlib
 import json
 import os
 import re
@@ -221,6 +222,67 @@ def dataverse(org, token, read_only=True, transport=None, sleep=None):
     return Client(org.rstrip("/") + "/api/data/v9.2/", token, read_only, transport, sleep,
                   {"OData-MaxVersion": "4.0", "OData-Version": "4.0",
                    "Prefer": 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'})
+
+
+# --------------------------------------------------------------------------- select before apply
+#
+# An apply acts only on what a plan showed. The plan run records its change list under
+# .ship-work/plans/ (in the folder it runs from); the apply selects again through the same code path,
+# read-only, and refuses unless a plan of the same inputs in the same environment was recorded and
+# lists exactly the same changes. A consumed plan is removed, so the next apply needs a new plan.
+
+PLAN_MAX_AGE_HOURS = 24
+
+
+def plan_key(kind, org, inputs):
+    """A stable id for one plan: the command, the environment and the exact inputs (file content, flags)."""
+    raw = json.dumps([kind, (org or "").rstrip("/").lower(), inputs], sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _plan_path(kind, key, work=None):
+    d = work or os.environ.get("PP_PLAN_DIR") or os.path.join(os.getcwd(), ".ship-work", "plans")
+    return os.path.join(d, "%s-%s.json" % (kind, key))
+
+
+def record_plan(kind, key, org, lines, work=None):
+    """Write the change list a plan printed. Returns the file's path."""
+    path = _plan_path(kind, key, work)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump({"kind": kind, "org": org, "at": time.time(), "lines": list(lines)}, f, indent=1)
+    return path
+
+
+def check_plan(kind, key, lines, work=None, max_age_hours=PLAN_MAX_AGE_HOURS, now=None):
+    """None when a recent plan of these inputs lists exactly these changes; otherwise the reason to refuse."""
+    path = _plan_path(kind, key, work)
+    try:
+        with open(path, encoding="utf-8") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return ("no plan was recorded for these inputs in this environment. Run the same command in plan mode, "
+                "read what it lists, then apply")
+    age = ((now or time.time()) - float(rec.get("at") or 0)) / 3600.0
+    if age > max_age_hours:
+        return "the plan is %.1f hours old (limit %d). Run the plan again and read it" % (age, max_age_hours)
+    old, new = list(rec.get("lines") or []), list(lines)
+    if old != new:
+        extra = [x for x in new if x not in old]
+        gone = [x for x in old if x not in new]
+        shown = ["  + " + x for x in extra[:5]] + ["  - " + x for x in gone[:5]]
+        return ("the live state or the inputs changed since the plan: %d change(s) the plan did not show, %d it "
+                "showed that no longer apply. Run the plan again and read it.\n%s"
+                % (len(extra), len(gone), "\n".join(shown)))
+    return None
+
+
+def consume_plan(kind, key, work=None):
+    """Remove a plan once its apply has run, so a second apply needs a new plan."""
+    try:
+        os.remove(_plan_path(kind, key, work))
+    except OSError:
+        pass
 
 
 class FakeTransport:

@@ -448,6 +448,13 @@ running it is a trap:
   its declared state with the exact command that fixes it. An audit compares repo and live on every
   run: a **state** mismatch is a finding; a **definition** mismatch is a note (normal between a
   change and its import).
+- **A client time-out is not a failed import.** An import that timed out on the client still landed
+  (the app was published) and left active flows in Draft. Read `importjobs` and the live flow states
+  before deciding it failed, and run the state diff above either way.
+- **A package built from a live export copies the live drift.** Before importing, compare every
+  flow's `StateCode` in the package with the repo's sidecar and refuse a package that would switch
+  one. That pre-import comparison is still a manual step (a check for it is on the roadmap); the
+  post-import state diff above already exists. Keep the two straight.
 - **Activation scripts select by name, and refuse to run bare.** An activation script whose default
   filter matched every app flow would, run bare, have switched on the deliberately-off scheduled
   reminders to the whole roster. Require an explicit name (or make the default match nothing),

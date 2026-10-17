@@ -78,11 +78,12 @@ matters.
 | A text check that measured none of the bound text is not a pass (exit 2); under half measured warns loudly | script check | `check-canvas-format.mjs` | layout constants lost to a comment: 0 of 225 measured, 0 findings |
 | Controls drawn over controls; text over a clickable shape (`covers-control`); a click-to-dismiss scrim is still a modal backdrop | hook (each write) | `check-canvas-overlap.mjs` | measured; a clickable scrim produced 259 false overlaps in one app |
 | Text cut at the top and the bottom in the running app | script check (walk step `clipcheck`) | `canvas-browser.mjs` | measured: 14 cut labels the whole-line count missed |
-| The held Studio tab stays open until after publish; a save stamp older than the click is UNPROVEN | script check | `canvas-browser.mjs second-tab`, `save` | a push lost after the held tab closed; SAVE LANDED printed for a 12-minute-old stamp |
+| The held Studio tab stays open until after publish; a save stamp older than the click, or unreadable, is UNPROVEN | script check | `canvas-browser.mjs second-tab`, `save` | a push lost after the held tab closed; SAVE LANDED printed for a 12-minute-old stamp |
 | Screen-file ceiling | hook (Stop) | `audit-stop.mjs` | a compile refused at 50 files |
 | No critique floor | none, deliberately | | no canvas build has been measured against a floor yet; record the score, add a floor when the evidence exists |
 | Know which build runs (5); delegation (10) | instruction, plus `check-drift.py`, build-stamp read-back in `ship-canvas.py` | SKILL.md 5, 10 | per screen judgement |
 | A gallery the live app does not have is not shipped from source (Studio 3.26094.x regression) | script check | `check-new-galleries.py` | a new gallery broke a published app and tore Studio down while every package check passed |
+| No modern NumberInput for data entry (`number-input-entry`); a classic TextInput with `Format: =TextFormat.Number` instead | hook note (each write), never blocks | `check-canvas-format.mjs` | Save clicked straight after typing wrote the previous value and reported success |
 | A button's AccessibleLabel contains its caption (WCAG 2.5.3) | hook note (each write), never blocks | `check-canvas-format.mjs` `label-not-in-name` | a walk click by caption landed on the container and reported OK |
 | After every publish, the first screen renders signed-in data | instruction | `canvas-shipping.md` 7 | package checks passed on a build where OnStart stopped part-way |
 
@@ -101,7 +102,7 @@ matters.
 | Rule | Enforcement | Where | Evidence |
 |---|---|---|---|
 | Plan before a table deploy | hook (before tools) | `plugin-gate.mjs` rule B | a build never ran the planning step the skill called required |
-| Plan first, idempotent writes | script check | `deploy-tables.py`, `seed-data.py` (plan unless `--apply`) | standard |
+| Select before apply (12): plan by default, the apply acts only on what the plan showed | script check, plus hook (before tools) | `deploy-tables.py`, `seed-data.py` (an apply refuses unless a recorded plan of the same inputs lists the same changes); `plugin-gate.mjs` rule D (no inline Web API write, no write script without a plan mode) | applies that failed part-way or wrote wrong rows: a plan and an apply on different code paths (HTTP 400 after 46 creates), labels never requested (322 rows written blank), a reconcile script with no plan mode |
 | Schema before screens (6); security roles out of the solution (7) | instruction | SKILL.md 6, 7; `dataverse.md`, `security-and-access.md` | a role-carrying import reset live access once; deciding "this import carries roles" from source is possible but has not been missed in a measured build |
 | Before a bulk write, ask what watches the table (9) | instruction, plus `lint-flows.mjs --require-safe-recipients` | SKILL.md 9 | |
 | Model-driven apps | no hook | `model-driven-and-docs.md` | no measured model-driven build; the build gate stays silent for a solution-only folder |

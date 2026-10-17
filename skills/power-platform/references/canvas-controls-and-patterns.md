@@ -40,7 +40,7 @@ copying a working control from the same app.
 | Modern Button | `Tooltip` (hard bind error), `Size`, `TabIndex`, `Weight` | `AccessibleLabel`; text scales with `Height`; focusable by default |
 | Modern Button, `Appearance` Secondary | honours `BasePaletteColor` (computed colours identical for two palettes) | switch `Appearance` (Primary honours the palette) to signal state |
 | Modern TextInput | `Default`, `HintText`, `Format`, `Size`, `VerticalAlign`, `DelayOutput`; `Mode: =TextMode.MultiLine` compiles and is ignored (one line) | `Value`, `Placeholder`, read back as `.Value`; `TriggerOutput` (section 2); pad instead of aligning; `Mode: ='TextInputCanvas.Mode'.Multiline` |
-| NumberInput | `Size` | `FontSize`; `Step: =0` to remove the spin arrows (section 3) |
+| NumberInput | `Size` | `FontSize`; do not use it for data entry - a click on Save straight after typing writes the previous value; use a classic TextInput with `Format: =TextFormat.Number` (section 3) |
 | Modern DropDown | `Tooltip`, `Value`, `DisplayFields` | shape `Items` to one `Value` column with `Distinct()` or a literal `Table`, not a `ForAll` projection (section 6) |
 | Fluent Text | `FontWeight`, `Radius*` | `Weight`, `BorderRadius*` - the way to draw a rounded pill (a classic Rectangle has no radius) |
 | Modern DatePicker | - | `SelectedDate`; the control is `DatePicker`, not `DatePickerCanvas` |
@@ -131,14 +131,21 @@ copying a working control from the same app.
   reload did not help either. What worked: `Reset()` every input in the SAVE formula, before the
   queued `Select(btnLoad)` - the boxes drop back to the old values, and the reload's change is then a
   real change they apply. Opening a different record first hides the bug, so test it by saving a
-  change and reading the box, in both directions.
-- **NumberInput spin arrows change the box, not `.Value`.** A click on an arrow moved the display
-  from 38888 to 38889 while `.Value` stayed 38888; Save pressed next wrote 38888 (pressing `Tab`
-  first commits). No property hides the arrows, but `Step: =0` makes the player draw none - one app
-  set it on 67 inputs and a typed save then wrote the typed number. Set `Step: =0` on every amount
-  input; `check-canvas-format.mjs` warns `number-spin-arrows` where it is missing. A browser test of
-  a NumberInput must drive the real mouse on the real control, because a `fill()` never meets the
-  arrows (`browser-verification.md`).
+  change and reading the box, in both directions. Reproduced in a second app, where the trigger was
+  Save, then Back, then the screen's `OnVisible` `Reset()` on the way in again: re-reading the record
+  (a `LookUp` by id, `Refresh`) changed nothing. Read the variable in the formula bar before blaming
+  the data; the fix there was the same - `Reset()` the inputs in Save's success branch, before
+  navigating away.
+- **Do not use a modern NumberInput for data entry.** It does not commit `.Value` when a button is
+  clicked straight after typing: Save wrote the previous value and still reported success; only
+  `Tab` or `Enter` commits. (An earlier note here said `Step: =0` fixed it; that test filled the box
+  and pressed `Tab`, which commits anyway.) Its spin arrows likewise change the box, not `.Value`
+  (display 38889, `.Value` 38888, Save wrote 38888). Use a classic TextInput with
+  `Format: =TextFormat.Number` and read `Value(txtAmount.Text)` - the replacement was verified in
+  Studio preview, typing then clicking Save. Also observed once: its right-aligned text lost the last
+  digit in a narrow box in the player. `check-canvas-format.mjs` warns `number-input-entry` on an
+  editable modern NumberInput. A browser test of an amount box must type with real keystrokes and click Save
+  straight after, because a `fill()` plus `Tab` hides the fault (`browser-verification.md`).
 - **`Reset()` cannot reach a control that is not rendered**, and a control hidden at load never
   applies its Default (section 4).
 - **An input fires `OnChange` when its bound value RESOLVES, not only when a person types.** A
@@ -327,6 +334,9 @@ copying a working control from the same app.
   text or shapes have none. An accessibility audit should not flag those children as mouse-only: the
   row itself stays keyboard-selectable (`audits.md` section 11).
 - **Use `AllItemsCount`** for counts and empty states (`power-fx-and-pa-yaml.md`, section 9).
+- **Count a gallery's rows against its source in a walk.** A gallery over an `Ungroup` union showed
+  a blank phantom row for an empty group, and an edit typed into it wrote an orphan child row; filter
+  the union on its id (section 16).
 - **Guards built on a control's state die with the control.** A duplicate check counting
   `Grid.AllItems` could never fire while the grid was broken (empty AllItems), so it silently allowed
   duplicates. Derive guards from the data source.
@@ -352,7 +362,9 @@ copying a working control from the same app.
   carried X 56, Y 248 - yet the authoring service kept the old control and applied only the
   properties that suited it, so Studio rendered it at 0,0, 320x32 on template defaults, with geometry,
   appearance and accessible label discarded. Rename the control (and its data-field children) and
-  every reference to it.
+  every reference to it. After a type change, also run `check-published-order.py` on the downloaded
+  app: the rebuilt control can come back at the top of its screen's draw order, above an overlay
+  (`canvas-layout.md` section 4).
 - **Repurposed controls can fail to paint too.** Same-type controls moved into a different layout
   rendered their panel and not their body until renamed - once, twice in a row. Renaming is free.
 - **Leftover properties of the old type break the compile** (`AllowEmptySelection` left on what is
@@ -806,7 +818,11 @@ tables in some connectors, `Len` and `Lower` around a column do not - keep them 
 (`power-fx-and-pa-yaml.md`, delegation). A dropdown that must offer a literal "All" entry instead of
 an empty selection needs a table of text values, e.g.
 `Ungroup(Table({v: ["All"]}, {v: ForAll(Choices('Items'.Category), Text(Value))}), v)`, and the
-filter then compares `Text(Category)`, which does not delegate - prefer empty-means-All.
+filter then compares `Text(Category)`, which does not delegate - prefer empty-means-All. A group
+built only from literals is never empty; a union of data columns can be. In the published player
+`Ungroup(Table({r: colA}, {r: colB}), r)` yielded one BLANK row for an empty group, and typing into
+that phantom gallery row wrote an orphan child row. Wrap every such union in
+`Filter(Ungroup(...), !IsBlank(Id))` (section 7).
 
 **Grouped list with section headers, delegation-friendly**: an outer flexible-height gallery over
 the categories, an inner gallery per category. Each inner query is delegable; `GroupBy` is not and

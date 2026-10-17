@@ -48,10 +48,14 @@ What it will and will not do:
     0x80047013 "attribute ... already exists".
   - A 500 carrying SQL error 40197 is retried: the create was rolled back and a re-run succeeds.
   - --plan prints, per table, whether it is new and how many items it would add and already has.
+  - Select before apply: --plan records its change list under .ship-work/plans/ (in the folder it
+    runs from; PP_PLAN_DIR overrides). An apply computes the list again, read-only, and refuses (exit
+    1, nothing written) unless a plan of the same manifest in the same environment, under 24 hours
+    old, lists exactly those changes. A plan is used once.
   - Security roles are deliberately not created here (references/security-and-access.md).
 
-Exit: 0 applied (or planned) and read back complete; 1 a conflict, a blocked lookup, or something
-missing on read-back; 2 a manifest error (refused before any call), no token, or the Web API failed
+Exit: 0 applied (or planned) and read back complete; 1 a conflict, a blocked lookup, no matching
+plan, or something missing on read-back; 2 a manifest error (refused before any call), no token, or the Web API failed
 part-way (re-run: every step is idempotent). 2 is never a pass.
 """
 import argparse
@@ -70,6 +74,9 @@ import urllib.request
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _ppapi import check_plan, consume_plan, plan_key, record_plan  # noqa: E402
 
 API = "/api/data/v9.2/"
 SLEEP = time.sleep          # the selftest replaces this so retries and settles cost nothing
@@ -951,16 +958,27 @@ def run(argv):
             print("REFUSED: %d conflict(s). Nothing was written; nothing is renamed, retyped or deleted here. "
                   "Change the manifest and run again." % len(p.conflicts))
             return 1
+        lines = []
+        shared_step(api, m, False, lines)      # GET only in both modes: what the shared step would do
+        planned = [text for text, _ in p.actions] + [x.strip() for x in lines]
+        key = plan_key("deploy-tables", org, m)
         if a.plan:
-            lines = []
-            shared_step(api, m, False, lines)
             print()
             print("\n".join(lines))
+            record_plan("deploy-tables", key, org, planned)
             print()
             print("PLAN ONLY: %d change(s) would be made in %s. Nothing was written (%d GET request(s))."
                   % (len(p.actions), org, len(api.calls)))
             return 0
+        why = check_plan("deploy-tables", key, planned)
+        if why:
+            print()
+            print("REFUSED (select before apply): %s" % why)
+            print("Nothing was written. Run: deploy-tables.py --manifest %s --org %s --plan" % (a.manifest, org))
+            return 1
+        consume_plan("deploy-tables", key)     # a re-run after a failure part-way plans the remainder again
         print()
+        print("Matches the plan recorded for this manifest and environment.")
         for text, fn in p.actions:
             fn()
             print("  done " + text)
@@ -1262,12 +1280,19 @@ def selftest():
             json.dump(m, f)
         return path
 
-    def go(m, org, *extra):
+    os.environ["PP_PLAN_DIR"] = os.path.join(tmp, "plans")
+
+    def go(m, org, *extra, plan_first=True):
+        """Run deploy-tables. An apply is preceded by its plan, as the procedure requires."""
         buf, old = io.StringIO(), sys.stdout
         sys.stdout = buf
         try:
-            rc = run(["--manifest", manifest_file(m), "--org", org,
-                      "--token-env", "DEPLOY_TABLES_SELFTEST_TOKEN"] + list(extra))
+            argv = ["--manifest", manifest_file(m), "--org", org, "--token-env", "DEPLOY_TABLES_SELFTEST_TOKEN"]
+            if plan_first and "--plan" not in extra:
+                run(argv + ["--plan"])
+                buf.seek(0)
+                buf.truncate()
+            rc = run(argv + list(extra))
         finally:
             sys.stdout = old
         return rc, buf.getvalue()
@@ -1349,12 +1374,45 @@ def selftest():
               and re.search(r"abc_request\s+NEW, 8 to add, 0 present", out) is not None)
         check("the token is never printed", "fixture-token" not in out)
 
+        # --- select before apply: an apply acts only on a plan it matches
+        shutil.rmtree(os.environ["PP_PLAN_DIR"], ignore_errors=True)
+        n0 = len(fake.calls)
+        rc, out = go(base, org, plan_first=False)
+        check("an apply with no recorded plan is refused, exit 1, nothing written",
+              rc == 1 and "REFUSED (select before apply)" in out and not writes(fake, n0))
+        go(base, org, "--plan")
+        changed = copy.deepcopy(base)
+        changed["tables"][0]["columns"].append({"schemaName": "abc_note", "displayName": "Note", "type": "string"})
+        n0 = len(fake.calls)
+        rc, out = go(changed, org, plan_first=False)
+        check("a plan of another manifest does not cover this one", rc == 1 and "no plan was recorded" in out
+              and not writes(fake, n0))
+        key = plan_key("deploy-tables", org, json.loads(json.dumps(base)))
+        path = record_plan("deploy-tables", key, org, ["+ publisher abcpublisher"])
+        n0 = len(fake.calls)
+        rc, out = go(base, org, plan_first=False)
+        check("a plan that listed other changes than the live state now gives is refused and the difference named",
+              rc == 1 and "changed since the plan" in out and "+ + table abc_category" in out and not writes(fake, n0))
+        go(base, org, "--plan")
+        with open(path, encoding="utf-8") as f:
+            rec = json.load(f)
+        rec["at"] -= 25 * 3600
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(rec, f)
+        rc, out = go(base, org, plan_first=False)
+        check("a plan older than 24 hours is refused", rc == 1 and "hours old" in out and not writes(fake, n0))
+
         # --- apply
         fake.flaky.add("EntityDefinitions(LogicalName='abc_request')/Attributes")
         fake.sql40197.add("EntityDefinitions")
         n0 = len(fake.calls)
         rc, out = go(base, org)
         check("apply exits 0 with DEPLOYED AND READ BACK", rc == 0 and "DEPLOYED AND READ BACK" in out)
+        check("the apply names the plan it matched", "Matches the plan recorded" in out)
+        n1 = len(fake.calls)
+        rc2, out2 = go(base, org, plan_first=False)
+        check("a plan is used once: a second apply needs a new plan", rc2 == 1 and "no plan was recorded" in out2
+              and not writes(fake, n1))
         req = fake.entities.get("abc_request", {"attrs": {}})["attrs"]
         check("columns created with their types and lower-case logical names",
               req.get("abc_duedate", {}).get("type") == "DateTimeType"

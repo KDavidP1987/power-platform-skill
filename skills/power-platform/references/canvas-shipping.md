@@ -353,8 +353,8 @@ re-published the old app; only a check of the published app caught it.
 | `canvas-browser.mjs studio` (or `studio --reload`) | it prints `STUDIO READY` | it exits 3 (read-only, or no edit mode in 3 minutes) or 5 (profile in use): stop, `close-studio`, start again |
 | `canvas-mcp.py hold`, started in the background (a foreground call blocks until release, times out, and the push dies with it before the save) | it prints `PUSHED CLEAN ... SESSION HELD` | it exits 1 (no session, errors, unreadable output, server did not start): nothing was pushed - stop; do not save or publish |
 | read-back | the changed property reads the new value in Studio | wrong session or an unapplied push: reload, push again |
-| `dirty` (when Save is disabled) | it exits 0 and says Save is enabled | exit 7: toggle a property the push changed (`dirty --toggle`) |
-| `save` | it prints `SAVE LANDED` with a stamp at or after the click | exit 7 (UNPROVEN, or nothing to save) or 3 (disconnected, read-only): do not release, do not publish |
+| `dirty` (when Save is disabled) | it exits 0 and says Save is enabled - the go-ahead to click Save, never proof that anything was pushed or saved | exit 7: toggle a property the push changed (`dirty --toggle`) |
+| `save` | it prints `SAVE LANDED` with a stamp at or after the click | exit 7 (UNPROVEN, or nothing to save) or 3 (disconnected, read-only): do not release, do not publish; an unreadable `Saved:` time is UNPROVEN, not failed (below) |
 | release the hold | it prints `save after the push is proven - releasing` | it keeps holding: the save is not proven |
 | `publish` | its gates pass; then `lastpublishtime` moves | a refusal says why: a push that failed records no hash, so "no clean push since the last publish" means push again |
 
@@ -409,7 +409,9 @@ save, and diff a fresh sync before trusting the clean push; a re-push of the fix
   compares the flyout's `Saved: <time>` with it: measured, it read a stamp 12 minutes old after a
   click that saved nothing (a clean push had not marked Studio dirty) and printed SAVE LANDED. It
   now reports UNPROVEN (exit 7) when the stamp is older than the click; run `dirty`, then `save`
-  again. After a push, run `dirty` before `save` by default.
+  again. After a push, run `dirty` before `save` by default. **An unreadable stamp is UNPROVEN, not
+  failed** (also exit 7): measured, the flyout could not be read on two saves that had landed. Retry
+  the read; never reload Studio to find out, since a reload discards a push that did not save.
 - **A reload discards the push** - it joins a new session that does not contain it. The screen
   looks broken, the instinct is to refresh, and the work is gone. One exception: after a session
   expiry Studio can silently re-attach to a new session on its own (white screen, nobody reloaded,
@@ -485,9 +487,12 @@ save, and diff a fresh sync before trusting the clean push; a re-push of the fix
   The same source shipped by solution import broke the published app (it stopped part-way through
   `App.OnStart`) while every package check passed. Until it is shown fixed: run
   `scripts/check-new-galleries.py <live package> <Src> --live-src <unpacked live Src>` before a ship
-  that adds a gallery, and for each one it names, insert the gallery in Studio (Insert > Vertical
-  gallery, renamed to the source's name), push the source, Save and Publish from Studio, then re-ship
-  from git. Push a new screen alone and save before linking to it; push one screen per cycle while
+  that adds a gallery, and for each one it names follow this order, measured twice with no teardown
+  against eight crashing cycles before it: push the change without the new gallery and save; in
+  Studio, Insert > Blank vertical gallery on the target screen, rename it to the source's name, and
+  save; then push the full source (the gallery and its children), save and publish, and re-ship from
+  git. The Studio steps are by hand for now (a driver command for them is on the roadmap). Push a
+  new screen alone and save before linking to it; push one screen per cycle while
   galleries are being added and save after each push that survives; keep each cycle's diff so the
   bisect can be repeated, and capture the console stack for a support case.
 - **Never import a solution while a push is held.** An import republishes every customisation and

@@ -21,6 +21,7 @@ from PowerShell or Python. What to build and why is in `dataverse.md`; who may r
 13. Model-driven forms by script
 14. The directory is already in Dataverse
 15. Windows PowerShell 5.1 traps
+16. Select before apply: every change, schema or data
 
 ---
 
@@ -324,6 +325,15 @@ Resolve dependents of type 60 (forms) with `systemforms(<id>)?$select=name`. Aut
 - Formatted values: with `odata.include-annotations="*"`, a choice's label arrives as
   `<column>@OData.Community.Display.V1.FormattedValue`. Print code **and** label when reading a
   source system's codes (`data-migration.md`, section 2).
+- **Labels come back only when the request asks for them.** A rollup read labels through a shared GET
+  helper whose `Prefer` header asked only for `odata.maxpagesize`; no annotation came back, every
+  `or "(none)"` default fired, and the apply wrote 322 rows with a blank status, all marked active.
+  Its totals reconciled to the cent, so the read-back passed. Put both preferences in one `Prefer`
+  header, make a script that maps labels refuse when no label came back, and read back by the
+  columns that were written (group the rows by status and type), not only by the totals.
+- **`[` is a wildcard in `startswith` and `contains`** (they become SQL `LIKE`):
+  `startswith(app_name,'[DEMO]')` matches nothing. Use `eq` on the full value (an escape was not
+  measured), and treat a selection that returns zero rows for a marker you know exists as broken.
 
 ## 13. Model-driven forms by script
 
@@ -368,4 +378,45 @@ Windows PowerShell 5.1 is often the only shell on a managed machine (`pwsh` may 
 `-UseBasicParsing`, native exit codes, collections that unroll (wrap in `@()`), `Import-Csv` indexing,
 case-insensitive variable names, `[string[]]` parameters and the dot-source guard - are one table in
 `tooling-and-auth.md` section 5, each with its consequence and fix.
+
+## 16. Select before apply: every change, schema or data
+
+Before any change that creates, updates or deletes rows, columns, tables, choices, keys or solution
+components, run the **selection** that names exactly what the change will touch, read it, and only
+then apply. This holds for a one-row fix as much as for a migration, and for deletes above all: a
+delete cannot be read back.
+
+**What the selection shows**
+
+- **Data**: the same entity set and the **same `$filter`** the write will use, as a GET, printing
+  every target row (key, name, the columns about to change, before and after) and the exact request
+  body each write will send. A count alone is not a selection.
+- **Schema**: every component the change adds, alters or removes (`deploy-tables.py --plan`). For a
+  delete or a retype, also the rows it holds (`$count`), what depends on it
+  (`RetrieveDependenciesForDelete`, section 11), and every canvas formula, flow and report that reads
+  it (search the source, `dataverse.md` section 9).
+- **Rows that would be affected without being named**: cascades, plug-ins and flows that watch the
+  table (SKILL.md must-hold 9), and other apps' rows in a shared table.
+
+**How the apply honours it**
+
+1. **Plan is the default.** A write script prints the selection and writes nothing unless run with
+   `--apply` (`-Apply` in PowerShell). `-WhatIf` makes the dry run opt-in, which is the wrong way
+   round; the plugin accepts it, but prefer plan by default. The plugin refuses an inline shell
+   write to the Web API and a new script that writes with no plan mode.
+2. **The plan and the apply share one code path.** Build the request list once and have plan mode
+   print it and apply mode send it. A loader's plan listed an unmatched company code as "left blank",
+   while its apply built the row on another path and bound `/<set>(None)`: HTTP 400 after 46 creates.
+   What the plan printed was not what the apply sent.
+3. **The apply acts on what the plan showed, and refuses if it changed.** It selects again,
+   read-only, and compares with the recorded plan; a row that appeared or vanished since, or a plan
+   of other inputs, stops it before the first write. `deploy-tables.py` and `seed-data.py` record
+   each plan under `.ship-work/plans/` and do this themselves (a plan older than 24 hours, or already
+   used, is refused).
+4. **Then read back** what was written, by the columns written (section 12): a load whose totals
+   matched to the cent had written every row with a blank status.
+
+Every one of these was learned from an apply that failed part-way or wrote wrong rows, after which
+the script had to be fixed and re-run. Make the script idempotent (upsert on the business key) so the
+re-run is safe, but do not rely on that instead of the selection.
 

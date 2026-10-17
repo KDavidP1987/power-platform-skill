@@ -575,7 +575,11 @@ python scripts/deploy-tables.py --manifest tables.json --org https://<org>.crm.d
 **Plan first, every time.** `--plan` issues GET requests only and prints every publisher, solution,
 table, column (file columns included), choice option and lookup it would create, a count per table
 of what is new and what is already there, the shared tables it would turn into references, and any
-conflict. Show the person the plan before the apply. Before a production deploy the plan is the
+conflict. Show the person the plan before the apply. The plan is recorded under
+`.ship-work/plans/`; the apply computes the same change list again, read-only, and refuses (exit 1,
+nothing written) unless a plan of the same manifest in the same environment, under 24 hours old,
+lists exactly those changes. A plan is used once: a re-run after a failure part-way plans the
+remainder again (`dataverse-web-api.md` section 16). Before a production deploy the plan is the
 proof that it is additive: one plan listed 424 components ahead of a deploy and showed nothing would
 be changed or removed. Without `--plan` it runs,
 in order: publisher, solution, tables (the primary name column inside the create), scalar columns,
