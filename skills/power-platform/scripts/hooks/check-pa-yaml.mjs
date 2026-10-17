@@ -154,6 +154,20 @@ export function checkPaYaml(text) {
     }
   }
 
+  // 10. Navigate() in a screen's OnVisible: "Navigate cannot be used here since it would automatically
+  //     always navigate away from this screen" - a compile error even inside If() (a feature switch
+  //     that redirected six guarded screens failed with six errors, one per screen). Comments and
+  //     strings are stripped first, so a note or a label text naming Navigate( does not count.
+  for (const f of propertyFormulas(lines)) {
+    if (f.key !== 'OnVisible') continue;
+    const code = codeOf(f.src);
+    const m = code.match(/(^|[^A-Za-z0-9_.'])Navigate\s*\(/);
+    if (!m) continue;
+    problems.push(`${lineAt(f, code, m.index + m[1].length)}: OnVisible calls Navigate() - "Navigate cannot be used here since it would automatically ` +
+      `always navigate away from this screen", a compile error even inside If(). For a feature switch, cover the screen instead: a full-screen ` +
+      `rectangle with a message and a Home link, Visible: =!<flag>, declared last so it sits on top.`);
+  }
+
   // 6. A zero guard on an aggregate. Sum, Average, Min and Max over an empty (or not yet loaded)
   //    table return Blank, and Blank = 0 is false while Blank <> 0 is true: If(Sum(t, x) = 0, "-",
   //    y / Sum(t, x)) still divides by zero (the player shows the error banner), and
@@ -424,6 +438,11 @@ function selftest() {
     '            Items: =["All years", "2026"]',
     '            DefaultSelectedItems: |-',
     '              =[First(Self.Items).Value]',
+    '  Orders:',
+    '    Properties:',
+    '      OnVisible: |-',
+    '        =Set(locReady, true);',
+    '        If(!gblOrdersOn, Navigate(Home, ScreenTransition.None))',
   ].join('\n');
   const good = [
     'Screens:',
@@ -465,12 +484,23 @@ function selftest() {
     '            OnSelect: |-',
     '              =Select(btnLoad)',
     '            Visible: =CountIf(colLines, Amount = 0) = 0 && Sum(colLines, Amount) >= 0',
+    '      - btnOrders:',
+    '          Control: Button',
+    '          Properties:',
+    '            AccessibleLabel: ="Open orders"',
+    '            OnSelect: =If(gblOrdersOn, Navigate(Orders, ScreenTransition.None))',
+    '  Orders:',
+    '    Properties:',
+    '      OnVisible: |-',
+    '        =Set(locReady, true);',
+    '        // a redirect with Navigate( here would not compile; the cover below does the job',
+    '        Set(locNote, "Navigate(Home) is not used")',
   ].join('\n');
   const pb = checkPaYaml(bad);
   const pg = checkPaYaml(good);
   const want = ['colon-space', 'starts a YAML comment', 'not a Power Fx comment', 'Tooltip', 'indented', 'classic Label has no AccessibleLabel',
     'with = 0', 'with <> 0', 'duplicate key "AccessibleLabel"', 'Visible: true has no leading', 'OnSelect\'s formula does not start',
-    'modern TextInput has no Tooltip', 'reads Self.Items'];
+    'modern TextInput has no Tooltip', 'reads Self.Items', 'OnVisible calls Navigate()'];
   const missing = want.filter((w) => !pb.some((p) => p.includes(w)));
   // Same key under different controls, and a control named like a property, are not duplicates.
   if (pb.filter((p) => p.includes('duplicate key')).length !== 1) missing.push('exactly one duplicate key');

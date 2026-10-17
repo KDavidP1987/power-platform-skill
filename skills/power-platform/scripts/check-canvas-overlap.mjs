@@ -39,7 +39,9 @@
 // Usage:
 //   node check-canvas-overlap.mjs <Src folder or .pa.yaml files>... [--screen-width 1366]
 //        [--screen-height 768] [--json] [--warnings-fail] [--explain]   (--explain lists every exempted pair)
-//   node check-canvas-overlap.mjs --hook           PostToolUse hook: file path from stdin JSON
+//   node check-canvas-overlap.mjs --hook           PostToolUse hook: file path from stdin JSON. In a git
+//        repository the findings are split into those NEW since the last commit and those already in it
+//        (a new label over a button once shipped unnoticed among a screen's old overlap errors).
 //   node check-canvas-overlap.mjs --selftest
 //
 // Exit: 0 clean, 1 findings (errors; warnings too with --warnings-fail), 2 nothing examined, or a
@@ -47,8 +49,10 @@
 // The rules and their history: references/canvas-layout.md, sections 4 and 7.
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { parseYaml, parseFx, flatten, readConstants, evalFormulaConstants } from './check-canvas-format.mjs';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { parseYaml, parseFx, flatten, readConstants, evalFormulaConstants, committedText, splitNew, diffLines } from './check-canvas-format.mjs';
+import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 
 // ---------- what a control is ----------
 const TEXTY = /^(Label|Text|Classic\/Label|ModernText|HtmlViewer|HtmlText|Classic\/HtmlViewer)(@|$)/i;
@@ -572,11 +576,17 @@ function hookMode() {
   let input = {}; try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { /* not a hook payload */ }
   const file = input?.tool_input?.file_path || input?.tool_response?.filePath;
   if (!file || !file.endsWith('.pa.yaml') || /(^|[\\/])(App|_EditorState)\.pa\.yaml$/i.test(file)) process.exit(0);
-  const res = analyse(collect([path.dirname(file)]));
-  const bad = res.findings.filter((f) => f.level === 'error' && path.resolve(f.file) === path.resolve(file));
+  const files = collect([path.dirname(file)]);
+  const errorsOf = (fl) => analyse(fl).findings.filter((f) => f.level === 'error' && path.resolve(f.file) === path.resolve(file));
+  const bad = errorsOf(files);
   if (!bad.length) process.exit(0);
-  console.error(`Overlap check failed for ${path.basename(file)}: a control is drawn over another that can be on screen at the same time.\n\n  `
-    + bad.map((f) => `${f.code}: ${f.msg}`).join('\n  ')
+  // Diff mode: the same analysis with this file's committed text (the other files as they are now).
+  const before = committedText(file);
+  const split = before === null ? null : splitNew(bad, errorsOf(files.map((x) => (path.resolve(x.path) === path.resolve(file) ? { ...x, text: before } : x))),
+    (f) => `${f.code}|${f.a || ''}|${f.b || ''}`);
+  const line = (f) => `${f.code}: ${f.msg}`;
+  console.error(`Overlap check failed for ${path.basename(file)}: a control is drawn over another that can be on screen at the same time.\n\n`
+    + (diffLines(split, line) || '  ' + bad.map(line).join('\n  '))
     + `\n\nMove one of them, or make their Visible conditions exclusive. See references/canvas-layout.md, sections 4 and 7.`);
   process.exit(2);
 }
@@ -663,6 +673,44 @@ const CASES = [
     L('lblBusy', { Visible: '=locBusy && locTab = "a"', X: '=0', Y: '=300', Width: '=Parent.Width', Height: '=80' })), ['covers-control', 'hidden-under']],
   ['never-visible-spacer', scr(L('lblA'), ctl('recSpacer', 'Rectangle', { Visible: '=false', X: '=0', Y: '=0', Width: '=999', Height: '=999' }), B('btnB', { Y: '=200' })), []],
 ];
+// Diff mode in the hook: a temporary git repository with one committed overlap; a label then added over
+// the button must be listed as NEW, the committed overlap as already there. Untracked and outside git:
+// the plain list. Skipped, with a note, where git is not installed.
+function diffModeSelftest(fails) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/.test(k)));
+  const git = (cwd, ...args) => spawnSync('git', ['-c', 'user.name=selftest', '-c', 'user.email=selftest@example.com', '-c', 'core.autocrlf=false', ...args], { cwd, env, encoding: 'utf8', windowsHide: true });
+  let probe; try { probe = git(os.tmpdir(), '--version'); } catch { probe = null; }
+  if (!probe || probe.status !== 0) return 'diff mode SKIPPED (git not found)';
+  const hook = (cwd, file) => spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--hook'], { cwd, env, input: JSON.stringify({ tool_input: { file_path: file } }), encoding: 'utf8', windowsHide: true });
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'overlap-diff-'));
+  try {
+    const src = path.join(tmp, 'Src');
+    fs.mkdirSync(src);
+    fs.writeFileSync(path.join(src, 'App.pa.yaml'), APP);
+    const old = scr(L('lblWarn', { Visible: '=locShowWarn' }), B('btnSave'));
+    const scrFile = path.join(src, 'scrS.pa.yaml');
+    fs.writeFileSync(scrFile, old);
+    git(tmp, 'init', '-q'); git(tmp, 'add', '-A');
+    const c = git(tmp, 'commit', '-q', '-m', 'base');
+    if (c.status !== 0) { fails.push(`diff mode: git commit failed: ${c.stderr}`); return 'diff mode FAILED'; }
+    // The new defect: a label declared after the button, over it.
+    fs.writeFileSync(scrFile, scr(L('lblWarn', { Visible: '=locShowWarn' }), B('btnSave'), L('lblNew', { X: '=210', Y: '=100', Width: '=100' })));
+    const r = hook(tmp, scrFile);
+    const parts = r.stderr.split(/\n\n(?=\d+ already in the committed file)/);
+    if (r.status !== 2 || !/^\s*\d+ NEW since the last commit:/m.test(r.stderr) || !/lblNew/.test(parts[0] || '') || !/^1 already in the committed file:/m.test(r.stderr) || /lblNew/.test(parts[1] || ''))
+      fails.push(`diff mode: expected exit 2, the new label listed as NEW and 1 finding already committed; got exit ${r.status}:\n${r.stderr}`);
+    // An untracked file in the same repository: the plain list, no diff headings.
+    const untracked = path.join(src, 'scrU.pa.yaml');
+    fs.writeFileSync(untracked, old.replace('scrS', 'scrU'));
+    const u = hook(tmp, untracked);
+    if (u.status !== 2 || /NEW since the last commit|already in the committed file/.test(u.stderr)) fails.push(`diff mode: an untracked file gets the plain list (exit ${u.status}):\n${u.stderr}`);
+    // Outside git: the plain list too.
+    fs.rmSync(path.join(tmp, '.git'), { recursive: true, force: true });
+    const n = hook(tmp, scrFile);
+    if (n.status !== 2 || /NEW since the last commit/.test(n.stderr) || !/lblNew/.test(n.stderr)) fails.push(`diff mode: outside git the plain list (exit ${n.status}):\n${n.stderr}`);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  return 'diff mode lists the NEW finding first in git, the plain list when untracked or outside git';
+}
 function selftest() {
   const fails = [];
   for (const [name, yaml, want] of CASES) {
@@ -690,8 +738,9 @@ function selftest() {
   if (rt.stats.resolved * 2 < rt.stats.compared || thin.length !== 1 || thin[0].file !== 'new.pa.yaml') fails.push(`per-file floor: expected new.pa.yaml alone under half, got [${thin.map((t) => t.file).join(', ')}]`);
   const rh = analyse([{ path: 'App.pa.yaml', text: APP }, { path: 'half.pa.yaml', text: scr(L('lblA'), L('lblN', { X: '=Rand() * 10', Y: '=200' })) }]);
   if (thinFiles(rh.stats).length) fails.push('per-file floor: exactly half resolved is not under half');
+  const diffNote = diffModeSelftest(fails);
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} layouts decided as expected (overlaps, exclusive conditions, modal (clickable backdrops too), access-denied cover, card and row backgrounds, text over a clickable shape, click pad, empty state, gallery rows, edges), layout constants after a comment, the skip floor and the per-file floor`
+  console.log(ok ? `selftest ok: ${CASES.length} layouts decided as expected (overlaps, exclusive conditions, modal (clickable backdrops too), access-denied cover, card and row backgrounds, text over a clickable shape, click pad, empty state, gallery rows, edges), layout constants after a comment, the skip floor and the per-file floor; ${diffNote}`
     : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }

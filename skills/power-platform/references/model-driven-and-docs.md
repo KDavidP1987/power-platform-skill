@@ -76,6 +76,10 @@ decimal. Two habits keep that from recurring:
 - **A file column has no entry.** No form in a measured environment showed one, so its classid could
   not be read from a form. Add a file column to a form in the maker portal once, then read that form,
   before scripting it.
+- **A script that rewrites whole forms deletes what the designer added.** A file column placed in the
+  maker portal (which a script cannot generate) was lost on the next full-form run. Keep the script
+  append-only (step 3) and scope each run to one table (an `--only <table>` switch), so a run never
+  touches a form it was not asked to change.
 
 **Read-only fields on a scripted form.** For a calculated or system-maintained value, put
 `disabled="true"` on the `<control>`: the form shows the lock and blocks typing. Cells in a
@@ -400,8 +404,10 @@ None of these change because the app is model-driven:
 
 The order that worked: find or create the app module, find or create its sitemap, `AddAppComponents`
 (the sitemap, each table, its forms and its public views), `ValidateApp`, set the header theme, then
-one `PublishXml` naming the web resource, the app module and the sitemap. Three traps:
+one `PublishXml` naming the web resource, the app module and the sitemap. Four traps:
 
+- **A form created after the app module exists is not in the app.** Add it with `AddAppComponents`
+  (and publish), or the app keeps opening the auto-generated form.
 - **A new app module is unpublished, and a plain query does not return it.** `GET appmodules?$filter=
   uniquename eq 'app_backoffice'` finds only published apps; until the first publish the module is
   visible only through `GET appmodules/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()`. An

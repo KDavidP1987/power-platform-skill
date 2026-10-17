@@ -166,6 +166,12 @@ seven audits and four rounds of user testing.
   screen's content card rendered blank: the geometry audit, the marker check and the accessibility
   snapshot all passed, because the controls existed; only a screenshot showed it. Fixed order per
   screen: background card, tab bodies, overlays last; a help overlay after any panel added later.
+- **Hide what an overlay covers.** Give each input under an overlay panel
+  `Visible: =<its own condition> && !locOverlayOpen`. A push can put a control above the panel
+  whatever the source order: a control whose type changed in source was rebuilt at the top of the
+  draw order, and the form's input under the panel took the clicks (`elementFromPoint` proved it).
+  Source-order checks cannot see this; `check-published-order.py` on the downloaded app can, and a
+  `deadclick` step with the overlay open confirms it.
 
 **The exception: modern (Fluent/PCF) input controls paint over a gallery whatever the declaration
 order.** A search-results gallery could not overlay a form built from modern inputs; the inputs
@@ -273,7 +279,9 @@ reads the live Studio session and is the second check. Run both; neither stands 
 
 `scripts/check-canvas-overlap.mjs` implements the rules below; run it over the whole `Src` folder
 after any layout change, and wire `--hook` so a write that puts a control over another is refused
-at once. It reports `overlap` (two text-bearing or interactive controls that can be on screen
+at once. In a git repo the write-time hook lists the findings that edit introduced first ("N NEW since
+the last commit"), then those already committed: measured, a new label covering a button shipped
+unnoticed among a file's existing overlap errors. It reports `overlap` (two text-bearing or interactive controls that can be on screen
 together), `covers-control` and `hidden-under` (decoration declared after a button or a label, so
 the click or the text is lost), and the warnings `off-canvas` and `outside-row`. Each finding names
 both controls, their lines, which one is drawn on top, the two conditions, and the layout (the

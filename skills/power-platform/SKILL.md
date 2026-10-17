@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.31.0"
+  version: "0.32.0"
 ---
 
 # Power Platform development
@@ -70,6 +70,13 @@ refuses, which stay instructions, and the surface each applies to.
     section 6.
 11. **An audit that can pass vacuously will.** Give every check a floor ("found at least N write
     paths"), prove it goes red on a known-bad input, and make it say when its inputs are stale.
+12. **Select before you apply - every Dataverse change, schema or data, deletes above all.** First
+    run the read-only selection the change will act on (the same `$filter`, the same code path) and
+    read it: every row or component touched, the exact request bodies, and for a delete or retype
+    what holds data or depends on it. Plan is the default; the apply needs `--apply`, acts only on
+    what the plan showed, and refuses if the live state changed since. `deploy-tables.py` and
+    `seed-data.py` enforce this; the plugin refuses inline Web API writes and write scripts with no
+    plan mode. `references/dataverse-web-api.md` section 16.
 
 ## How to behave
 

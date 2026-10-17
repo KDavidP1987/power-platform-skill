@@ -268,6 +268,11 @@ repo's design doc. Keep the Demo source filterable end to end.
   service ask for a credential per table), organizational account, no `OData-Version` header,
   lookups as `_<column>_value`. Decide at the start: if the TDS endpoint lists this build's tables
   when the lane starts, use it; otherwise use the Web API template straight away.
+- **Read another team's Gen1 dataflow without changing it.** Gen1 entity data is not readable over
+  REST. A Gen2 dataflow opens the entity through `PowerPlatform.Dataflows(null)` (Workspaces >
+  workspace > dataflow > entity) on a PowerPlatformDataflows connection, renames the columns to
+  snake_case with `MissingField.Error` so an upstream rename fails loudly instead of landing nulls,
+  and lands the result in bronze.
 - **A count that can be empty needs `+ 0`.** `COUNTROWS` over an empty filter is blank: the card
   shows "(Blank)" and the reconcile compares null with 0. Write `COUNTROWS(...) + 0` in measures and
   in the checks, and colour an alert figure only when it is above zero.
@@ -360,7 +365,8 @@ prove it with
 build's own (any other table is refused), confirms the Dataverse figure moved, runs the pipeline
 from Fabric, re-reads the figure through the model, then restores the row and refreshes again.
 Exit 1 means the refresh does not reach Dataverse from Fabric; the hand-back cannot call the report
-live until it exits 0.
+live until it exits 0. Nor describe the report as refreshing on its own until its pipeline has a
+schedule set (the Fabric item schedule API) and one scheduled run has succeeded.
 
 **Licensing, before promising a report to leaders:** viewing a Power BI report needs a Pro (or
 Premium Per User) licence for each viewer unless the workspace sits on a capacity of F64 / P1 or
@@ -417,6 +423,7 @@ until it exists, this section is the pattern to follow.
   render with data. The player walk itself is in `references/browser-verification.md`.
 - **Always add "Open in Power BI"** (`Launch()` with the same filter on the report URL). It works in
   every player, opens the full report with its pages and filter pane, and is the fallback when the
-  tile cannot render.
+  tile cannot render. The embedded tile has no export or print: Open in Power BI is the route to
+  File > Export (PowerPoint, PDF, Analyze in Excel) and Print, so say so beside the link.
 - Viewers need access to the report itself (section 4, licensing); the app grants nothing.
 

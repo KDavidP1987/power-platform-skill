@@ -52,6 +52,12 @@ power-platform plugin's Stop gate reads it: a build that wrote production data (
 than the last write. A measured build restored its seed, ran more walks that returned seeded loans,
 and handed back saying the seed held.
 
+Select before apply: a run without --apply (and `list`, for cleanup) records the changes it lists
+under .ship-work/plans/ (PP_PLAN_DIR overrides). `seed --apply` and `cleanup --apply` first select
+again, read-only, through the same code path and refuse (exit 1, nothing written) unless a plan of the
+same seed file, environment and flags, under 24 hours old, listed exactly those changes - a test row
+that appeared after the listing stops the delete. A plan is used once.
+
 Cleanup is list-only without --apply. "cleanup": "delete" deletes the seed rows of that table (and,
 with "cleanupFilter", every row matching that OData filter - test rows a walk created);
 "cleanup": "restore" puts the "restore" columns back to their seed values. Tables run in reverse
@@ -67,11 +73,12 @@ Options:
     --token-env NAME    variable holding the token (default DATAVERSE_TOKEN)
     --selftest          offline tests against a simulated Web API
 
-Exit: 0 done (or planned, or check clean); 1 a finding or (check) drift (unknown choice label, unresolvable lookup, duplicate key);
+Exit: 0 done (or planned, or check clean); 1 a finding, no matching plan, or (check) drift (unknown choice label, unresolvable lookup, duplicate key);
 2 cannot run (bad seed file, no token, API error), or (check) no seed row was compared - NOT a pass.
 """
 import argparse
 import csv
+import io
 import datetime
 import json
 import os
@@ -79,7 +86,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _ppapi import ApiError, FakeTransport, PlanRefused, dataverse, get_token, odata_literal  # noqa: E402
+from _ppapi import (ApiError, FakeTransport, PlanRefused, check_plan, consume_plan, dataverse, get_token,  # noqa: E402
+                    odata_literal, plan_key, record_plan)
 
 TODAY_RE = re.compile(r"^=today(?:([+-])(\d+))?$")
 
@@ -361,6 +369,26 @@ def cmd_cleanup(dv, meta, seed, only, apply, today, seed_path):
     return 0
 
 
+class _Planned(list):
+    rc = 0
+
+
+def plan_pass(fn, echo=True):
+    """Run a plan-mode command, capturing the changes it lists ("would ..." and findings) in order."""
+    buf, old = io.StringIO(), sys.stdout
+    sys.stdout = buf
+    try:
+        rc = fn()
+    finally:
+        sys.stdout = old
+    out = buf.getvalue()
+    if echo:
+        sys.stdout.write(out)
+    lines = _Planned(x.strip() for x in out.splitlines() if x.startswith(("would ", "FINDING ")))
+    lines.rc = rc
+    return lines
+
+
 def run(argv, transport=None, today=None):
     ap = argparse.ArgumentParser(prog="seed-data.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
@@ -398,6 +426,27 @@ def run(argv, transport=None, today=None):
         meta = Meta(dv)
         day = today or today_in(seed.get("timezone"))
         only = set(a.only or [])
+        writes = a.apply and a.command in ("seed", "cleanup")
+        if a.command in ("seed", "cleanup", "list"):
+            # Select before apply: the plan pass runs read-only through the same code path the apply
+            # takes; a plan run records it, an apply refuses unless it matches what a plan showed.
+            kind = "seed-data-seed" if a.command == "seed" else "seed-data-cleanup"
+            key = plan_key(kind, org, [seed, sorted(only), bool(a.update)])
+            ro = dataverse(org, token, read_only=True, transport=transport,
+                           sleep=(lambda s: None) if transport else None) if writes else dv
+            planned = plan_pass(lambda: cmd_seed(ro, Meta(ro), seed, only, False, a.update, day) if a.command == "seed"
+                                else cmd_cleanup(ro, Meta(ro), seed, only, False, day, a.seed), echo=not writes)
+            if not writes:
+                record_plan(kind, key, org, planned)
+                return planned.rc
+            why = check_plan(kind, key, planned)
+            if why:
+                print("REFUSED (select before apply): %s" % why)
+                print("Nothing was written. Run the same command without --apply%s first and read it."
+                      % (" (or list)" if a.command == "cleanup" else ""))
+                return 1
+            consume_plan(kind, key)
+            print("Matches the plan recorded for this seed file and environment (%d change(s))." % len(planned))
         if a.command == "seed":
             rc = cmd_seed(dv, meta, seed, only, a.apply, a.update, day)
             if a.apply and a.update and not only:
@@ -518,10 +567,17 @@ def selftest():
             json.dump(s, f)
         return p
 
-    def go(t, *args):
+    os.environ["PP_PLAN_DIR"] = os.path.join(tmp, "plans")
+
+    def go(t, *args, plan_first=True):
+        """Run seed-data. An apply is preceded by its plan, as the procedure requires."""
         buf, old = io.StringIO(), sys.stdout
         sys.stdout = buf
         try:
+            if plan_first and "--apply" in args and args[0] in ("seed", "cleanup"):
+                run([x for x in args if x != "--apply"], transport=t, today=day)
+                buf.seek(0)
+                buf.truncate()
             rc = run(list(args), transport=t, today=day)
         finally:
             sys.stdout = old
@@ -541,6 +597,9 @@ def selftest():
         check("=today-10 became a date", loan["app_dueon"] == "2026-03-05")
         check("lookup bound to the row created in the same run", loan["_app_asset_value"] == a2["app_assetid"])
         n = len(t.writes())
+        rc, out = go(t, "seed", "--seed", p, "--apply", plan_first=False)
+        check("a plan is used once: a second seed --apply needs a new plan", rc == 1 and "no plan was recorded" in out
+              and len(t.writes()) == n)
         rc, out = go(t, "seed", "--seed", p, "--apply")
         check("re-run is idempotent", rc == 0 and len(t.writes()) == n and len(db["app_loans"]) == 1)
 
@@ -569,7 +628,19 @@ def selftest():
         check("list prints the cleanup plan and writes nothing", rc == 0 and len(t.writes()) == n and "would delete app_loan" in out2)
         rc, out2 = go(t, "list", "--seed", p, "--apply")
         check("list refuses --apply", rc == 2 and len(t.writes()) == n)
-        rc, out = go(t, "cleanup", "--seed", p, "--apply")
+        # select before apply: no plan, or a plan the live rows no longer match, writes nothing
+        shutil.rmtree(os.environ["PP_PLAN_DIR"], ignore_errors=True)
+        rc, out = go(t, "cleanup", "--seed", p, "--apply", plan_first=False)
+        check("cleanup --apply with no recorded plan is refused, nothing deleted",
+              rc == 1 and "REFUSED (select before apply)" in out and len(t.writes()) == n)
+        go(t, "list", "--seed", p)
+        db["app_loans"].append({"app_loanid": "walk2", "app_borrower": "[SAMPLE] late walk row"})
+        rc, out = go(t, "cleanup", "--seed", p, "--apply", plan_first=False)
+        check("a row that appeared after the plan refuses the delete and is named",
+              rc == 1 and "changed since the plan" in out and "late walk row" in out and len(t.writes()) == n)
+        go(t, "list", "--seed", p)
+        rc, out = go(t, "cleanup", "--seed", p, "--apply", plan_first=False)
+        check("the list plan covers cleanup --apply and is named", "Matches the plan recorded" in out)
         check("cleanup --apply deletes seed and test rows only",
               [r["app_borrower"] for r in db["app_loans"]] == ["Real person"])
         check("cleanup --apply restores the seed status", a2["app_status"] == 100000001)

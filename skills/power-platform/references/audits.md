@@ -117,7 +117,13 @@ Rules every `.pa.yaml` parser in the project has had to learn:
 - **Derive exclusion sets from source, never from a hand list.** `As` aliases, `With({...})` record
   names, control names (`X.SelectedItems`), table-returning functions nested in a first argument,
   and named formulas that return a table are not data sources. Without these exclusions one section
-  produced 16 false findings.
+  produced 16 false findings. Read **every** top-level key of a `With({...})` record, not only the
+  first, and treat `GroupBy`'s group column (its last argument) as a local name, or later keys and
+  grouped rows are reported as unconnected data sources.
+- **Do not let one match consume the next.** A regex that consumes `FN(` and then captures the next
+  name skips every source nested one call deep: over `CountRows(Filter('Orders', ...))` it captures
+  `Filter` and never examines `'Orders'`. Use overlapping matches (a lookahead), and prove the audit
+  red on a bogus name nested inside another call (section 1).
 - **Match bare single-word source and field names.** A whole-table-read check that required quotes
   could not see `ForAll(People As p, ...)`, the one table already over the row limit; a traversal
   check requiring `'X'.'Y'` missed `'Cost Center'.Code`.
@@ -368,7 +374,7 @@ codebase, and push the fixes back upstream as commits in the source repo, not as
 | geometry | overlaps across `Visible` conditions, gallery children vs row bounds, off-canvas edges, dead click spots | a floor; the browser is the authority (`canvas-layout.md`) |
 | navigation | dead `Navigate` targets, orphan screens, app-wide duplicate control names, nav bar drift | see below |
 | `.pa.yaml` traps | colon-space, comments, Tooltip on Button, duplicate keys, values without `=`, file ceiling (once per folder), block-scalar indentation | run at write time by the hook too |
-| control traps | properties that compile and misbehave: a classic enum on a modern input, spin arrows that do not commit, a dropdown fed a projection, row clicks that reach nothing, two colour tokens with one value | `check-canvas-format.mjs`; `canvas-controls-and-patterns.md` |
+| control traps | properties that compile and misbehave: a classic enum on a modern input, a modern number input used for data entry (it does not commit before a click on Save), a dropdown fed a projection, row clicks that reach nothing, two colour tokens with one value | `check-canvas-format.mjs`; `canvas-controls-and-patterns.md` |
 | flows | `lint-flows.mjs` set, plus cross-flow cycles, entity set names, repo vs live on/off state | `power-automate.md` |
 | accessibility | interactive controls with no accessible name; actions only a mouse can reach | derived from source, not from the platform checker; see below |
 | picker bindings | every ComboBox `FieldName` exists on the table its `Items` binds; no partial default records | see below |
@@ -423,8 +429,9 @@ Details that made several of these worth running:
   exactly `Select(Parent)` too: it hands the click to the row, and the row itself stays reachable
   by keyboard (`canvas-controls-and-patterns.md` section 7). Do not add an `AccessibleLabel` to a control whose literal
   `Text` already names it - screen readers announce the name twice. A scripted fix-up derives a
-  missing label from `Text`, then the placeholder, then the control name split into words
-  (`btnSubmitOrder` -> "Submit order"). These rules took one app from 1,829 checker findings to 12
+  missing label from the control's own `Text`, else the nearest preceding label (or section heading)
+  - the caption a sighted user reads - then the placeholder, then the control name split into words
+  (`btnSubmitOrder` -> "Submit order"); preview the derived labels before applying them. These rules took one app from 1,829 checker findings to 12
   real ones (section 9).
 - **Picker bindings.** Repointing a picker is covered by grepping `FieldName`; automate it. Each
   `ComboBoxDataField.FieldName` must exist on the picker's bound table, and a `DefaultSelectedItems`

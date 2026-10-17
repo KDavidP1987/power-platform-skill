@@ -119,7 +119,10 @@ in Preview, against the same data, before theorising (`browser-verification.md` 
   down an ordinary start), and again in the target's `OnVisible` if it is still blank. `Param()` is
   read once at start; build email links as the app URL plus `?id=<key>`. A gate panel that flashes
   during start can be held back with `Coalesce(gblIsAllowed, true)` for its `Visible`.
-- **`Navigate()` is refused inside `OnVisible`.** Route from a behaviour property instead.
+- **`Navigate()` is refused inside `OnVisible`**, even inside `If()` (measured: one compile error per
+  guarded screen). Route from a behaviour property instead; for a feature switch on a screen, cover it
+  (a full-screen rectangle with a message and a Home link, `Visible: =!<flag>`, declared last).
+  `check-pa-yaml.mjs` refuses it.
 - **Named formulas (`Formulas:` on `App`) are partly supported.** In some schema versions the
   property is rejected outright. Where it is accepted, constants and user-defined functions worked
   in one app (a font, a palette, `MoneyShort(x)`, `VarianceText(fc, bud)`), while table formulas
@@ -308,6 +311,10 @@ in Preview, against the same data, before theorising (`browser-verification.md` 
   delegable. You likewise cannot `SortByColumns` on a lookup; sort on a persisted scalar.
 - **A `Patch` result exposes no relationship navigation**: `patchResult.'Order Lines'` fails "The
   specified column is not accessible in this context". Read related rows separately.
+- **Do not keep the record `Patch` returns as an edit screen's record.** Its lookups come back
+  unexpanded, a picker reading them shows blank, and the next Save writes the blank - measured: a
+  test cleared a live record's vendor that way. After the save, re-read the row by id
+  (`Set(gblRec, LookUp(app_Orders, Order = saved.Order))`).
 - **Lookup traversal inside a server-side predicate compiles clean and fails at run time.**
   `Filter(Lines, 'Order'.'Order Number' = x)`, a correlated subquery (a `Filter` nested in another
   referencing the outer row) and `IsBlank(column)` inside a `Filter`/`LookUp`/`CountRows` over a
@@ -399,6 +406,15 @@ like any other Studio change until you publish.
 `LookUp` that feeds a save and misses because its row sits past the limit makes the save **create a
 duplicate**.
 
+**A write path takes its record from the loaded row or a LookUp by id, never a name LookUp on a large
+table.** Carry the row itself as a column of the collection the screen edits, or re-read it by its
+key. Measured: `Patch(app_Orders, LookUp(app_Orders, Name = r.Name), {...})` read the table
+unfiltered, missed, and wrote nothing - `IsError` was false, the success message showed and the
+change-log row was written. Guard `IsBlank(base)` before the `Patch` and treat it as a failure; the
+same miss inside `Coalesce(LookUp(...), Defaults(...))` creates the duplicate instead. Observed once,
+not yet explained: an equality on a large table's primary name column failed to delegate while an
+equality on another table's ordinary column delegated - prove each column by trace rather than assume.
+
 **A delegable query is safe only when the RESULT fits.** Design rules:
 
 1. **Bind controls to the source, not a collection.** A gallery over a delegable Dataverse source
@@ -428,7 +444,8 @@ duplicate**.
    `Average` as delegable for Dataverse, and one project reconciled delegated `Sum` totals to the
    cent against the Web API; another got a non-delegation warning on its `Sum` expression and could
    only total a scoped set. `CountIf(T, true)` delegates. The compile/Studio delegation warning for
-   the exact expression you wrote is authoritative; when it appears, pre-aggregate server-side or sum
+   the exact expression you wrote is authoritative when it appears (its absence proves nothing, rule
+   11); when it appears, pre-aggregate server-side or sum
    a collection whose size you control (section 7). **In your notes, treat each aggregate as its own
    point, separate from lookups:** name the expression, say whether this source documents it as
    delegable, what Studio's warning on it said (or that it must be read after the change), and the
@@ -458,10 +475,17 @@ duplicate**.
     but `Status ne 'Submitted'` returned all 27 of 27 rows whose status was blank. So
     `Status <> 'Status (Notes)'.Approved && Status <> 'Status (Notes)'.Submitted` delegates and
     keeps the blanks. The same holds for a Yes/No flag (`<> false`, section 4).
-11. **Read the delegation warnings.** Studio's underline and the compile output name the exact
-    clause. They are authoritative and free - and their **disappearance** is the best evidence a
-    fix delegates: moving a filter onto a stored key column took the warning count from 61 to 60.
-    With two rows of test data a broken filter and a working one look identical.
+11. **Read the delegation warnings - but a missing warning is not proof.** Studio's underline and
+    the compile output name the exact clause. A warning that appears is authoritative and free, and
+    its disappearance is good evidence a fix delegates: moving a filter onto a stored key column
+    took the warning count from 61 to 60. Its **absence** proves nothing on its own. Measured:
+    `Filter(app_Periods, StartsWith('Period Key', gblFY & "-"))` compiled with no warning, yet the
+    published app read the first 2,000 rows by primary key and filtered on the client - a total
+    showed about half the true figure, reproduced to the dollar by summing those first 2,000 rows.
+    Twelve `'Period Key' = gblFY & "-NN"` equalities joined with `||` delegated and the total
+    matched. Prefer equality on keys, and prove delegation on a table larger than the row limit (or
+    with the limit lowered), checking the answer against the Web API. With two rows of test data a
+    broken filter and a working one look identical.
 
 ## 7. Reading large tables: chunking, scoping and proving it
 

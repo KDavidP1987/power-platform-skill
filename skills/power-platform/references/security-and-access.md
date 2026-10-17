@@ -58,7 +58,13 @@ app's actual write paths did.
 - **Audit it from the app's side.** Enumerate the tables the canvas source binds and writes, map them
   to logical names via the solution's `Entity.xml` (or the app's `DataSources.json`), and fail when
   one is granted by no role that reaches the screen using it. Security audits usually ask whether a
-  role grants too much; ask the opposite too.
+  role grants too much; ask the opposite too. **Check the privilege type, not only that a role
+  exists.** For every table the app changes through `Patch`, `Remove` or `SubmitForm`, some role of
+  the non-admin user must grant Create or Write (as the path needs), plus Append on the row's table and
+  AppendTo on every lookup target. A role repair that restores Read alone stops the start-up errors
+  and leaves every edit screen broken for non-administrators - hidden, because the maker who tests is a
+  System Administrator. Measured: an app role held Read only on 12 tables its screens write; 60
+  privileges were granted and read back for its 5 holders. Prove it by impersonation (section 3).
 - **Assign Basic User alongside custom roles.** Custom app roles carry no platform privileges
   (organisation, user settings, and so on), and a custom role alone fails at start-up on baseline
   tables. Assign the stock **Basic User** role as well; do not copy its privileges into the custom

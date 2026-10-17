@@ -213,6 +213,8 @@ command must also work as `powershell -File`):
 | TLS defaults | older hosts negotiate below TLS 1.2 | `[Net.ServicePointManager]::SecurityProtocol = 'Tls12'` |
 | `[string[]]` parameter via `powershell -File` | "a,b" arrives as one string | two parameters, or split explicitly |
 | `$PSScriptRoot` in `param()` defaults | empty in some hosts | resolve inside the script body |
+| a `DataTable` returned as one object (`, $dt`) and piped to `Export-Csv` | the CSV holds the table's own properties, not its rows | pipe `$dt.Rows` |
+| datetimes formatted by .NET `ToString()` | follow the machine's culture, so the same export differs by machine | format in SQL: `CONVERT(varchar, col, 126)` |
 
 A dot-source guard - `if ($MyInvocation.InvocationName -eq '.') { return }` after the function
 definitions - lets one script be both a runnable provisioner and a helper library. In Python,

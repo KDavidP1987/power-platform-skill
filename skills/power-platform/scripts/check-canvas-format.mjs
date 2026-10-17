@@ -36,7 +36,8 @@
 // Usage:
 //   node check-canvas-format.mjs <Src folder or .pa.yaml files>... [--schema cols.json]
 //        [--screen-width 1366] [--screen-height 768] [--char-em 0.56] [--galleries-only] [--no-theme] [--json]
-//   node check-canvas-format.mjs --hook            PostToolUse hook: file path from stdin JSON
+//   node check-canvas-format.mjs --hook            PostToolUse hook: file path from stdin JSON. In a git
+//        repository the findings are split into those NEW since the last commit and those already in it.
 //   node check-canvas-format.mjs --selftest
 //
 // 8. VERTICAL FIT. Size is in points (px = Size x 4/3) and a rendered line is about 1.15 x px; a box
@@ -56,7 +57,9 @@
 // Names and contrast: references/canvas-layout.md, "Accessible names and contrast".
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import os from 'node:os';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const BOM = String.fromCharCode(0xFEFF);
 
@@ -1174,7 +1177,8 @@ export function vacuity(stats) {
 //   textmode-on-modern-input  error  a modern TextInput's Mode: =TextMode.MultiLine is ignored: one line
 //   dropdown-forall-items     warn   a modern DropDown fed ForAll(...) showed numeric keys as options
 //   row-click-lost            warn   a gallery with OnSelect whose template text or shapes have none
-//   number-spin-arrows        warn   a NumberInput without Step: =0 shows arrows that do not commit Value
+//   number-input-entry        warn   an editable modern NumberInput: a button clicked straight after typing
+//                                    reads the previous Value (only Tab or Enter commits it)
 //   same-colour-branches      warn   an If/Switch choosing between colour tokens that hold one value
 const MODERN_TEXT_INPUT = /^(TextInput|ModernTextInput)(@|$)/i;
 const MODERN_DROPDOWN = /^(DropDown|Dropdown|ModernDropdown)(@|$)/;
@@ -1193,9 +1197,13 @@ export function controlTrapFindings(all, cmap = new Map()) {
       push('warn', 'dropdown-forall-items', c, 'Items', `${c.name}.Items is a ForAll projection; a modern DropDown fed one showed numeric keys instead of the names. ` +
         `Feed it Sort(Distinct(col, Name), Value) or a literal Table (canvas-controls-and-patterns.md, section 6).`);
     }
-    if (NUMBER_INPUT.test(c.control) && !/^=\s*0\s*$/.test(pv(c, 'Step'))) {
-      push('warn', 'number-spin-arrows', c, 'Step', `${c.name} shows spin arrows: a click on them changes the box but not .Value, so a Save pressed next writes the old number. ` +
-        `Set Step: =0, which removes the arrows (canvas-controls-and-patterns.md, section 3).`);
+    // A box that is never editable (View or Disabled, no Edit branch) takes no typing, so it is exempt. Step: =0 hides
+    // the arrows but does not help: typing then clicking Save straight away still saved the old value.
+    const dm = pv(c, 'DisplayMode');
+    if (NUMBER_INPUT.test(c.control) && !(/DisplayMode\.(View|Disabled)\b/.test(dm) && !/DisplayMode\.Edit\b/.test(dm))) {
+      push('warn', 'number-input-entry', c, 'Default', `${c.name}: a modern NumberInput is not safe for data entry - a button clicked straight after typing reads the ` +
+        `previous .Value (only Tab or Enter commits it), so a Save wrote the old number and reported success. Use a classic TextInput with ` +
+        `Format: =TextFormat.Number and read Value(${c.name}.Text) (canvas-controls-and-patterns.md, section 3).`);
     }
     if (/^Gallery/i.test(c.control) && pv(c, 'OnSelect') && !/^=?\s*false\s*$/i.test(pv(c, 'OnSelect'))) {
       const dead = [];
@@ -1249,6 +1257,34 @@ function report(res, json) {
   for (const t of thinMeasuredFiles(stats)) console.log(`!! ${path.basename(t.file)}: only ${t.measured} of ${t.bound} data-bound text control(s) measured - this screen was NOT checked (exit 2 unless there are errors).`);
 }
 
+// ---------- diff mode for the write-time hooks ----------
+// A file with many old findings hides the one an edit just added: a label declared after a button,
+// covering it, shipped among a screen's pre-existing overlap errors and only the published walk caught
+// it. When the file is tracked in git, the hook runs the same analysis on the committed text and lists
+// what is NEW first. Outside git, or for an untracked file, nothing changes. (Shared with
+// check-canvas-overlap.mjs.)
+export function committedText(file) {
+  try {
+    const r = spawnSync('git', ['show', 'HEAD:./' + path.basename(file)], { cwd: path.dirname(path.resolve(file)), encoding: 'utf8', windowsHide: true });
+    return r.status === 0 && typeof r.stdout === 'string' ? r.stdout : null;
+  } catch { return null; }
+}
+// Findings of `now` not in `before`, by key (a multiset: a second copy of an old finding is new).
+export function splitNew(now, before, keyOf) {
+  const left = new Map();
+  for (const f of before) left.set(keyOf(f), (left.get(keyOf(f)) || 0) + 1);
+  const fresh = [], old = [];
+  for (const f of now) { const k = keyOf(f); if (left.get(k)) { left.set(k, left.get(k) - 1); old.push(f); } else fresh.push(f); }
+  return { fresh, old };
+}
+// The hook's finding list: plain outside git; NEW first, then the committed file's, inside it.
+export function diffLines(split, line) {
+  if (!split) return null;
+  return `${split.fresh.length} NEW since the last commit${split.fresh.length ? ':\n  ' + split.fresh.map(line).join('\n  ') : ' - every finding below was already there.'}` +
+    (split.old.length ? `\n\n${split.old.length} already in the committed file:\n  ` + split.old.map(line).join('\n  ') : '');
+}
+// ---------- end diff mode ----------
+
 // The build-stamp variable is the one the ship writes (canvas-app.json buildStampVariable, default gblBuild).
 function readStampVar(root = process.cwd()) {
   for (const c of ['scripts/canvas-app.json', 'canvas-app.json']) {
@@ -1276,10 +1312,11 @@ function hookMode() {
     const cfg = JSON.parse(fs.readFileSync(path.join(process.cwd(), '.claude', 'hooks', 'standards.config.json'), 'utf8'));
     if (cfg.textFitSchema) schema = loadSchema(path.resolve(process.cwd(), cfg.textFitSchema));
   } catch { /* no config: lengths guessed from column names */ }
-  const res = analyse(files, { schema, stampVar: readStampVar() });
+  const stampVar = readStampVar();
   // A write-time hook blocks only on what is known: a length guessed from a column name does not block
   // (configure textFitSchema in .claude/hooks/standards.config.json to check those too).
-  const mine = res.findings.filter((f) => f.level === 'error' && path.resolve(f.file) === path.resolve(file) && !(f.guessed && !schema));
+  const mineOf = (fl) => analyse(fl, { schema, stampVar }).findings.filter((f) => f.level === 'error' && path.resolve(f.file) === path.resolve(file) && !(f.guessed && !schema));
+  const mine = mineOf(files);
   // Two tiers (project-setup.md section 4): a missing accessible name is real but not fatal, and an
   // existing app can have one on every screen - blocking would get the hook switched off. Note it.
   const NOTE_ONLY = new Set(['no-accessible-name', 'label-not-in-name']);
@@ -1291,7 +1328,12 @@ function hookMode() {
       ' Give each an AccessibleLabel, or TabIndex -1 for a purely decorative click target (canvas-layout.md, "Accessible names and contrast").' } }));
     process.exit(0);
   }
-  console.error(`Formatting check failed for ${path.basename(file)} (text fit, theme tokens, names and contrast):\n\n  ` + bad.map((f) => `${f.code}: ${f.msg}`).join('\n  ') +
+  // Diff mode: the same analysis with this file's committed text (the other files as they are now).
+  const before = committedText(file);
+  const split = before === null ? null : splitNew(bad, mineOf(files.map((x) => (path.resolve(x.path) === path.resolve(file) ? { ...x, text: before } : x)))
+    .filter((f) => !NOTE_ONLY.has(f.code)), (f) => `${f.code}|${f.control || ''}`);
+  const line = (f) => `${f.code}: ${f.msg}`;
+  console.error(`Formatting check failed for ${path.basename(file)} (text fit, theme tokens, names and contrast):\n\n` + (diffLines(split, line) || '  ' + bad.map(line).join('\n  ')) +
     `\n\nSee references/canvas-layout.md, "Long text: the fit rule" and "Accessible names and contrast".`);
   process.exit(2);
 }
@@ -1327,6 +1369,42 @@ const CASES = [
   ['literal-colour-with-theme', label('lblCode', { Text: '=ThisItem.Code', Width: '=120', Height: '=22', Size: '=10', Color: '=RGBA(200, 0, 0, 1)' }), ['literal-colour']],
   ['token-colour', label('lblCode', { Text: '=ThisItem.Code', Width: '=120', Height: '=22', Size: '=10', Color: '=clrText' }), []],
 ];
+// Diff mode in the hook: a temporary git repository with one committed visible build stamp; a second
+// one then added must be listed as NEW, the first as already there. Untracked and outside git: the
+// plain list. Skipped, with a note, where git is not installed.
+function diffModeSelftest(fails) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/.test(k)));
+  const git = (cwd, ...args) => spawnSync('git', ['-c', 'user.name=selftest', '-c', 'user.email=selftest@example.com', '-c', 'core.autocrlf=false', ...args], { cwd, env, encoding: 'utf8', windowsHide: true });
+  let probe; try { probe = git(os.tmpdir(), '--version'); } catch { probe = null; }
+  if (!probe || probe.status !== 0) return 'diff mode SKIPPED (git not found)';
+  const hook = (cwd, file) => spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--hook'], { cwd, env, input: JSON.stringify({ tool_input: { file_path: file } }), encoding: 'utf8', windowsHide: true });
+  const stamp = (name, y) => [`      - ${name}:`, '          Control: Label', '          Properties:', `            Text: ="Build " & gblBuild`,
+    '            X: =20', `            Y: =${y}`, '            Width: =300', '            Height: =28', '            Size: =11'];
+  const scrText = (...ctrls) => ['Screens:', '  scrA:', '    Children:', ...ctrls.flat()].join('\n');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'format-diff-'));
+  try {
+    const src = path.join(tmp, 'Src');
+    fs.mkdirSync(src);
+    const scrFile = path.join(src, 'scrA.pa.yaml');
+    fs.writeFileSync(scrFile, scrText(stamp('lblBuild', 20)));
+    git(tmp, 'init', '-q'); git(tmp, 'add', '-A');
+    const c = git(tmp, 'commit', '-q', '-m', 'base');
+    if (c.status !== 0) { fails.push(`diff mode: git commit failed: ${c.stderr}`); return 'diff mode FAILED'; }
+    fs.writeFileSync(scrFile, scrText(stamp('lblBuild', 20), stamp('lblStampNew', 80)));
+    const r = hook(tmp, scrFile);
+    const parts = r.stderr.split(/\n\n(?=\d+ already in the committed file)/);
+    if (r.status !== 2 || !/^1 NEW since the last commit:/m.test(r.stderr) || !/lblStampNew/.test(parts[0] || '') || !/^1 already in the committed file:/m.test(r.stderr) || /lblStampNew/.test(parts[1] || ''))
+      fails.push(`diff mode: expected exit 2, lblStampNew listed as NEW and lblBuild as already committed; got exit ${r.status}:\n${r.stderr}`);
+    const untracked = path.join(src, 'scrU.pa.yaml');
+    fs.writeFileSync(untracked, scrText(stamp('lblBuildU', 20)).replace('scrA', 'scrU'));
+    const u = hook(tmp, untracked);
+    if (u.status !== 2 || /NEW since the last commit|already in the committed file/.test(u.stderr)) fails.push(`diff mode: an untracked file gets the plain list (exit ${u.status}):\n${u.stderr}`);
+    fs.rmSync(path.join(tmp, '.git'), { recursive: true, force: true });
+    const n = hook(tmp, scrFile);
+    if (n.status !== 2 || /NEW since the last commit/.test(n.stderr) || !/lblStampNew/.test(n.stderr)) fails.push(`diff mode: outside git the plain list (exit ${n.status}):\n${n.stderr}`);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  return 'diff mode lists the NEW finding first in git, the plain list when untracked or outside git';
+}
 function selftest() {
   const fails = [];
   const run = (text, schema = SCHEMA, name = 's') => analyse([{ path: 'App.pa.yaml', text: APP }, { path: name + '.pa.yaml', text }], { schema });
@@ -1512,14 +1590,22 @@ function selftest() {
     const got = [...new Set(r.findings.filter((f) => TRAP_CODES.has(f.code)).map((f) => f.code))].sort();
     if (JSON.stringify(got) !== JSON.stringify([...want].sort())) fails.push(`trap ${name}: expected [${want.join(', ')}], got [${got.join(', ')}]`);
   };
-  const TRAP_CODES = new Set(['textmode-on-modern-input', 'dropdown-forall-items', 'row-click-lost', 'number-spin-arrows', 'same-colour-branches']);
+  const TRAP_CODES = new Set(['textmode-on-modern-input', 'dropdown-forall-items', 'row-click-lost', 'number-input-entry', 'same-colour-branches']);
   trap('modern TextInput with TextMode', [['txtStory', 'TextInput', { ...box, Mode: '=TextMode.MultiLine' }]], ['textmode-on-modern-input']);
   trap('modern TextInput with its own enum', [['txtStory', 'TextInput', { ...box, Mode: "='TextInputCanvas.Mode'.Multiline" }]], []);
   trap('classic TextInput with TextMode', [['txtStory', 'Classic/TextInput', { ...box, Mode: '=TextMode.MultiLine' }]], []);
   trap('DropDown over a ForAll projection', [['ddPerson', 'DropDown', { ...box, Items: '=ForAll(Sort(colRoster, Name) As r, {Value: r.Name})' }]], ['dropdown-forall-items']);
   trap('DropDown over Distinct', [['ddPerson', 'DropDown', { ...box, Items: '=Sort(Distinct(colRoster, Name), Value)' }]], []);
-  trap('NumberInput with arrows', [['numAmount', 'NumberInput', { ...box }]], ['number-spin-arrows']);
-  trap('NumberInput with Step 0', [['numAmount', 'NumberInput', { ...box, Step: '=0' }]], []);
+  trap('NumberInput for data entry', [['numAmount', 'NumberInput', { ...box }]], ['number-input-entry']);
+  trap('NumberInput with Step 0 is still entry', [['numAmount', 'ModernNumberInput', { ...box, Step: '=0' }]], ['number-input-entry']);
+  trap('NumberInput read-only', [['numAmount', 'NumberInput', { ...box, DisplayMode: '=DisplayMode.View' }]], []);
+  trap('NumberInput disabled', [['numAmount', 'NumberInput', { ...box, DisplayMode: '=DisplayMode.Disabled' }]], []);
+  trap('NumberInput editable until locked', [['numAmount', 'NumberInput', { ...box, DisplayMode: '=If(locLocked, DisplayMode.View, DisplayMode.Edit)' }]], ['number-input-entry']);
+  trap('classic TextInput with number format', [['txtAmount', 'Classic/TextInput', { ...box, Format: '=TextFormat.Number', AccessibleLabel: '="Amount"' }]], []);
+  {
+    const ne = analyse([{ path: 'App.pa.yaml', text: trapApp }, { path: 't.pa.yaml', text: free([['numAmount', 'NumberInput', { ...box }]]) }]).findings.find((f) => f.code === 'number-input-entry');
+    if (!ne || ne.level !== 'warn' || !/TextFormat\.Number/.test(ne.msg) || !/Value\(numAmount\.Text\)/.test(ne.msg)) fails.push('trap number-input-entry: a warn naming the classic TextInput and Value(numAmount.Text)');
+  }
   trap('colour tokens with one value in an If', [['lblKind', 'Label', { ...box, Text: '="Kind"', Color: '=If(ThisItem.IsResource, clrInfo, clrAccent)' }]], ['same-colour-branches']);
   trap('colour tokens with two values in an If', [['lblKind', 'Label', { ...box, Text: '="Kind"', Color: '=If(ThisItem.IsResource, clrInfo, clrWarn)' }]], []);
   const galRow = (child) => ['Screens:', '  scrA:', '    Children:', '      - galPeople:', '          Control: Gallery', '          Variant: Vertical', '          Properties:',
@@ -1535,8 +1621,9 @@ function selftest() {
 
   // Parser: doubled quotes, quoted names, comments, chains.
   try { parseFx(`="It""s " & ThisItem.'Due Date' & Text(Now(), "yyyy") // note\n`); parseFx('=Set(a, 1); Set(b, 2)'); } catch (e) { fails.push('parser: ' + e.message); }
+  const diffNote = diffModeSelftest(fails);
   const ok = fails.length === 0;
-  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 12 name, 15 contrast, 6 literal-fit, 2 vertical-fit, 5 build-stamp, 4 phone-width, ${fmtCases.length + 1} format-string, comment-before-layout, vacuity, per-file floor and control-trap cases decided as expected`
+  console.log(ok ? `selftest ok: ${CASES.length} gallery cases, flexible-height, detail-pane, no-theme, floor, per-table, Selected, With, collection, 4 list, 12 name, 15 contrast, 6 literal-fit, 2 vertical-fit, 5 build-stamp, 4 phone-width, ${fmtCases.length + 1} format-string, comment-before-layout, vacuity, per-file floor and control-trap cases decided as expected; ${diffNote}`
                  : `selftest FAILED:\n  ${fails.join('\n  ')}`);
   process.exit(ok ? 0 : 1);
 }

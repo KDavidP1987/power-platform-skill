@@ -265,7 +265,10 @@ evidence. Design each one so the broken version gives a different answer.
 - **Test the row ceiling with today's data.** To prove a fix for 2,000-row truncation, lower the
   app's data row limit to 150 in an **unsaved** Studio session (or restore it before any publish):
   the failure and the fix both show now, instead of when volume arrives. One fix matched the
-  database at both 150 and 2,000.
+  database at both 150 and 2,000. The absence of a delegation warning is not proof either: prove
+  delegation on a table larger than the row limit (or with the limit lowered) and check the answer
+  against the Web API (measured: a `StartsWith` filter compiled with no warning, read the first 2,000
+  rows and showed about half the true total).
 
 ## 8. Writes, gates and negative tests
 
@@ -288,6 +291,15 @@ evidence. Design each one so the broken version gives a different answer.
   written row. The restore scenario confirms the baseline the same way. Observed on the first real
   run: the screen's "Saved" step failed while the confirmation proved the row was written - the
   banner was outside the app frame (next bullet), not a failed save.
+- **A write walk is not a pass until the read-back names the intended row.** A walk passed while its
+  save landed on a neighbouring row; only the read-back showed it. Filter the `confirm` check on the
+  intended row's key, and pair it with an `absent` check over its siblings that sets
+  `"changedThisRun": true` (for example the same parent, excluding that key): rows modified before the
+  walk started pass, any sibling the run touched fails.
+- **Snapshot the whole row before a hands-on save test, and diff every column after.** Not only the
+  field under test: a save from a cached `Patch` result blanked a lookup on a live record, and only a
+  whole-row diff caught it. Read the row over the Web API with no `$select` before and after, and
+  account for every column that moved.
 - **Assert a write by its confirm, not by its toast.** A `Notify` success banner is gone after a
   long settle, so an `expect` on it failed while the write had succeeded; an `expect` that caught
   it would prove no more. Prove the write with the `confirm` check, or with a deterministic second
@@ -330,6 +342,10 @@ evidence. Design each one so the broken version gives a different answer.
 - On a **modern** TextInput the `Tab` is the whole thing: a button gated on
   `Len(Trim(Box.Value)) > 0` stays disabled through `fill()` and enables on blur. Read "disabled"
   as "not committed yet", not "broken guard".
+- **A click on a button straight after typing is not the blur a modern NumberInput needs.** Save
+  wrote the previous value and reported success. `fill()` then `Tab` hides that bug, so a save test on
+  a number box types keystrokes and clicks Save with no `Tab` in between - the way a person does it -
+  and confirms the stored value.
 - **`fill()` into a box with content may append rather than replace.** Close and reopen the panel
   for a clean box.
 - **A DropDown is a `<select>` with no accessible name, and labels repeat across dropdowns.**
@@ -360,9 +376,12 @@ evidence. Design each one so the broken version gives a different answer.
   after, and fail when it did not change. The driver does both, and a write that depends on a
   checkbox still needs a `confirm` on that column.
 - **Verify a modern DropDown by what the person sees.** Playwright's view of its listbox (the
-  `role=option` text) can differ from the rendered list. Drive it with `selectOption({ label })` on
-  the hidden native `<select>` that carries the options, and confirm the choice with a screenshot of
-  the opened list, not by option text alone.
+  `role=option` text) can differ from the rendered list. Use the walk step `select` when a native
+  `<select>` exists; otherwise use `pick` (`{"pick": "Closed", "from": "Status"}`), which opens the
+  control by its accessible name (a modern DropDown's opener is a `combobox`, a classic one's a
+  `button`), clicks the exact `role=option`, and reads the value back as `selected` judges it. Confirm
+  the choice with a screenshot of the opened list, not by option text alone. Type into modern inputs
+  by accessible name rather than placeholder.
 - **A selected value is not on-screen text, so `expect` cannot prove a default.** A check that a
   dropdown opened on the right value failed on a correct screen: the value is not visible text inside
   the canvas. Use the walk step `{"selected": "Active", "from": "Status"}`, which reads the named combo
@@ -488,7 +507,11 @@ negative. Use it for "is my code right?" and the player for "what do users get?"
   property back in the formula bar (a Save 30 s after a genuine hold saved the pre-push state; the
   read-back also caught a scripted edit that landed on the wrong control). "Save with version notes"
   greyed out is a second tell that Studio thinks it is clean, but proves nothing alone. The driver's
-  `save` reads the stamp before and after and exits non-zero when it did not move.
+  `save` reads the stamp before and after and exits non-zero when it did not move. When the stamp
+  cannot be read at all it reads twice more, 10 s apart (measured: the flyout could not be read on
+  two saves that had in fact landed), then exits 7 and writes no save proof. Do not reload Studio
+  while a save is unproven - a reload discards an unsaved push; read the stamp by eye or run
+  `doctor --studio-only`, then confirm with a reload plus `sync --diff`.
 - **A pushed change can be checked against what Save will write.** `sync_canvas` after a compile
   reads the session that was just pushed to, so it is not independent. Reattach over CDP and read a
   control's rendered box from the designer or tree view in the authoring frame (`[data-testid]`,
@@ -556,12 +579,19 @@ pane, hover the list item reading `<Name> Microsoft Dataverse`, open its last bu
   than the control or its descendant means a user cannot press it. Report what covers it. Modern
   inputs paint over galleries regardless of declaration order (`canvas-layout.md` section 4).
 - **Scroll**: does the screen scroll at all? In absolute layout a control below the app height is
-  unreachable unless the screen scrolls.
+  unreachable unless the screen scrolls. A screen taller than `App.Height` scrolls inside an inner
+  element: `document.scrollingElement.scrollTop` does not move, and below-fold text reads "in the DOM
+  but not visible". The driver's `scroll` then scrolls the largest element whose `overflow-y` is
+  `auto` or `scroll` and that holds more than it shows, and names it in the log.
+- **Below-fold text**: `{"scrollto": "Grand total"}` scrolls the deepest visible element holding that
+  text to the centre (`scrollIntoView({ block: 'center' })`, whichever element scrolls it) and fails
+  unless the text is then on screen. Put it before an `expect` on a tall screen; an `expect` that
+  fails with "in the DOM but not visible" says to.
 - **Font metrics**: measure rendered width per character from single-line strings, by font size and
   weight, and feed the result back into any static geometry audit. State the unit: the driver
   reports px per char per CSS px, and the equivalent per unit of canvas `Size` (points, x 4/3).
 
-All four are scenario verbs in the bundled driver (`clipcheck`, `deadclick`, `scroll`,
+All are scenario verbs in the bundled driver (`clipcheck`, `deadclick`, `scroll`, `scrollto`,
 `measurefont`), with `overlapcheck` for text-bearing controls that overlap as rendered.
 
 - **A layout change is gated by a whole-app sweep, after every publish.** One round of text-fit work
@@ -606,8 +636,14 @@ Monitor (Advanced tools) is greyed out while the app has **live updates** (co-au
 - **A Dataverse failure arrives inside an HTTP 200.** The outer `$batch` status is 200 even when an
   inner call failed; the inner part carries the 4xx/5xx and the error message, and only the
   **request** body says which query it was. Keep both bodies. The driver's `--trace` records inner
-  failures with their request; with the MCP tools, `browser_network_requests` then
-  `browser_network_request` for each body.
+  failures with their request when the page sent it; with the MCP tools, `browser_network_requests`
+  then `browser_network_request` for each body.
+- **The request body can be invisible.** The player can send its `$batch` from a web worker: a
+  page-level capture still sees the response, but the request's `postData()` is empty, and the trace
+  says "request body not visible (sent from a web worker)". Then trace by the answer instead:
+  `--trace-body "<text>"` (on `play` or `walk`) records each response part whose body holds that text,
+  with its `@odata.context` and inner status - a value you typed or expect to see names the query that
+  carried it.
 
 **The Monitor export.** If Monitor is greyed out in Studio, publish, then open Monitor from the
 app's details page in the maker portal (environment-dependent; the maker portal's newer Monitor view

@@ -10,11 +10,12 @@ and so did a gallery inserted through Studio's Insert menu and then filled from 
 the teardown the same week; new galleries had shipped from source a month earlier, so it reads as a
 platform regression. Until it is shown fixed, run this before any ship that adds a gallery.
 
-The workaround that shipped:
-  1. Studio: Insert > Vertical gallery on the right screen, rename it to the source's name.
-  2. Push or compile the source into that session; the Tree view must stay up.
-  3. Save and Publish from Studio.
+The workaround, measured twice with no teardown (against eight crashing cycles before it), in this order:
+  1. Push the change WITHOUT the new gallery, and save.
+  2. Studio: Insert > Blank vertical gallery on the target screen, rename it to the source's name, save.
+  3. Push the full source (the gallery and its children); the Tree view must stay up. Save and Publish.
   4. Re-ship from git, then open the published app and check that its first screen renders signed-in data.
+A driver command for the Studio steps is on the roadmap; today they are done by hand in Studio.
 
 What it compares: gallery names in the repo's Src against the galleries the live app already knows -
 the named controls in the live package's compiled half (msapp/Controls/*.json; a Studio publish writes a
