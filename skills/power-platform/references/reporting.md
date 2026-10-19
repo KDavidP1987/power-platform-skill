@@ -389,8 +389,9 @@ the lakehouse: do not delete it separately (that returns 404, which is expected)
 refuses an item, list it for the person with the portal path (workspace, folder, item, Delete); do
 not retry it in a loop.
 
-A dedicated Power BI and Fabric skill (reports, semantic models, DAX, custom visuals) is planned;
-until it exists, this section is the pattern to follow.
+Power BI and Fabric guidance grows inside this skill. For a workspace that already exists (Gen1
+dataflows, Import models, reports read by Excel templates), audit it before building anything:
+`fabric-workspace-audit.md`.
 
 ## 5. Power BI inside the app: embed it, and always offer the link
 

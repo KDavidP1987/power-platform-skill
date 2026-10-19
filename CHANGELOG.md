@@ -11,6 +11,42 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-19
+
+Feedback from public users, and the first Fabric / Power BI guidance inside this skill. A read-only audit
+of a grown production workspace (about 190 items: Gen1 and Gen2 dataflows, Import and Direct Lake models,
+reports, an app, Excel templates reading dataflows) showed that none of its real problems were visible from
+the item list, and that two lineage and usage APIs give wrong answers unless handled; this release writes
+down the procedure that worked.
+
+### Added
+
+- `references/feedback.md` and a SKILL.md behaviour line: when the skill misled an agent or had no answer,
+  the agent offers the person a GitHub issue (the `defect` or `lesson` form) describing the skill's
+  behaviour, the version and the measured evidence only - never what the person is building, names,
+  tenants, URLs, ids or data - shows the draft, and files only on a yes. README Contributing points to it.
+- `references/fabric-workspace-audit.md`: auditing an existing workspace before a rebuild - the snapshot
+  calls, lineage from M and TMDL, Excel consumers read from each workbook's DataMashup, 90-day usage,
+  refresh health, cadence and order, classification and staged retirement.
+- SKILL.md description: Fabric workspaces that feed Power BI are in scope (DAX measure writing is not
+  yet).
+
+### Changed
+
+- `reporting.md` section 4 no longer points to a separate Power BI skill; Power BI and Fabric guidance
+  grows here, starting with the audit.
+
+### Measured traps now written down
+
+- The lakehouse tables API returned 400 for some lakehouses and a partial list for another; the SQL
+  endpoint is the inventory, and `sys.partitions` has no Delta row counts.
+- `GET /dataflows/{id}/upstreamDataflows` returned nothing where nine dataflows read others; lineage
+  comes from the M.
+- The usage-metrics model's report ids are upper case; a case-sensitive join reports zero views.
+- Unpaced SharePoint REST calls from a signed-in browser throttle the user (406, `Throttle.htm`), the same
+  identity that runs their scheduled refreshes.
+- A select-before-apply guard's refusals are tested on its functions, never by running the live apply.
+
 ## [0.32.0] - 2026-10-17
 
 Select before apply, as a must-hold rule and as enforcement. Several Dataverse applies in real projects
