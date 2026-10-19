@@ -10,12 +10,12 @@ description: >-
   galleries and pickers, Dataverse columns and security, flows that loop or fail on activation,
   risky bulk writes, "the button does nothing", "works in Studio but not in the published app",
   columns the app can't see, and proving a change by driving the published app with Playwright.
-  Not for DAX or Power BI report authoring, Dynamics C# plugins, desktop (RPA) flows, or custom web
-  apps calling the Dataverse API.
+  Also auditing Fabric workspaces that feed Power BI (lineage, refresh health, usage).
+  Not for DAX measures, C# plugins, desktop flows, or custom web apps on the Dataverse API.
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.32.0"
+  version: "0.33.0"
 ---
 
 # Power Platform development
@@ -104,7 +104,8 @@ refuses, which stay instructions, and the surface each applies to.
 - **Leave the machine as you found it**: close the tabs you opened, release every Studio session,
   run `canvas-browser.mjs tidy` before the hand-back.
 - **Write lessons where the next person will look** - the shared standards, not only one project's
-  notes.
+  notes. When the skill itself misled you or had no answer, offer the person a GitHub issue about the
+  skill's behaviour only - never what they are building, names or ids. `references/feedback.md`.
 
 ## A new app or a multi-part build, in this order
 
@@ -189,6 +190,8 @@ Read only the reference the task needs; each topic has one home.
 | Reporting: the history table, in-app charts, metric definitions, Power BI over a Fabric medallion, embedding, viewer licensing | `references/reporting.md` |
 | Which rules a hook enforces, the surface each applies to, when an instruction becomes a hook | `references/rules-and-scope.md` |
 | Writing or trusting an audit; stale inputs; vacuous passes | `references/audits.md` |
+| An existing Power BI / Fabric workspace: lineage from M and TMDL, Excel consumers, usage, refresh health, dead items, staged retirement | `references/fabric-workspace-audit.md` |
+| The skill misled you or lacked an answer: offering feedback, what it may and may not contain | `references/feedback.md` |
 | Starting from nothing: the machine, pac, tokens, a browser that signs in by itself, identities signed in once, the smoke test | `references/first-run.md` |
 | Starting a repo or app: the harness, theme intake, layout, hooks, continuity docs, CI, offering GitHub | `references/project-setup.md` |
 | CI/CD: service-principal pac auth, Solution Checker, managed vs unmanaged, deployment settings, the skill's tools as gates | `references/alm-pipelines.md` |
