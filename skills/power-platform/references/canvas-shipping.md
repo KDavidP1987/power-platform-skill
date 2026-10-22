@@ -716,6 +716,16 @@ that clearing storage re-triggers, and when to use Studio Preview instead of the
 - **Recovering from a broken import:** restore the last good version, Publish, `pac canvas
   download` it, and adopt its `References/DataSources.json` / `.msapr` as the new baseline manifest
   - in one recovery the good copy had every source and the repo copy did not.
+- **Proving live equals source after an interrupted session** (an editor closed mid-ship): read the
+  last push, save-proof and publish logs for where it stopped, download the live app, and compare it
+  with the repo **per control, not per file**. A plain diff of the downloaded `Src/*.pa.yaml` showed
+  every screen different (41 of 41): Studio's serializer adds a header comment, reorders properties,
+  appends control versions (`Rectangle@2.3.0`) and drops default values (`X: =0`, an empty
+  `AccessibleLabel`). Parsing both sides and comparing each control's type (without version) and
+  property values (whitespace-normalised), listing one-side-only properties separately, gave 2,723
+  controls and 0 real differences; the same comparison against the previous publish's download named
+  exactly the three screens the last batch had edited. A walk that fails on exact caption text after
+  a polish publish is checked against the source before the app is blamed.
 - **Diagnose a post-deploy break in this order**, which one project learned by reaching for the
   first step last, twice (a trace answered a day-long outage in ten minutes):
   1. A Monitor trace (if live updates allow; otherwise publish, then open Monitor from the app's

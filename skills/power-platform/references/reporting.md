@@ -334,6 +334,24 @@ percent format with display units off. A percent card left on the page's million
 (an element screenshot of the page, or the report in full-screen view): the service's header shows
 the signed-in person's photo and the organisation's logo, and the workspace rail lists other work.
 
+**Report layout traps in generated (PBIR) reports**, each seen in the service after a clean deploy:
+
+- **Set "Maintain layer order" on anything that overlaps.** A full-width masthead image with the title
+  and slicers laid over it came to the front when a reader clicked it (service and app embed), hiding
+  the title and slicers until reload; readers reported it as "the filters disappear". Set
+  `visualContainerObjects.general.keepLayerOrder = true` on the background visual and on every visual
+  laid over it, and turn the background's visual header off. Check: click the band in reading view,
+  then confirm the slicers are still there.
+- **Do not promise a default-expanded matrix from PBIR.** `expansionStates` (levels `isCollapsed` /
+  `isPinned`, root `isToggled`) passed schema validation and deployed, and the service still opened the
+  matrix collapsed, in two variants. Put the level readers need first, or say "expand" in a note.
+- **Quarter subtotals after their months, without an expand state.** A Quarter > Month hierarchy puts
+  each quarter after its three months only when expanded, which a generated report does not carry. A
+  small report-column table (each month, and each quarter after its third month, 16 rows) with a
+  bridge to period number, read in the measure with `TREATAS`, gives Oct Nov Dec Q1 ... Q4 with
+  correct totals. Shading the quarter columns by a fill measure applied nothing until the
+  conditional-format selector's `metadata` was set to the value's queryRef.
+
 **Build the reporting lane in parallel with the app** once schema and sample data exist
 (`references/orchestration.md`): `scripts/fabric.py` deploys folder, notebooks, pipeline, model and
 report from `assets/templates/fabric-medallion/` (plan by default, `--apply` to write), runs the
@@ -391,7 +409,8 @@ not retry it in a loop.
 
 Power BI and Fabric guidance grows inside this skill. For a workspace that already exists (Gen1
 dataflows, Import models, reports read by Excel templates), audit it before building anything:
-`fabric-workspace-audit.md`.
+`fabric-workspace-audit.md`. Replacing it with a medallion fed by SharePoint lists and Excel workbooks,
+and proving the new layers against the old model: `fabric-rebuild-and-parity.md`.
 
 ## 5. Power BI inside the app: embed it, and always offer the link
 

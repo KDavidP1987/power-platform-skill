@@ -41,7 +41,7 @@
         { "schemaName": "abc_cost", "displayName": "Cost", "type": "money" },
         { "schemaName": "abc_reopencount", "displayName": "Times Reopened", "type": "integer" },
         { "schemaName": "abc_category", "displayName": "Category", "type": "lookup", "target": "abc_category" },
-        { "schemaName": "abc_requester", "displayName": "Requester", "type": "lookup", "target": "core_person" }
+        { "schemaName": "abc_requester", "displayName": "Requester", "type": "lookup", "target": "core_person", "onDelete": "Restrict" }
       ]
     },
     {

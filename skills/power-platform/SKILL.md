@@ -10,12 +10,12 @@ description: >-
   galleries and pickers, Dataverse columns and security, flows that loop or fail on activation,
   risky bulk writes, "the button does nothing", "works in Studio but not in the published app",
   columns the app can't see, and proving a change by driving the published app with Playwright.
-  Also auditing Fabric workspaces that feed Power BI (lineage, refresh health, usage).
+  Also auditing and rebuilding Fabric workspaces that feed Power BI.
   Not for DAX measures, C# plugins, desktop flows, or custom web apps on the Dataverse API.
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.33.0"
+  version: "0.34.0"
 ---
 
 # Power Platform development
@@ -191,6 +191,7 @@ Read only the reference the task needs; each topic has one home.
 | Which rules a hook enforces, the surface each applies to, when an instruction becomes a hook | `references/rules-and-scope.md` |
 | Writing or trusting an audit; stale inputs; vacuous passes | `references/audits.md` |
 | An existing Power BI / Fabric workspace: lineage from M and TMDL, Excel consumers, usage, refresh health, dead items, staged retirement | `references/fabric-workspace-audit.md` |
+| Rebuilding a reporting chain as a medallion: bronze from SharePoint lists and Excel workbooks, verifying against the files, parity with the old model, Python notebooks, reading Delta from Python | `references/fabric-rebuild-and-parity.md` |
 | The skill misled you or lacked an answer: offering feedback, what it may and may not contain | `references/feedback.md` |
 | Starting from nothing: the machine, pac, tokens, a browser that signs in by itself, identities signed in once, the smoke test | `references/first-run.md` |
 | Starting a repo or app: the harness, theme intake, layout, hooks, continuity docs, CI, offering GitHub | `references/project-setup.md` |

@@ -105,7 +105,11 @@ Bootstrap traps:
   To read a legacy app only as a specification, unzip the `.msapp` and read the JSON - it is not
   corrupt.
 - **`--allowDelete true` on unpack** when syncing, or components removed live stay in
-  `solution/src` forever.
+  `solution/src` forever. It removes files, not folders: nine `Entities/<table>` folders stayed as
+  empty shells for seven weeks after their tables left the solution. Git never shows them (it tracks
+  no empty folder), but a script that lists `Entities/` reported those tables as still shipped. Prune
+  empty folders after every sync (or unpack into a fresh folder and swap it in), and make any
+  folder-listing check count only folders that contain files.
 - **A managed zip cannot be packed from an unmanaged unpack** ("Solution package type did not match
   requested type"). Either export the managed build from the environment (`pac solution export
   --managed true`), or unpack with `--packagetype Both` so the tree can produce either (general pac

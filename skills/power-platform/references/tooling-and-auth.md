@@ -214,6 +214,9 @@ command must also work as `powershell -File`):
 | `[string[]]` parameter via `powershell -File` | "a,b" arrives as one string | two parameters, or split explicitly |
 | `$PSScriptRoot` in `param()` defaults | empty in some hosts | resolve inside the script body |
 | a `DataTable` returned as one object (`, $dt`) and piped to `Export-Csv` | the CSV holds the table's own properties, not its rows | pipe `$dt.Rows` |
+| the same `DataTable` piped to `ForEach-Object` | one iteration; `$_.col` member-enumerates every row, so a per-row note merged all rows into one string (looked right while there was one row) | pipe `$dt.Rows` |
+| `Set-Content -Encoding utf8` for a JSON file another tool reads | writes a BOM; Python `json.load` refuses it | `[IO.File]::WriteAllText($p, $s, [Text.UTF8Encoding]::new($false))`; read with `utf-8-sig` |
+| hashtable keys (also `[ordered]@{}` and `-contains`) are case-insensitive | a column-list intersection found `CO partner object name` in a table holding `CO Partner Object Name`; the lakehouse SQL endpoint (case-sensitive names) then said "Invalid column name" | `[Collections.Specialized.OrderedDictionary]::new([StringComparer]::Ordinal)` or `-ccontains` when names go back into SQL |
 | datetimes formatted by .NET `ToString()` | follow the machine's culture, so the same export differs by machine | format in SQL: `CONVERT(varchar, col, 126)` |
 
 A dot-source guard - `if ($MyInvocation.InvocationName -eq '.') { return }` after the function
