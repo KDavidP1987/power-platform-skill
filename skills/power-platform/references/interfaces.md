@@ -41,6 +41,7 @@ rule applies to the checkers the hooks call, not to the hook's own silence.
 | `check-all.mjs` | One table for format, overlap, lint, drift, seed and stamp | `[--repo .] [--max 5] [--only a,b] [--json]`, `--selftest` | 0, 1, 2 (nothing failed but a check examined nothing, or nothing ran) | the codes of the checks it runs | frozen |
 | `reconcile-report.py` | A Power BI model's figures against a direct Dataverse count | `--checks FILE [--org] [--workspace] [--dataset] [--json] [--token-cmd] [--token-env] [--pbi-token-cmd] [--pbi-token-env]`, `--selftest` | 0, 1 (a DIFF), 2 (cannot run, or the file lists no checks) | `DIFF` lines | frozen |
 | `flow-runs.py` | Read a flow's run history and explain a failed run | `list`, `runs <flow> [--status S] [--top N]`, `why <flow> [<run>] [--max-chars N]`; `--env`, `--config`, `--token-cmd`, `--token-env`, `--selftest` | 0 (nothing failed), 1 (a failed run explained), 2 | messages | frozen |
+| `run-flow.py` | Run a scheduled flow once and report what the run did | `<flow> [--run] [--send-ok] [--trigger NAME] [--wait S] [--max-chars N]`; `--env`, `--config`, `--token-cmd`, `--token-env`, `--selftest` | 0 (plan, or the run succeeded), 1 (the run failed, explained), 2 (refused or cannot run), 3 (still running at `--wait`) | `REFUSED`, `NOTE`, `RUN`, `STILL RUNNING` lines | new |
 
 ## Builders and deployers (write, plan first)
 

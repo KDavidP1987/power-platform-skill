@@ -11,6 +11,33 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-22
+
+Running a scheduled flow once after a deploy, as a tool and a procedure. A deployed Recurrence flow is
+proved only by a run, Dataverse cannot start one, and in a measured session both routes an agent tried
+(a hand-built flow-API token written to a file, a scripted click on Run in the portal) were refused by
+its safety guard, so a person had to click Run although they had already approved it.
+
+### Added
+
+- `scripts/run-flow.py`: plan by default (state, trigger, every send and write with its loop); `--run`
+  starts the Recurrence trigger over the flow management API, waits for the run it started (not an
+  earlier one), and counts each send and write as Succeeded or Skipped per loop iteration, which tells a
+  no-op from a delivery; a failed run is explained in the same call with `flow-runs.py why`. It refuses a
+  stopped flow, a non-Recurrence trigger, and a flow that sends unless `--send-ok` records the person's
+  approval of that run. The token stays in memory. Reuses `flow-runs.py`'s client rather than copying it.
+  Self-tests in CI. The read-only plan was proved against a real definition, where it found a
+  shared-mailbox send (`SharedMailboxSendEmailV2`) classed as a write - fixed and tested before release.
+  The `--run` path is proved by self-tests only so far.
+- `setup-harness.mjs` installs `run-flow.py` with the other tools.
+
+### Changed
+
+- `power-automate.md` section 11: testing a scheduled flow is now a six-step procedure built on
+  `run-flow.py` (plan, make sends harmless, ask once and run, read what the run did, explain a failure
+  without resubmitting, restore and record); section 14 points the trigger-run endpoint at the tool;
+  the section 15 checklist requires one run after every deploy, read back by its tally.
+
 ## [0.34.0] - 2026-10-22
 
 Lessons from rebuilding a grown Power BI reporting chain (Gen1 dataflows over SharePoint lists and Excel

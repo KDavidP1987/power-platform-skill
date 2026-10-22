@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.34.0](https://img.shields.io/badge/plugin-0.34.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.35.0](https://img.shields.io/badge/plugin-0.35.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.34.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.35.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -150,7 +150,7 @@ The method and references need nothing installed. The tools need:
 | Need | For | Notes |
 |---|---|---|
 | **Node 20+** | Hooks, flow linter, browser driver | No npm dependencies for the hooks or the linter |
-| **Python 3** | `ship-canvas.py`, `inspect-artifact.py`, `check-drift.py`, `deploy-tables.py`, `canvas-mcp.py`, `flow-runs.py`, `audit-pages-permissions.py`, `check-published-order.py`, `seed-data.py`, `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `pbi-theme.py` | Standard library only |
+| **Python 3** | `ship-canvas.py`, `inspect-artifact.py`, `check-drift.py`, `deploy-tables.py`, `canvas-mcp.py`, `flow-runs.py`, `run-flow.py`, `audit-pages-permissions.py`, `check-published-order.py`, `seed-data.py`, `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `pbi-theme.py` | Standard library only |
 | **.NET 10 SDK** | The canvas authoring server (`canvas-mcp.py`) | Started with `dnx`; nothing else to install |
 | **PowerShell** (optional) | `dv-token.ps1`, owner scripts | Windows PowerShell 5.1 or PowerShell 7 |
 | **Power Platform CLI** (`pac`) | Packing, importing, environment checks | `pac org who` is part of every pre-flight |
@@ -699,6 +699,7 @@ skills/power-platform/
   scripts/check-published-order.py  published control order against the repo
   scripts/contract-to-walk.mjs  acceptance contract to walk scenarios, with coverage checks
   scripts/flow-runs.py          why a flow run failed, read only
+  scripts/run-flow.py           run a scheduled flow once after a deploy, and count what it sent
   scripts/audit-pages-permissions.py  Power Pages permissions, allow-lists and headers
   scripts/dv-token.ps1          a Dataverse token with one sign-in
   scripts/hooks/                preflight, check-pa-yaml, check-standards, shared-guard, audit-stop, lib
