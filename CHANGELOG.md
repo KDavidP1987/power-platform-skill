@@ -11,6 +11,31 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-22
+
+The skill now tells its users when it is out of date, every week until they update, and carries its own
+changelog. Until now only projects with the harness installed heard about a new release, and a skill
+folder copied on its own had no record of what had changed.
+
+### Added
+
+- `scripts/hooks/update-check.mjs`, a plugin SessionStart hook in every folder: reads the release feed at
+  most once a week (three-second timeout, silent offline, a failed read retried after a day) and, when a
+  newer release exists, shows the person the new version, the headline of each release since theirs and
+  the two update commands, and asks the agent to relay it once and update only on a yes. A release not
+  installed is announced again a week later; prereleases are never offered. `--print` gives the same check
+  as plain text for installs without hooks (SKILL.md tells the agent to run it once per session there);
+  `--now` ignores the weekly limits. Opt out with `POWER_PLATFORM_SKILL_UPDATE_CHECK=off`. Self-tests in CI
+  (15 checks, including the weekly re-prompt and the opt-out); the live feed read was checked.
+- `skills/power-platform/CHANGELOG.md`: the changelog ships inside the skill folder. `validate-skills.mjs
+  --check-versions` fails when it differs from the repository's `CHANGELOG.md`.
+
+### Changed
+
+- SKILL.md "How to behave": keep the skill current, and where the changelog is.
+- README: how the weekly update notice works and how to turn it off; the release steps copy the changelog
+  into the skill folder.
+
 ## [0.35.0] - 2026-10-22
 
 Running a scheduled flow once after a deploy, as a tool and a procedure. A deployed Recurrence flow is

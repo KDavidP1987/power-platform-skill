@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.35.0](https://img.shields.io/badge/plugin-0.35.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.36.0](https://img.shields.io/badge/plugin-0.36.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.35.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.36.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -138,8 +138,13 @@ equivalent skills folder for your agent.
 **Updating.** Plugin: `/plugin marketplace update power-platform-skill`, or turn on auto-update for
 the marketplace in `/plugin`. `npx skills`: run the same `add` command again. Manual copy: replace the
 folder. Then re-run `setup-harness.mjs` (plan first) in each project so its hooks and tools match.
-Projects with the harness installed are told at session start, at most once a day, when a newer
-release exists.
+The plugin checks the release feed at session start at most once a week and, when a newer release
+exists, shows the new version, the headline of each release since yours and the two update commands
+(`claude plugin marketplace update power-platform-skill`, then `claude plugin update
+power-platform@power-platform-skill`); it repeats weekly until you update. Offline it is silent; set
+`POWER_PLATFORM_SKILL_UPDATE_CHECK=off` to turn it off. Without the plugin, the agent runs
+`node scripts/hooks/update-check.mjs --print` itself. Projects with the harness are also told when
+their copied hooks are older than the skill.
 
 **Something wrong, or a lesson to add?** Open an issue with the defect or lesson template.
 
@@ -714,7 +719,9 @@ The way to 1.0, with measurable criteria, is in [ROADMAP.md](ROADMAP.md).
 
 Releases follow [Semantic Versioning](https://semver.org). Every change is recorded in
 [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` first, then moved under a version heading on
-release. The plugin version lives in `.claude-plugin/plugin.json`; the marketplace entry,
+release. The skill folder carries the same file (`skills/power-platform/CHANGELOG.md`), so a copied
+skill still says what changed; copy it on every release (`--check-versions` fails when the two differ).
+The plugin version lives in `.claude-plugin/plugin.json`; the marketplace entry,
 `package.json`, this README's badge and version line, and the newest changelog heading must all
 agree with it. To release, bump them together and run:
 

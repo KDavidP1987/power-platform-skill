@@ -33,6 +33,7 @@ jobs:
       - run: node skills/power-platform/scripts/hooks/check-pa-yaml.mjs --selftest
       - run: node skills/power-platform/scripts/hooks/check-standards.mjs --selftest
       - run: node skills/power-platform/scripts/hooks/preflight.mjs --selftest
+      - run: node skills/power-platform/scripts/hooks/update-check.mjs --selftest
       - run: node skills/power-platform/scripts/hooks/lib.mjs --selftest
       - run: python skills/power-platform/scripts/inspect-artifact.py --selftest
       - run: python skills/power-platform/scripts/check-drift.py --selftest
