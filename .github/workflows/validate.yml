@@ -43,6 +43,7 @@ jobs:
       - run: python skills/power-platform/scripts/check-published-order.py --selftest
       - run: python skills/power-platform/scripts/check-new-galleries.py --selftest
       - run: python skills/power-platform/scripts/flow-runs.py --selftest
+      - run: python skills/power-platform/scripts/run-flow.py --selftest
       - run: python skills/power-platform/scripts/audit-pages-permissions.py --selftest
       - run: python skills/power-platform/scripts/seed-data.py --selftest
       - run: python skills/power-platform/scripts/deploy-flows.py --selftest

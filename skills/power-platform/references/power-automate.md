@@ -640,12 +640,34 @@ A flow first switched on at go-live has never run. Prove it first:
 setting back. For a single hands-on test on real data, park the flow that would notify someone,
 make the attempt, restore it, and confirm nothing was written (`modifiedon` unchanged).
 
-**A scheduled flow**: (1) switch the channel settings off and narrow recipients to one person;
-(2) temporarily pin the flow's date parameter to a past period that has data; (3) activate that
-flow alone, run it by hand, and read the run; (4) check each send shows *Skipped,
-ActionBranchingConditionNotSatisfied* - proof the switch held; (5) revert the pin as a targeted
-edit, not a whole-file checkout; (6) re-import, switch the flow off, confirm with `-WhatIf`;
-(7) read back every setting.
+**A scheduled flow is run with `scripts/run-flow.py`, not by a click in the portal.** Dataverse
+cannot start a run (`flowrun` is read-only history) and a Recurrence flow does not run until its next
+tick. In a measured session two other routes were refused by the agent's safety guard: a flow-API token
+built by hand and written to a file, and a Playwright click on Run in the portal. `run-flow.py` keeps the
+token in memory, starts the run over the API, and makes the approval of a sending run explicit on the
+command line. The procedure, after every deploy of a scheduled flow:
+
+1. **Plan** (read only): `python scripts/run-flow.py "<flow>"` prints the state, the trigger, and every
+   send and write in the definition with the loop it sits in. It refuses a stopped flow and any trigger
+   that is not Recurrence (prove a Dataverse trigger by the test-row write above, a manual or Power Apps
+   trigger from its caller). Measured on a real definition: a shared-mailbox send
+   (`SharedMailboxSendEmailV2`) is classed as a send.
+2. **Make a send harmless where the flow allows it**: channel settings off or recipients narrowed to one
+   person and, when the run needs data, the date parameter pinned to a past period that has some. Record
+   each setting's value before changing it.
+3. **Ask the person once, then run.** A flow that sends needs the person's approval of this run (which
+   flow, to whom, with which settings), then `python scripts/run-flow.py "<flow>" --run --send-ok`; a flow
+   with no sends needs only `--run`. It waits for the run it started, not an earlier one.
+4. **Read what the run did, not only its status.** The tool counts each send and write as Succeeded or
+   Skipped, per loop iteration. Every send Skipped with the channels off is the proof the switch held
+   (*ActionBranchingConditionNotSatisfied*); a run of a few seconds with every send Skipped is a no-op,
+   not a delivery; a "Succeeded" run that sent nothing when it should have is a failure.
+5. **A failed run is explained in the same call** (`flow-runs.py why`: the deepest specific error, on
+   the failing iteration, and the sends already made). Fix the source, redeploy, repeat from 1. Never
+   resubmit the failed run: it repeats every send it already made.
+6. **Restore** every setting from step 2 as a targeted edit (not a whole-file checkout), redeploy if the
+   pin was in the definition, return the flow to its intended on/off state, and read every setting back.
+   Record the run id, its tally and the restored values in the project's state file.
 
 Prove any calendar lookup inside it on known dates (a closure day, the day before, the day after) over
 the Web API first, and hoist invariant lookups ("is today a closure day") out of `Apply to each` to the
@@ -777,7 +799,8 @@ with an Az token for `https://service.flow.microsoft.com/` and `api-version=2016
   the `Safe_to_` Compose that fed it.
 - `.../triggers/<name>/histories` shows every trigger evaluation (fired or not) with its payload via
   `outputsLink` - this is how a lost Dataverse event is told apart from a skipped condition.
-- `POST .../triggers/<name>/run` runs a Recurrence trigger now, for a test.
+- `POST .../triggers/<name>/run` runs a Recurrence trigger now, for a test. Use `run-flow.py`
+  (section 11): it finds the run that call started, waits for it, and counts what it sent.
 
 ## 15. A checklist for every flow
 
@@ -810,6 +833,10 @@ with an Az token for `https://service.flow.microsoft.com/` and `api-version=2016
 - [ ] Imported; connections exist and are bound; turned on once to compile, even if it then goes
       back off until go-live; repo sidecar state matches the live state you intend; state diffed
       after the import.
+- [ ] Run once after the deploy and read what the run did: a scheduled flow with `run-flow.py
+      --run` (sends approved by the person, channels off or recipients narrowed), a trigger flow by the
+      app's own write on a test row; every send and write counted; settings restored and read back
+      (section 11).
 - [ ] Before any bulk write or purge to a watched table: messages and log rows counted, true figure
       worked out, watchers parked by name and restored to their recorded state.
 
