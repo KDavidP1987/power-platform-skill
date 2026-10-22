@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.35.0"
+  version: "0.36.0"
 ---
 
 # Power Platform development
@@ -106,6 +106,9 @@ refuses, which stay instructions, and the surface each applies to.
 - **Write lessons where the next person will look** - the shared standards, not only one project's
   notes. When the skill itself misled you or had no answer, offer the person a GitHub issue about the
   skill's behaviour only - never what they are building, names or ids. `references/feedback.md`.
+- **Keep the skill current.** The plugin checks for a newer release weekly at session start; relay
+  its notice once and update only on a yes. Without the plugin's hooks, run
+  `node scripts/hooks/update-check.mjs --print` once per session. What changed: `CHANGELOG.md` here.
 
 ## A new app or a multi-part build, in this order
 

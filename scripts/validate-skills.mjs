@@ -80,6 +80,12 @@ export function checkVersions(args, base = root) {
     return read(p).match(/^ {2}version:\s*"?([^"\r\n]+)"?\s*$/m)?.[1] ?? null;
   };
   for (const name of skills) {
+    // A skill that ships its own CHANGELOG.md (so a copied skill folder still says what changed) carries the
+    // repository's changelog unchanged: `cp CHANGELOG.md skills/<name>/CHANGELOG.md` on every release.
+    const cp = `skills/${name}/CHANGELOG.md`;
+    if (has(cp) && has("CHANGELOG.md") && read(cp).replace(/\r\n/g, "\n") !== read("CHANGELOG.md").replace(/\r\n/g, "\n")) {
+      mismatches.push(`${cp} differs from CHANGELOG.md: copy it (cp CHANGELOG.md ${cp})`);
+    }
     const have = skillVersion(name);
     if (have === null) continue;                    // no SKILL.md version; the main validator reports that
     const rp = `skills/${name}/README.md`;
