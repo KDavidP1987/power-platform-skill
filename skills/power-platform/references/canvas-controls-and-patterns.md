@@ -146,6 +146,18 @@ copying a working control from the same app.
   digit in a narrow box in the player. `check-canvas-format.mjs` warns `number-input-entry` on an
   editable modern NumberInput. A browser test of an amount box must type with real keystrokes and click Save
   straight after, because a `fill()` plus `Tab` hides the fault (`browser-verification.md`).
+- **The same trap inside a gallery whose rows do not depend on the record being edited.** A grid of
+  the same twelve fiscal periods for every line item reuses its child inputs from one record to the
+  next. A classic TextInput keeps typed text until its `Default` *value* changes or it is reset, so
+  where both records' Default is blank, an amount typed (unsaved) on record A stayed in the box when
+  record B opened, and the row's Save wrote it onto B; a box cleared on A carried a delete the same
+  way. Fields whose values differ between records look right, which hides it. Fix: `Reset: =locReset`
+  on every input in the template, toggled (`true`, then `false`) on record change - in `OnVisible` and
+  in any control that switches record or year - or make the Items include the record key. Test: type
+  without saving on record A, open record B, assert B's value in the box. Observed once (three
+  ships): the same toggle placed in the `OnSelect` that hides the input's tab did NOT clear typed
+  text, while the screen's `OnVisible` did; treat "discard on leave" as a reset on entry, and guard
+  navigation away rather than promising a discard on a tab switch.
 - **`Reset()` cannot reach a control that is not rendered**, and a control hidden at load never
   applies its Default (section 4).
 - **An input fires `OnChange` when its bound value RESOLVES, not only when a person types.** A

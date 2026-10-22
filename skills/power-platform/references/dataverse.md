@@ -460,7 +460,16 @@ often more than one row.
 | Financial fact to a reference row (a time entry to its person or period) | **Restrict** | RemoveLink silently blanks the link and leaves a row that still adds up, with no person on it |
 | History or audit row to its subject (changed by, approver) | **RemoveLink**, plus a **name snapshot** text column | History must never make a roster row undeletable, and must stay readable after the target goes |
 | Person row to `systemuser` | RemoveLink, NoCascade on assign and share | A departed user must not make the person undeletable |
+| Any app row to a **shared reference table** (vendor, cost centre, GL account, person) | **Restrict** | RemoveLink is the platform default, so one app deleting a shared row silently blanks the column on every other app's rows - rows that app cannot even see |
 
+- **Measured: every lookup a provisioning script had created was RemoveLink**, including those into
+  shared vendor, cost-centre and GL tables read by three apps. Nothing had failed; the first delete of a
+  shared row would have blanked the field across all of them. `deploy-tables.py` takes `"onDelete"` per
+  lookup and warns at plan time on a lookup to a shared table without one. To change an EXISTING
+  relationship, PUT `RelationshipDefinitions(<id>)` with the full `OneToManyRelationshipMetadata` body
+  (read it, change `CascadeConfiguration.Delete`, send it all back), prove it with a parent/child test
+  pair (the parent's delete must be refused), and export the solution so the next import does not put
+  RemoveLink back.
 - **Restrict into a shared table stops every app deleting those rows** - which is why shared rows are
   deactivated, not deleted. Record it in the shared change log, and count inbound Restrict links
   before planning any delete of a shared row.

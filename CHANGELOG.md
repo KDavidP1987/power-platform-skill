@@ -11,6 +11,49 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-22
+
+Lessons from rebuilding a grown Power BI reporting chain (Gen1 dataflows over SharePoint lists and Excel
+workbooks, feeding an Import model) as a medallion that had to give the same answers to the cent before
+anything switched over, and from two canvas apps in production. Most of the medallion traps passed a green
+refresh or a matching row count; each one was found by a check that compared values. 41 log entries
+analysed: 37 folded in, 4 rejected as already covered (the item description limit, the push-then-save
+wait, the no-op Save toast with formula-bar focus, the lookup-to-record comparison).
+
+### Added
+
+- `references/fabric-rebuild-and-parity.md`: inventory from the production mashups; bronze from SharePoint
+  lists (no silent `try ... otherwise null`, a per-row type-error column, `Table.Buffer`, code columns as
+  text); bronze from Excel workbooks (error cells, totals rows, folder-read traps, filled-down labels, the
+  worksheet row number); the lakehouse destination's column-name rewriting; verifying bronze against the
+  files (EXCEPT both ways, rounding to the column's scale, probing M conversion rules through
+  `executeQuery`); parity with an Import model (`executeQueries` truncation, VertiPaq casing, M-versus-SQL
+  null semantics, half-cent tolerance, index columns as row surrogates); code-first Python notebooks (one
+  generated cell, the runtime's pinned versions, errors only in the run snapshot, tokens in memory); and
+  reading Delta tables from Python (column mapping returning nulls, timestamp zones, empty tables,
+  deterministic row numbering).
+- `deploy-tables.py`: `"onDelete"` per lookup (`RemoveLink`, `Restrict`, `Cascade`), shown in the plan; a
+  lookup to a shared table without one draws a plan warning. Self-tests cover the refusal, the warning and
+  the body sent.
+- `reporting.md`: report layout traps in generated (PBIR) reports - "Maintain layer order" on overlapping
+  visuals (a masthead came to the front and hid the slicers), no default-expanded matrix from
+  `expansionStates`, quarter subtotals after their months with `TREATAS`.
+
+### Changed
+
+- `dataverse.md` section 12: shared reference tables default to Restrict, with how to change an existing
+  relationship and prove it.
+- `canvas-controls-and-patterns.md` section 3: a gallery whose rows do not depend on the edited record
+  carries typed text (and deletes) from one record to the next; reset on record change.
+- `canvas-shipping.md` section 8: proving live equals source after an interrupted session, per control
+  rather than per file.
+- `project-setup.md`: an unpack with `--allowDelete` leaves empty folders; prune them.
+- `fabric-workspace-audit.md`: resolve SharePoint lists by site and GUID, never by title across sites.
+- `tooling-and-auth.md` section 5: three PowerShell traps (a DataTable through `ForEach-Object`, a BOM in
+  JSON for Python, case-insensitive keys against a case-sensitive SQL endpoint).
+- SKILL.md description: rebuilding Fabric workspaces is in scope next to auditing them.
+- The README's reference table lists both Fabric references.
+
 ## [0.33.0] - 2026-10-19
 
 Feedback from public users, and the first Fabric / Power BI guidance inside this skill. A read-only audit

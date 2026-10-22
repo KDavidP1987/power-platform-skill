@@ -40,6 +40,10 @@ What it will and will not do:
     copy over the owner's table. After the lookups, every shared table in the solution is removed
     and added back as a reference (DoNotIncludeSubcomponents, behavior 1). Shared tables are the
     manifest's "sharedTables" patterns plus every lookup target that does not carry the prefix.
+  - A lookup's delete behaviour is its "onDelete": "RemoveLink" (the default), "Restrict" or
+    "Cascade". A lookup to a shared table with no "onDelete" draws a plan warning: RemoveLink there
+    means a delete of a shared row in any app silently blanks this column on every row that pointed
+    at it. The behaviour of an existing relationship is never changed here.
   - A yes/no column should carry "default": true or false; without one every new row reads No, and
     the plan warns. A live default that differs is reported, never changed.
   - Names Dataverse reserves are refused: <table>id, and the virtual <column>name of a lookup,
@@ -232,6 +236,8 @@ def validate(m):
                 if cn and cn != cn.lower():
                     errs.append("%s: lookup schemaName must be all lower case ('%s'); the navigation property "
                                 "takes the schema name's casing" % (cw, cn.lower()))
+                if c.get("onDelete", "RemoveLink") not in ON_DELETE:
+                    errs.append("%s: onDelete must be one of %s" % (cw, ", ".join(ON_DELETE)))
                 if cn and tn and prefix:
                     rel = relationship_name(prefix, tn, cn)
                     if rel in rel_names:
@@ -388,6 +394,9 @@ def table_body(t, lcid):
     return b
 
 
+ON_DELETE = ("RemoveLink", "Restrict", "Cascade")
+
+
 def relationship_body(m, t, c, lcid):
     return {"@odata.type": "Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata",
             "SchemaName": relationship_name(m["publisher"]["prefix"], t["schemaName"], c["schemaName"]),
@@ -395,7 +404,8 @@ def relationship_body(m, t, c, lcid):
             "Lookup": {"@odata.type": "Microsoft.Dynamics.CRM.LookupAttributeMetadata",
                        "SchemaName": c["schemaName"], "DisplayName": label(c["displayName"], lcid),
                        "RequiredLevel": {"Value": "None"}},
-            "CascadeConfiguration": {"Assign": "NoCascade", "Delete": "RemoveLink", "Merge": "NoCascade",
+            "CascadeConfiguration": {"Assign": "NoCascade", "Delete": c.get("onDelete", "RemoveLink"),
+                                     "Merge": "NoCascade",
                                      "Reparent": "NoCascade", "Share": "NoCascade", "Unshare": "NoCascade"}}
 
 
@@ -778,7 +788,13 @@ def build_plan(api, m, ctx):
                                    "deploy its owner first" % (ln, cl, tg))
                 continue
             rel = relationship_name(m["publisher"]["prefix"], t["schemaName"], c["schemaName"])
-            p.add("+ lookup %s.%s -> %s (relationship %s)" % (ln, cl, tg, rel),
+            if "onDelete" not in c and is_shared(tg, shared_patterns(m)[0]):
+                p.warnings.append("%s.%s -> %s has no \"onDelete\": it will be RemoveLink, so deleting a row of the "
+                                  "shared table in any app blanks this column with no error. Set \"Restrict\" "
+                                  "(and deactivate shared rows rather than delete them), or \"RemoveLink\" to "
+                                  "accept it" % (ln, cl, tg))
+            p.add("+ lookup %s.%s -> %s (relationship %s, delete: %s)"
+                  % (ln, cl, tg, rel, c.get("onDelete", "RemoveLink")),
                   lambda t=t, c=c: api.post("RelationshipDefinitions", relationship_body(m, t, c, lcid),
                                             solution=sol_name), ln)
     return p
@@ -1177,7 +1193,8 @@ class FakeDataverse:
             if lk + "name" in self.entities[ref]["attrs"]:   # the platform adds <lookup>name itself
                 return 400, {"error": {"message": "0x80047013 An attribute with the specified name %sname "
                                                   "already exists" % lk}}
-            self.entities[ref]["attrs"][lk] = {"type": "LookupType", "options": {}, "targets": [tgt]}
+            self.entities[ref]["attrs"][lk] = {"type": "LookupType", "options": {}, "targets": [tgt],
+                                               "delete": body["CascadeConfiguration"]["Delete"]}
             self.entities[ref]["attrs"][lk + "name"] = {"type": "StringType", "options": {}, "targets": [],
                                                        "of": lk}
             if sol:   # the platform's side effect: the target joins the solution WITH its schema
@@ -1326,6 +1343,8 @@ def selftest():
                 schemaName="abc_categoryname"),
             "a boolean default that is not true or false": lambda m: m["tables"][0]["columns"][0].update(
                 default="yes"),
+            "a lookup onDelete that is not a delete behaviour": lambda m: m["tables"][1]["columns"][6].update(
+                onDelete="SetNull"),
         }
         for name, mutate in bad_cases.items():
             m = copy.deepcopy(base)
@@ -1360,6 +1379,19 @@ def selftest():
                                      "+ column abc_request.abc_status (choice, 3 options 100000000..100000002)",
                                      "+ lookup abc_request.abc_category -> abc_category",
                                      "+ lookup abc_request.abc_requester -> core_person")))
+        check("plan warns that a lookup to a shared table with no onDelete will be RemoveLink",
+              "abc_request.abc_requester -> core_person has no \"onDelete\"" in out
+              and "abc_category has no \"onDelete\"" not in out)
+        check("plan shows each lookup's delete behaviour", "delete: RemoveLink)" in out)
+        m_rs = copy.deepcopy(base)
+        m_rs["tables"][1]["columns"][6]["onDelete"] = "Restrict"
+        rc, out_rs = go(m_rs, org, "--plan")
+        check("an explicit onDelete silences the warning and shows in the plan",
+              rc == 0 and "has no \"onDelete\"" not in out_rs and "delete: Restrict)" in out_rs)
+        fake_rs, org_rs = env()
+        rc, _ = go(m_rs, org_rs)
+        check("onDelete Restrict reaches the relationship's CascadeConfiguration",
+              rc == 0 and fake_rs.entities["abc_request"]["attrs"]["abc_requester"].get("delete") == "Restrict")
         check("plan says the shared table will be turned into a reference", "core_person" in out
               and "reference" in out)
         check("plan lists a file column and a yes/no column with its default",
@@ -1421,6 +1453,8 @@ def selftest():
         check("choice option values come from the publisher prefix (100000000 + n)",
               req.get("abc_status", {}).get("options") == {100000000: "New", 100000001: "In Progress",
                                                          100000002: "Done"})
+        check("a lookup with no onDelete is created RemoveLink",
+              req.get("abc_requester", {}).get("delete") == "RemoveLink")
         check("lookups created with their targets", req.get("abc_category", {}).get("targets") == ["abc_category"]
               and req.get("abc_requester", {}).get("targets") == ["core_person"])
         check("the post-create 400 on a column is retried, not fatal", rc == 0 and not fake.flaky)

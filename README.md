@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.33.0](https://img.shields.io/badge/plugin-0.33.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.34.0](https://img.shields.io/badge/plugin-0.34.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.33.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.34.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -564,6 +564,8 @@ touches it, it points there rather than repeating it.
 | | [`model-driven-and-docs`](skills/power-platform/references/model-driven-and-docs.md) | Model-driven apps (when they fit, the schema and shared-table rules, Microsoft's app builder, browser verification), forms by script, guides generated from the running product, licensing as a dependency |
 | Power Automate | [`power-automate`](skills/power-platform/references/power-automate.md) | Solution flow JSON, `runtimeSource`, SDK message codes, trigger loops and sentinel guards, activation as the only compile, notification safety, diagnosing a failed run |
 | Reporting | [`reporting`](skills/power-platform/references/reporting.md) | History first (an append-only event table, baseline, labelled demo history, commitment fields); a change log for plan-vs-actual variance, planned against unplanned; in-app charts from galleries and their compile traps; metric definitions (burn-down, burn-up, velocity, say/do, throughput, cycle time, aging, flow, mix); Power BI over a Fabric medallion, embedded in the app or linked with a filter; viewer licensing |
+| | [`fabric-workspace-audit`](skills/power-platform/references/fabric-workspace-audit.md) | Auditing an existing Power BI / Fabric workspace read-only: lineage from M and TMDL, Excel consumers, usage, refresh health, staged retirement |
+| | [`fabric-rebuild-and-parity`](skills/power-platform/references/fabric-rebuild-and-parity.md) | Rebuilding a reporting chain as a medallion: bronze from SharePoint lists and Excel workbooks, verifying against the files, parity with the old model, code-first Python notebooks, reading Delta from Python |
 | Process | [`audits`](skills/power-platform/references/audits.md) | Proving a check can fail, floors against vacuous passes, stale-input detection, comparing the published app with the repo, the audits worth having |
 | | [`project-setup`](skills/power-platform/references/project-setup.md) | Repository layout, bootstrapping with `pac`, the harness (hooks, tools, config and docs installed by `setup-harness.mjs`), generated screens, owner scripts, continuity documents |
 | | [`shared-environments`](skills/power-platform/references/shared-environments.md) | Several apps in one environment: ownership, shared tables, change protocol |

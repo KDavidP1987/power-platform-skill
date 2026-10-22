@@ -4,7 +4,7 @@ A workspace that grew by hand (Gen1 and Gen2 dataflows, Import and Direct Lake m
 Excel workbooks reading dataflows) cannot be cleaned up or replaced safely from its item list. Audit it
 read-only first: what each item is, what it reads, who reads it, whether it refreshes cleanly, and whether
 anyone uses it. Building a new medallion over Dataverse is `reporting.md` section 4; this page is for the
-workspace you inherit.
+workspace you inherit, and `fabric-rebuild-and-parity.md` is the rebuild that follows it.
 
 ## Contents
 
@@ -78,6 +78,12 @@ workbook downloads) got the user throttled: every call returned 406 and pages re
 `/_layouts/15/Throttle.htm`. SharePoint throttles per user, and the same identity usually runs that user's
 scheduled refreshes. Keep 2-3 seconds between calls, stop at the first 429, 406, 503 or Throttle page,
 honour `Retry-After`, never retry in a loop. After about ten minutes single paced calls worked again.
+
+**Resolve SharePoint lists by site and GUID, never by title across sites.** A measured audit matched
+list nodes to lists by title over every site: two busy lists (551 and 31 items) and four lookup lists
+were reported empty, because same-titled empty lists existed on another site, and the wrong counts
+reached the audit document. Match by GUID within the node's own site; fall back to the title only within
+that site; and check any "empty list" finding against the list itself before it goes into a report.
 
 ## 4. Consumers the APIs cannot see: Excel workbooks
 
