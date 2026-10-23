@@ -316,8 +316,15 @@ preconditions change.
    publish drops its co-authoring connection ("There's been a disconnect"), and a held push then
    reports PUSHED CLEAN into a session no Studio is attached to. Measured: that push was lost; a
    reload and a re-push two minutes later saved with 0 differences.
+   **Keep one Studio tab on the app.** A push made while several tabs held it (one had just saved a
+   data source, others were restored from an earlier browser session) saved every screen the push
+   changed with its stacking order reversed: headers drew over buttons, and compile, save, the
+   fresh-session property check and the build stamp were all clean. The same source pushed from one
+   tab kept the order on all 50 screens. Close the others, and do not let the profile restore tabs.
 2. `connect`, then `compile_canvas` - pushing a stamped scratch copy (below). Read line 1 and the
-   error count (`authoring-sessions.md`, section 2). Keep the session held.
+   error count (`authoring-sessions.md`, section 2). Keep the session held. A control NEW to the app
+   is appended as the last child of its parent (on top) whatever its place in the source; write a new
+   control last unless it must sit below something, so source and published order agree.
 3. Prove the push reached Studio's client: select a changed control and read the property back in
    the formula bar, or see the new control in the tree.
 4. Make Studio dirty if Save is disabled (below), then click Save (a real click, section 5) and read
@@ -332,6 +339,8 @@ preconditions change.
    step 4 already persisted the push - never reorder.
 7. Confirm the save from a fresh session (`canvas-mcp.py sync <scratch> --diff` after the reload:
    0 differences), the publish from the `canvasapps` record, then the player and its build stamp.
+   A property diff cannot see stacking order: run `check-published-order.py` on the downloaded
+   package, which names a REVERSED screen (re-push from one tab) apart from an APPENDED control.
 
 **For a data-bound change, walk Studio's Preview between the save proof and Publish.** In the
 reloaded, saved session, Preview (F5) runs against live data: one build proved its new screens there

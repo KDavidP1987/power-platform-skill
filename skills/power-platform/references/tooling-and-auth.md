@@ -246,7 +246,11 @@ admin's access to test as a non-admin. The pattern that kept work moving:
    absolute, quoted paths (the session's working directory may not be the project), a shell-neutral
    form that works from bash or PowerShell (`powershell -NoProfile -ExecutionPolicy Bypass -File
    "<abs path>" -Apply`), and every offline step (generate, pack, gate) already run by you so the
-   command does only the guarded action. For example
+   command does only the guarded action. The `!` line runs in bash where the client's shell is bash:
+   in `powershell -Command "..."` bash expands `$?`, `$LASTEXITCODE` and `$x` to empty first (one
+   line stopped after its plan, the next failed "-eq is not recognized"). Single-quote the `-Command`
+   argument (double quotes inside it), and test `$LASTEXITCODE`, not `$?`, after a script that ends
+   with `exit`. For example
    `! powershell -NoProfile -ExecutionPolicy Bypass -File "C:/.../scripts/migrate/014-build-roles.ps1" -Apply`, with: why it is safe to re-run
    (idempotent, checks live drift first, exactly what it adds or removes), what it unblocks, and the
    **verification with its expected result** ("the security audit's section E goes from 2 findings

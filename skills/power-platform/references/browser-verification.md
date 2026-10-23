@@ -104,7 +104,9 @@ asserting against a sign-in form.
   Chrome handed every automated launch to the person's running Chrome ("Opening in existing browser
   session"), even with a brand-new profile directory. Edge (`--channel msedge`), present on every
   Windows machine, launched normally and signed in to the tenant through the Windows account with
-  no prompt at all. Without an explicit `--channel`, the driver falls back to Edge on that error.
+  no prompt at all. Without an explicit `--channel`, the driver falls back to Edge on that error, and
+  goes to Edge first when the Chrome policy `UserDataDir` is set (`HKLM` or `HKCU\SOFTWARE\Policies\Google\Chrome`):
+  that policy makes Chrome ignore `--user-data-dir`, so every profile fails the same way.
 - **Try headless first.** On a domain-joined Windows machine, the driver signed in headlessly on its
   first run through Windows SSO, with no interactive MFA (environment-specific). Run
   `check --headless` before asking a person to sign in. The mechanism, observed again on an
@@ -370,7 +372,7 @@ evidence. Design each one so the broken version gives a different answer.
   opened a date picker: the text sat over a control whose accessible name was something else. The
   driver now warns when the control under the click is named without the step's text; give the step
   that control's name instead.
-- **A classic CheckBox can take a click without toggling.** Clicking its wrapper reported OK and left
+- **A classic CheckBox can take a click without toggling.** Clicking its wrapper (or its label text) reported OK and left
   the box unticked, so the save wrote No while every step passed; only the Dataverse confirm caught
   it. Click the checkbox by role (`getByRole('checkbox', { name })`), read its state before and
   after, and fail when it did not change. The driver does both, and a write that depends on a
@@ -430,14 +432,21 @@ for (const d of await indexedDB.databases()) indexedDB.deleteDatabase(d.name);  
 ```
 
   Clearing storage re-triggers the connection consent prompt ("This app will be able to: ...").
-  Click Allow, or the app loads half-initialised (the driver accepts it and says so).
+  Click Allow, or the app loads half-initialised (the driver accepts it after its own `--fresh`).
+  **Any other consent prompt is the person's to answer.** The first play after a new connection or
+  flow reached the environment showed one, and every screen behind it looked broken. The driver stops
+  with CONSENT NEEDED (exit 12) instead of reporting screen failures; ask, then run again with
+  `--accept-consent`.
 - **Publish propagation is slow and variable** - measured from 4 to more than 10 minutes, with a
   success toast and nothing written in between (`canvas-shipping.md`, "The player serves the previous
   build"). **A negative result inside the first ten-plus minutes proves nothing.**
 - **The decisive check is the build stamp**: the ship writes a unique id into the packed app; an
   admin-only label renders it; the scenario `expect`s it (top-level `"build"`). Then "the browser is
   on the build I just shipped" is a fact, not a hope. Elapsed time is not evidence; only the stamp
-  is. **Reload and repeat before debugging a formula.**
+  is. **Reload and repeat before debugging a formula.** Read the stamp first on every player check:
+  after one publish the player served the previous build for several reloads while a package check
+  reported the new markers present, because the package check reads what was published, not what
+  the browser runs. A negative result before the stamp matches is not a result.
 - **A stale player is not a failed ship: read the package before shipping again.** After a
   successful publish the player kept serving the previous version through two reloads (about two
   minutes) while the published package already held the new text. `pac canvas download` the app,

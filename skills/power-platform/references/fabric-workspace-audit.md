@@ -27,7 +27,9 @@ workspace you inherit, and `fabric-rebuild-and-parity.md` is the rebuild that fo
 - **Test a guard's refusals on its functions or a `--selftest`, never by running the live apply.** A
   measured "refusal test" tampered with the recorded plan file, missed (wrong file name), and the
   untouched plan matched: the apply ran for real. It was additive that time; against a delete it would
-  not have been.
+  not have been. The same holds for any outward call: a runner's refusal (a flow runner that refuses
+  to start a flow that sends mail) is proved on its function or selftest, never by calling it against
+  production to watch it refuse.
 
 ## 2. Snapshot the workspace
 

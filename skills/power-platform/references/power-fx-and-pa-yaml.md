@@ -223,6 +223,11 @@ in Preview, against the same data, before theorising (`browser-verification.md` 
   meant - OData `ne false` returns the nulls and still delegates. Measure with `$count` for eq true /
   eq false / eq null. Backfilling instead moves `modifiedon` on every row and wakes every update flow
   on the table (`power-automate.md`).
+- **`<> 0` in a delegated `Filter` also returns the blank rows.** `Filter(Lines, Actuals <> 0)` over a
+  Dataverse number column came back with the rows where Actuals is blank, so a "lines without actuals"
+  list built as NOT IN that set showed 1 line instead of 253. It compiles and passes audits. When
+  blank means zero, read the rows, `Coalesce(col, 0)` into a collection and test there; prove any
+  server-side alternative with a count against the Web API. The `.pa.yaml` hook notes the pattern.
 - **A Yes/No column can fail to read in the player with "Invalid data from the network"** - on some
   rows and some column selections only. Reading one flag alone in a `ForAll` failed on app-created
   rows while the same read beside other columns, and `Text()` in Studio, worked; the Web API showed

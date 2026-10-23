@@ -215,6 +215,17 @@ repo's design doc. Keep the Demo source filterable end to end.
   date dimension for zero periods rather than inventing rows.
 - **Run order is bronze, silver, gold, then a model refresh.** Without the refresh, Direct Lake keeps
   serving the old frame and the report shows stale numbers after a successful data run.
+- **After a schema change, sync the SQL endpoint before framing.** Direct Lake reads through the
+  lakehouse's SQL analytics endpoint, whose copy of the Delta schema lags. A refresh about a minute
+  after a notebook added a column failed "We cannot access the source column '<column>' of delta
+  table '<table>'" while the Delta log held the column. Call `POST /v1/workspaces/{ws}/sqlEndpoints/{id}/refreshMetadata?preview=true`
+  (long-running; wait for it) and then refresh; put the call in the model deploy so it is never
+  skipped. Read that error as endpoint lag once the Delta schema shows the column.
+- **The first bronze refresh after a new Dataverse table can fail with no detail.** A Dataflow Gen2
+  over the Dataverse connector failed "Job instance failed without detail error" minutes after a table
+  was created and added to its queries; the same definition passed about ten minutes later with
+  nothing changed. Retry once after a wait before debugging, and keep later layers tolerant of the
+  new table being absent (a guarded read) so they still run on the previous bronze.
 - **A new dataflow's first refresh can fail with no detail; retry once.** When a run fails with a
   real cause, the job API hides the Power Query error and does not say which query broke.
   `fabric.py probe --manifest fabric.json <dataflow>` evaluates every loaded query through the
@@ -298,6 +309,13 @@ repo's design doc. Keep the Demo source filterable end to end.
   `fabric.py deploy` refuses the comparison form in a Dataflow query that reads `Lakehouse.Contents`.
 - **An item description is at most 256 characters.** A longer one on a semantic model create returned
   a bare 400 with no body. `fabric.py deploy` refuses it in the plan.
+- **Read the body of every 4xx.** Fabric puts the reason in the response body, and Windows PowerShell
+  5.1's `Invoke-WebRequest` / `Invoke-RestMethod` throw on a 4xx and show only "(400) Bad Request". A
+  REST helper catches the exception and prints `$_.ErrorDetails.Message` (or the response stream);
+  the 256-character limit above took two blind attempts before the helper did.
+- **A `sortByColumn` needs one sort value per value of the sorted column.** Sorting a quarter label by
+  a period start date (three per quarter) is refused when the model is processed. Sort by a column that
+  is 1:1 with the label, or many-to-one into it (a quarter number).
 - **A measure cannot share a name with a column of its table.** Names are not case-sensitive: a
   measure `Budget` beside a column `budget` was refused ("a column with the same name already
   exists"), and the REST create first returned only a bare 400. When measures take the plain business
@@ -342,9 +360,12 @@ the signed-in person's photo and the organisation's logo, and the workspace rail
   `visualContainerObjects.general.keepLayerOrder = true` on the background visual and on every visual
   laid over it, and turn the background's visual header off. Check: click the band in reading view,
   then confirm the slicers are still there.
-- **Do not promise a default-expanded matrix from PBIR.** `expansionStates` (levels `isCollapsed` /
-  `isPinned`, root `isToggled`) passed schema validation and deployed, and the service still opened the
-  matrix collapsed, in two variants. Put the level readers need first, or say "expand" in a note.
+- **A matrix opens expanded only when every row projection is active.** `expansionStates` alone
+  (levels `isCollapsed` / `isPinned`, root `isToggled`) passed schema validation and deployed, and the
+  service still opened the matrix at its first level, in two variants. What opened it to the last
+  level, as a saved report does: `"active": true` on every projection in `queryState.Rows`, plus
+  `expansionStates` with one level per row field, each `isPinned`, the first carrying
+  `identityKeys`, the last `isCollapsed`. Check it in reading view, not in the definition.
 - **Quarter subtotals after their months, without an expand state.** A Quarter > Month hierarchy puts
   each quarter after its three months only when expanded, which a generated report does not carry. A
   small report-column table (each month, and each quarter after its third month, 16 rows) with a

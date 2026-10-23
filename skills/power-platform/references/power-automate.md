@@ -428,6 +428,14 @@ These pass activation. Some fail every run; the worst succeed and do the wrong t
   `take(string(d), 10)` rather than `substring` (which throws on a short or empty string), and
   `ticks(if(empty(d), '1900-01-01', d))` so a missing date compares instead of failing.
 
+**List rows: `$select` and `$expand` take the Web API's names, not the attribute list's.** A lookup's
+generated name attribute (`app_customername`, listed as a String in attribute metadata) in `$select`
+failed at run time "Could not find a property named ...", and `$expand` needs the navigation
+property's schema-cased name (`app_Customer`, `ReferencingEntityNavigationPropertyName`), not the
+attribute name. Lint and activation both passed; the first two runs failed. Select `_app_customer_value`
+and read its `@OData.Community.Display.V1.FormattedValue` for the name, and before deploying replay
+each List rows action's `$select`, `$filter` and `$expand` as a Web API GET (dynamic parts filled in).
+
 ## 8. An import applies the repo's on/off state
 
 Each flow's `.json.data.xml` sidecar carries `<StateCode>` and `<StatusCode>`, and an import applies
@@ -720,6 +728,10 @@ does aggregates and joins:
   </link-entity>
 </entity></fetch>
 ```
+
+**`ne` keeps the nulls.** `<condition attribute="x" operator="ne" value="0"/>` in an aggregate counted
+268 of 269 rows "with a value" against 16 real ones: every null passed. Pair it with
+`<condition attribute="x" operator="not-null"/>` whenever "has a value" is meant.
 
 Chained `link-entity` flattens a two-hop join (an order line, its order, that order's account)
 into aliased columns on one row, which `$expand`

@@ -116,7 +116,18 @@ run the service reported green.
 - **M is not SQL.** In M `null <> null` is false and `null <> "x"` is true (SQL gives null for both;
   `IS DISTINCT FROM` is not the same either); `Text.Contains(null, ..)` is null; a lookup returning `""`
   is not one returning null; a logical column typed text lands as `"-1"` / `"0"`; Int64 conversion rounds
-  half to even. Port each comparison with explicit null rules.
+  half to even. Port each comparison with explicit null rules. M also has a null-coalescing `x ?? y`
+  (measured in a Dataflow Gen2 query), which reads better than `if x = null then y else x`.
+- **A parity check against a live model needs one source moment.** A production model that refreshes
+  hourly reads the source files as they are now; bronze reads them as they were at its last load. One
+  check failed by $21,851 because two workbooks were edited after the bronze load (their modified time
+  proved it). Load bronze immediately before the comparison, or prove from the files' modified times
+  that nothing changed in between, before reading a difference as a defect.
+- **Record a failed run by its job instance, not by the error's request id.** The `requestId` inside a
+  job's `failureReason` belongs to the API call that read it and changes on every GET, so a note that
+  quoted it named no run (and the failure it described had been fixed two runs earlier). Record the
+  job instance id and its start time; to settle what ran, list the item's job instances (id, status,
+  start, end) and match the deployed definition to the build that produced it.
 - **Compare unrounded group sums within half a cent.** Rounding each group before comparing reported 703
   false one-cent differences (the model sums doubles; a group can sit 1e-9 either side of a boundary).
 - **An index added after a sort is a row surrogate.** `Table.AddIndexColumn` after `Table.Sort` numbers

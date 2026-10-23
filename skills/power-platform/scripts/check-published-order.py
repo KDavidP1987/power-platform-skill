@@ -12,6 +12,14 @@ Usage:
   python scripts/check-published-order.py --selftest
 
 The repo Src defaults to canvasSrc in scripts/canvas-app.json.
+Each finding is named for its cause:
+  REVERSED   the published siblings are in the opposite order (more than half the pairs inverted): a push
+             made while several Studio tabs held the app saved the screens it changed upside down. Re-push
+             from ONE tab with no restored tabs, save, publish, and run this again.
+  APPENDED   one control sits last in the published order but not in the repo: a push adds a NEW control
+             at the end of its parent whatever its place in the source. Move it last in the source (unless
+             it must sit below something) so the two agree, or reorder it in Studio.
+  ORDER      any other difference: a control moved under another.
 Exit codes: 0 order matches, 1 a container is out of order, 2 nothing compared.
 """
 import json
@@ -39,6 +47,20 @@ def siblings(path):
     return out
 
 
+def diagnose(repo_order, pub_order):
+    """'same', 'reversed', 'appended' or 'moved' for two orders of the same names."""
+    if repo_order == pub_order:
+        return 'same'
+    pos = {k: i for i, k in enumerate(pub_order)}
+    pairs = [(a, b) for i, a in enumerate(repo_order) for b in repo_order[i + 1:]]
+    if len(repo_order) > 2 and sum(pos[a] > pos[b] for a, b in pairs) * 2 > len(pairs):
+        return 'reversed'
+    last = pub_order[-1]
+    if [k for k in repo_order if k != last] + [last] == pub_order:
+        return 'appended'
+    return 'moved'
+
+
 def compare(pub, repo, out=print):
     bad = compared = 0
     for f in sorted(os.listdir(repo)):
@@ -52,9 +74,17 @@ def compare(pub, repo, out=print):
             pub_order = [k for k in pk if k in common]
             if common != pub_order:
                 bad += 1
+                kind = diagnose(common, pub_order)
                 pos = {k: i for i, k in enumerate(pub_order)}
                 a, b = next((a, b) for i, a in enumerate(common) for b in common[i + 1:] if pos[a] > pos[b])
-                out(f'ORDER  {f}  {parent}: repo has {a} before {b}, published has it after (so {a} draws on top)')
+                if kind == 'reversed':
+                    out(f'REVERSED  {f}  {parent}: the published order is upside down ({common[0]} now draws on top) - '
+                        'a push from several Studio tabs; re-push from one tab')
+                elif kind == 'appended':
+                    out(f'APPENDED  {f}  {parent}: {pub_order[-1]} is last (on top) in the published app only; if it is new in '
+                        'this push, the push appended it - move it last in the source or reorder it in Studio')
+                else:
+                    out(f'ORDER  {f}  {parent}: repo has {a} before {b}, published has it after (so {a} draws on top)')
     return bad, compared
 
 
@@ -63,6 +93,13 @@ def selftest():
         return 'Screens:\n  Home:\n    Children:\n' + ''.join(
             f'      - {n}:\n          Control: Label@2.5.1\n' for n in order)
     ok = True
+    for name, repo, pub, want in [('diagnose reversed', ['a', 'b', 'c', 'd'], ['d', 'c', 'b', 'a'], 'reversed'),
+                                  ('diagnose appended', ['a', 'new', 'b', 'c'], ['a', 'b', 'c', 'new'], 'appended'),
+                                  ('diagnose moved', ['a', 'b', 'c', 'd'], ['b', 'a', 'c', 'd'], 'moved'),
+                                  ('diagnose same', ['a', 'b'], ['a', 'b'], 'same')]:
+        good = diagnose(repo, pub) == want
+        ok &= good
+        print(('ok    ' if good else 'FAIL  ') + name)
     for name, repo, pub, want in [('same order', ['lblA', 'galB', 'cardC'], ['lblA', 'galB', 'cardC'], 0),
                                   ('card moved under gallery', ['lblA', 'galB', 'cardC'], ['lblA', 'cardC', 'galB'], 1)]:
         with tempfile.TemporaryDirectory() as t:

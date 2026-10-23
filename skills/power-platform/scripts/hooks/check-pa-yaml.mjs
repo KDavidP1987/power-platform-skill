@@ -12,7 +12,8 @@
 // compiles and cannot catch the case it was written for. Notes do not block (formulaNotes): a
 // pattern that is wrong in the shapes seen so far but right in others - a Yes/No read through
 // Coalesce, two queued Select() calls, a month name taken from a period's start date, a currency
-// sign in front of a value that can be blank, a With() alias in a delegated search. The hook passes
+// sign in front of a value that can be blank, a With() alias in a delegated search, <> 0 in a Filter
+// over a data source (Dataverse returns the blank rows too). The hook passes
 // them back as context; a direct run prints WARN.
 //
 // The file ceiling is a property of the Src folder, not of a file (ceilingCheck): a direct run
@@ -345,6 +346,24 @@ export function formulaNotes(text) {
           `Sum over no rows it renders a bare sign. Coalesce(${p}, 0) first, or return "-" for blank.`);
       }
     }
+    // f. <column> <> 0 inside a Filter over a data source: delegated to Dataverse, it also returns the rows
+    //    where the column is BLANK (a "lines without actuals" list showed 1 line instead of 253). A collection
+    //    (col...) is filtered in the app and is not affected.
+    for (const m of code.matchAll(/(^|[^A-Za-z0-9_.'])Filter\s*\(/g)) {
+      const open = code.indexOf('(', m.index + m[1].length);
+      const close = closeOf(code, open);
+      if (close < 0) continue;
+      const args = splitTop(code.slice(open + 1, close), ',').map((a) => a.trim());
+      if (args.length < 2 || !/^('[^']+'|[A-Z][A-Za-z0-9_]*)$/.test(args[0])) continue;
+      for (const c of args.slice(1)) {
+        const z = c.match(/(^|[^A-Za-z0-9_.(])((?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:'[^']+'|[A-Za-z_][A-Za-z0-9_]*))\s*<>\s*0(?![\d.])/);
+        if (!z || /Coalesce\s*\($/.test(c.slice(0, z.index + z[1].length))) continue;
+        notes.push(`${lineAt(f, code, m.index + m[1].length)}: ${f.key} filters ${args[0]} on ${z[2]} <> 0. Delegated to Dataverse, <> 0 also returns ` +
+          `the rows where ${z[2]} is blank. If blank means zero, load the rows, Coalesce(${z[2]}, 0) into a collection and test there, or add ` +
+          `!IsBlank(${z[2]}) only after proving it delegates for this column (power-fx-and-pa-yaml.md, delegation).`);
+        break;
+      }
+    }
     // e. A With() alias as a delegated search value: With({q: Trim(txt.Value)}, Filter(T, StartsWith(Col, q)))
     //    compiles, but the compiler reads q as a field and does not delegate. Use txt.Value directly.
     for (const w of code.matchAll(/(^|[^A-Za-z0-9_.])With\s*\(\s*\{/g)) {
@@ -522,6 +541,7 @@ function selftest() {
     '              =With({q: Trim(txtFind.Value)}, Filter(Vendors, StartsWith(\'Vendor Name\', q)))',
     '            Formulas: |-',
     '              =MoneyShort(v: Number): Text = "$" & Text(v / 1000, "#,##0") & "K";',
+    "            HintText: =CountRows(Filter('Cost Lines', Actuals <> 0))",
   ].join('\n');
   const noteGood = [
     '          Properties:',
@@ -545,9 +565,10 @@ function selftest() {
     // A Yes/No column this app surfaces as a boolean: used bare in a Filter, so Coalesce(..., false) is right.
     "            Items: =Filter(People, Active, 'Completes A Timesheet')",
     "            Default: =Coalesce(ThisItem.'Completes A Timesheet', false)",
+    '            HintText: =CountRows(Filter(colLines, Actuals <> 0))',
   ].join('\n');
   const nb = formulaNotes(noteBad), ng = formulaNotes(noteGood);
-  const notesOk = nb.length === 6 && ['through Coalesce', 'Select()', 'names a month', 'before Text(Sum', 'MoneyShort()', 'With() alias']
+  const notesOk = nb.length === 7 && ['through Coalesce', 'Select()', 'names a month', 'before Text(Sum', 'MoneyShort()', 'With() alias', 'Actuals <> 0']
     .every((w) => nb.some((x) => x.includes(w))) && ng.length === 0;
   // --fix: the colon line becomes a block scalar that passes rule 1; a line with " #" is left alone.
   const fx = fixColons(['    Children:', '          Properties:', '            Text: ="Total: " & gblTotal', '            Tooltip: ="No: " & " #" & n'].join('\r\n'));
@@ -584,10 +605,10 @@ function selftest() {
   const directOk = at50.status === 0 && (at50.stdout.match(/^WARN .*ceiling/gm) || []).length === 1 && !/^FAIL/m.test(at50.stdout)
     && at51.status === 1 && (at51.stdout.match(/^FAIL .*ceiling/gm) || []).length === 1 && /0 with faults/.test(at51.stdout);
   const ok = missing.length === 0 && pg.length === 0 && pluginOk && notesOk && fixOk && noteHookOk && ceilingOk && directOk;
-  console.log(ok ? `selftest ok: bad fixture -> ${pb.length} findings, good fixture -> 0, notes 6 on bad and 0 on good, ceiling once per folder (fail above, warn at), --fix converts and skips " #", ` +
+  console.log(ok ? `selftest ok: bad fixture -> ${pb.length} findings, good fixture -> 0, notes 7 on bad and 0 on good, ceiling once per folder (fail above, warn at), --fix converts and skips " #", ` +
                    `plugin mode runs without a harness or beside a project's own hook and stands down only for its harness copy, notes do not block the hook`
                  : `selftest FAILED: missing [${missing.join(', ')}] on bad; ${pg.length} false finding(s) on good:\n  ${pg.join('\n  ')}` +
-                   (notesOk ? '' : `\n  notes: ${nb.length} on bad (want 6), ${ng.length} on good (want 0):\n  ${[...nb, ...ng].join('\n  ')}`) +
+                   (notesOk ? '' : `\n  notes: ${nb.length} on bad (want 7), ${ng.length} on good (want 0):\n  ${[...nb, ...ng].join('\n  ')}`) +
                    (ceilingOk ? '' : `\n  ceilingCheck: 51 ${JSON.stringify(c51)}, 50 ${JSON.stringify(c50)}, 45 ${JSON.stringify(c45)}, 12 ${JSON.stringify(c12)}`) +
                    (directOk ? '' : `\n  direct at 50: exit ${at50.status}\n${at50.stdout}\n  direct at 51: exit ${at51.status}\n${at51.stdout}`) +
                    (fixOk ? '' : `\n  --fix: fixed ${fx.fixed}, skipped [${fx.skipped}]:\n${fx.text}`) +

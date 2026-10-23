@@ -679,8 +679,21 @@ export function evaluatePre(root, input = {}, env = process.env) {
 // Does this shell command RUN the schema deployer for real? Only a segment whose program is the script
 // (or an interpreter given it) counts, and --plan, --selftest and --help are dry. A git diff, a grep or a
 // commit message that merely names the file is not a deploy (the gate blocked reading it).
+// A heredoc body is data handed to another program (a Python edit of a markdown log that named the
+// deployer in a table cell was denied as a deploy), so it is removed before the command is read.
+export function withoutHeredocs(cmd) {
+  const lines = String(cmd).split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    out.push(lines[i]);
+    const m = lines[i].match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
+    if (!m) continue;
+    while (i + 1 < lines.length && lines[i + 1].trim() !== m[2]) i++;
+  }
+  return out.join('\n');
+}
 export function runsDeployer(cmd) {
-  for (const seg of String(cmd).split(/&&|\|\||[;|&\n]/)) {
+  for (const seg of withoutHeredocs(cmd).split(/&&|\|\||[;|&\n]/)) {
     const toks = seg.trim().split(/\s+/).filter((t) => t && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)).map((t) => t.replace(/^["']|["']$/g, ''));
     if (!toks.length) continue;
     const prog = path.basename(toks[0]).toLowerCase();
@@ -772,6 +785,8 @@ function selftest() {
     check('A: other tools are allowed', pre('Read', { file_path: path.join(tmp, 'canvas/app/Src/Loans.pa.yaml') }), silent);
     check('B: deploy-tables without a plan is denied', pre('Bash', { command: 'python scripts/deploy-tables.py --solution X' }), denies('plan before schema', 'acceptance-contract.md'));
     check('B: reading or diffing the deployer is not a deploy', pre('Bash', { command: 'git diff main -- scripts/deploy-tables.py && grep -n default scripts/deploy-tables.py' }), silent);
+    check('B: a heredoc that only names the deployer is not a deploy', pre('Bash', { command: "python - <<'EOF'\ns = open('LOG.md').read()\nrow = '| deploy-tables.py --apply denied |'\nEOF" }), silent);
+    check('B: a deploy after a heredoc is still a deploy', pre('Bash', { command: "cat > n.txt <<EOF\nnote\nEOF\npython scripts/deploy-tables.py --manifest t.json" }), denies('plan before schema'));
     check('B: the deployer selftest is not a deploy', pre('Bash', { command: 'cd x && python scripts/deploy-tables.py --selftest' }), silent);
     check('B: a deploy after a cd is still a deploy', pre('Bash', { command: 'cd x && python3 "scripts/deploy-tables.py" --manifest t.json' }), denies('plan before schema'));
     check('D: an inline curl DELETE to the Web API is denied', pre('Bash', { command: "curl -s -X DELETE -H \"Authorization: Bearer $T\" 'https://org.crm.dynamics.com/api/data/v9.2/app_orders(1f0e)'" }), denies('select before apply', 'GET first'));

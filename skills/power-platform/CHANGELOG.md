@@ -11,6 +11,74 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-23
+
+Lessons from three projects folded in. Where a tool could catch or prevent the fault, the tool changed;
+where only judgement can, the reference changed. Every tool change has self-tests in CI.
+
+### Added
+
+- `check-canvas-format.mjs`: the error `button-appearance-on-dark`. A modern Button with Appearance
+  Secondary, Subtle or Transparent draws theme ink with no Fill or Color of its own, so the contrast pass
+  never saw it. A Secondary Delete button on a navy header was unreadable in the player and passed. The
+  check now composites what is behind the button and flags it below 4.5:1.
+- `check-pa-yaml.mjs` (note, does not block): `<column> <> 0` inside a `Filter` over a data source. In a
+  measured case the delegated filter also returned the blank rows, and a list showed 1 line instead of 253.
+- `canvas-browser.mjs --accept-consent`. play and walk now stop with CONSENT NEEDED (exit 12) at a
+  connection consent prompt they did not cause themselves. The first play after a new connection reached
+  the environment showed one, and every screen behind it looked broken. The prompt is still accepted after
+  the driver's own `--fresh`.
+
+### Changed
+
+- `check-published-order.py` names its findings by cause:
+  - `REVERSED`: the published stacking order is upside down. This came from a push made while several
+    Studio tabs held the app; it reversed four screens while compile, save and the build stamp were all
+    clean.
+  - `APPENDED`: a control is last only in the published app. A push adds a new control at the end
+    whatever its place in the source.
+  - `ORDER`: anything else.
+- `check-canvas-format.mjs` skips its 390 px pass when the layout width has a floor above it
+  (`Max(1230, App.Width)`), and says so in the summary. Findings at a width the app never renders were
+  noise.
+- `canvas-browser.mjs` choosing a browser:
+  - It goes to Edge before trying Chrome when the Chrome policy `UserDataDir` is set. That policy makes
+    every Chrome profile open in the person's own browser.
+  - `save` dismisses first-run dialogs in every frame, not only the frame that holds Save.
+- `flow-runs.py` and `run-flow.py` replace `{resource}` in `--token-cmd`, as `deploy-flows.py` does, so
+  one shared token command serves every script.
+- The plugin's order gate ignores heredoc bodies. A Python edit of a markdown log that named the table
+  deployer in a table cell was denied as a deploy.
+- References:
+  - `power-fx-and-pa-yaml.md`: `<> 0` in a delegated Filter.
+  - `power-automate.md`:
+    - FetchXML `ne` keeps nulls (pair it with `not-null`).
+    - A List rows `$select` of a lookup's name attribute fails at run time, and `$expand` takes the
+      navigation property's name.
+  - `reporting.md`:
+    - Sync the SQL endpoint (`refreshMetadata`) before framing a Direct Lake model after a schema change.
+    - A first bronze refresh after a new Dataverse table can fail with no detail.
+    - Read the body of every Fabric 4xx.
+    - A `sortByColumn` needs one sort value per value.
+    - A matrix opens expanded once every row projection is `active`. This corrects the earlier advice
+      that it could not be done from PBIR.
+  - `fabric-rebuild-and-parity.md`:
+    - Parity against a live model needs one source moment.
+    - Record a failed run by its job instance, not the error's request id.
+    - M's `??` operator.
+  - `canvas-shipping.md`:
+    - Keep one Studio tab on the app during a push.
+    - Write a new control last.
+    - Run the order check after publishing.
+  - `browser-verification.md`:
+    - Read the build stamp before judging any player result; a package check proves what was published,
+      not what the player loaded.
+    - The Chrome policy and the consent stop.
+  - `tooling-and-auth.md`: a `!` line that calls `powershell -Command` single-quotes its argument, because
+    bash expands `$?` and `$LASTEXITCODE` first.
+  - `fabric-workspace-audit.md`: a refusal is proved on the function for any outward call, not only for an
+    apply.
+
 ## [0.36.0] - 2026-10-22
 
 The skill now tells its users when it is out of date, every week until they update, and carries its own

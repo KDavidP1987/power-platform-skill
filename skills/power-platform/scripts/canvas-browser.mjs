@@ -71,6 +71,8 @@
 //   walk verbs for tall screens: "scroll" falls back to the largest inner scroller when the document does
 //        not move; "scrollto": "<text>" brings below-fold text to the centre (see the verb list below)
 //        --fresh          delete the player's IndexedDB/Cache Storage before loading (stale build)
+//        --accept-consent accept a connection consent prompt; without it (and without --fresh) a prompt stops
+//                         the walk with CONSENT NEEDED, exit 12 - the person decides
 //        --allow-writes   required to walk a scenario that declares "writes": true
 //        --skip-writes    skip those scenarios instead (a read-only pass, e.g. the reviewer's)
 //   publish: refused when the source is unchanged (--again), and from the third publish until
@@ -297,13 +299,23 @@ const PROFILE = resolve(String(flag('profile', join(homedir(), '.canvas-browser-
 // "Opening in existing browser session" and the driver falls back to Edge. One stray tab per command
 // left 20+ tabs in an owner's Chrome in one session, and the driver's tab hygiene never sees them. So
 // with Chrome running, go straight to Edge, and remember the choice beside the profile (a profile is
-// then always opened by the same browser). --channel always wins.
+// then always opened by the same browser). --channel always wins. The Chrome enterprise policy UserDataDir
+// does the same even with Chrome closed: Chrome ignores --user-data-dir and every profile directory fails
+// "Opening in existing browser session"; with the policy set, go to Edge before trying.
 const CHANNEL_FILE = PROFILE.replace(/[\\/]+$/, '') + '.channel';
-export function pickChannel({ given, requested, platform, sticky, chromeRunning }) {
+export function pickChannel({ given, requested, platform, sticky, chromeRunning, chromePolicyDir = () => false }) {
   if (given) return { channel: requested, remember: false };
   if (sticky) return { channel: sticky, remember: false };
-  if (requested === 'chrome' && platform === 'win32' && chromeRunning()) return { channel: 'msedge', remember: true };
+  if (requested === 'chrome' && platform === 'win32' && (chromePolicyDir() || chromeRunning())) return { channel: 'msedge', remember: true };
   return { channel: requested, remember: false };
+}
+function chromePolicyDir() {
+  for (const hive of ['HKLM', 'HKCU']) {
+    try {
+      if (/UserDataDir/i.test(execSync(`reg query "${hive}\\SOFTWARE\\Policies\\Google\\Chrome" /v UserDataDir`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 }))) return true;
+    } catch { /* no policy in this hive */ }
+  }
+  return false;
 }
 function chromeRunning() {
   try {
@@ -317,8 +329,8 @@ function resolveChannel() {
   CHANNEL_PICKED = true;
   let sticky = '';
   try { sticky = readFileSync(CHANNEL_FILE, 'utf8').trim(); } catch { /* first run */ }
-  const d = pickChannel({ given: CHANNEL_GIVEN, requested: CHANNEL, platform: process.platform, sticky, chromeRunning });
-  if (d.channel !== CHANNEL) log(`  Using ${d.channel === 'msedge' ? 'Edge' : d.channel} (${sticky ? CHANNEL_FILE : 'your Chrome is running; a Chrome launch would open a tab in it'}).`);
+  const d = pickChannel({ given: CHANNEL_GIVEN, requested: CHANNEL, platform: process.platform, sticky, chromeRunning, chromePolicyDir });
+  if (d.channel !== CHANNEL) log(`  Using ${d.channel === 'msedge' ? 'Edge' : d.channel} (${sticky ? CHANNEL_FILE : 'Chrome is running or its UserDataDir policy is set; a Chrome launch would open a tab in your Chrome'}).`);
   CHANNEL = d.channel;
   if (d.remember) rememberChannel(CHANNEL);
 }
@@ -482,16 +494,29 @@ async function clearAppCache(page) {
   return deleted;
 }
 
-// Clearing storage re-triggers the connection consent prompt ("This app will be able to: ...").
-// Left unanswered, the app loads half-initialised. Accept it, and say so in the log.
+// Clearing storage re-triggers the connection consent prompt ("This app will be able to: ..."), and
+// left unanswered the app loads half-initialised: after --fresh the driver accepts it. Any other prompt
+// (the first play after a new connection or flow reached the environment) grants access in the person's
+// name, so the walk stops with CONSENT NEEDED (exit 12) instead of reporting every screen behind it as
+// broken; --accept-consent accepts it once the person has agreed. Pure.
+let CONSENT_EXPECTED = false;
+export function consentAction({ expected, acceptFlag }) { return expected || acceptFlag ? 'accept' : 'stop'; }
 async function acceptConsent(page) {
   for (const f of page.frames()) {
     for (const c of locsOf(f, 'player.consentAllow')) {
       try {
         const allow = c.first();
         if (await allow.count() > 0 && await allow.isVisible()) {
+          if (consentAction({ expected: CONSENT_EXPECTED, acceptFlag: has('accept-consent') }) === 'stop') {
+            log('  !! CONSENT NEEDED: the player asks to allow the app\'s connections (a new connection or flow reached');
+            log('     the environment). Nothing behind the prompt has been checked. Ask the person, then run again with');
+            log('     --accept-consent (or let them press Allow once in this profile).');
+            await capture(page, 'consent-needed');
+            process.exitCode = 12;
+            return 'needed';
+          }
           await allow.click({ timeout: 10000 });
-          log('  accepted the connection consent prompt (expected after clearing storage)');
+          log('  accepted the connection consent prompt (' + (CONSENT_EXPECTED ? 'expected after clearing storage' : '--accept-consent') + ')');
           return true;
         }
       } catch { /* detached */ }
@@ -510,7 +535,7 @@ async function appFrame(page) {
         if (await f.locator(CONTROL).count() > 0) return f;
       } catch { /* detached mid-check */ }
     }
-    if (i % 3 === 2) await acceptConsent(page);   // a consent prompt holds the app back
+    if (i % 3 === 2 && await acceptConsent(page) === 'needed') return null;   // a consent prompt holds the app back
     await page.waitForTimeout(2000);
   }
   return null;
@@ -1653,6 +1678,9 @@ function selftest() {
     ['channel: Chrome running on Windows -> Edge, remembered', (() => { const d = pickChannel({ given: false, requested: 'chrome', platform: 'win32', sticky: '', chromeRunning: () => true }); return d.channel === 'msedge' && d.remember; })()],
     ['channel: no Chrome running -> Chrome', pickChannel({ given: false, requested: 'chrome', platform: 'win32', sticky: '', chromeRunning: () => false }).channel === 'chrome'],
     ['channel: the remembered browser wins', pickChannel({ given: false, requested: 'chrome', platform: 'win32', sticky: 'msedge', chromeRunning: () => false }).channel === 'msedge'],
+    ['channel: Chrome UserDataDir policy -> Edge, remembered', (() => { const d = pickChannel({ given: false, requested: 'chrome', platform: 'win32', sticky: '', chromeRunning: () => false, chromePolicyDir: () => true }); return d.channel === 'msedge' && d.remember; })()],
+    ['consent: unexpected prompt stops the walk', consentAction({ expected: false, acceptFlag: false }) === 'stop'],
+    ['consent: accepted after --fresh or with --accept-consent', consentAction({ expected: true, acceptFlag: false }) === 'accept' && consentAction({ expected: false, acceptFlag: true }) === 'accept'],
     ['channel: --channel always wins', pickChannel({ given: true, requested: 'chrome', platform: 'win32', sticky: 'msedge', chromeRunning: () => true }).channel === 'chrome'],
     ['channel: not Windows -> no process check', pickChannel({ given: false, requested: 'chrome', platform: 'darwin', sticky: '', chromeRunning: () => { throw new Error('checked'); } }).channel === 'chrome'],
   ];
@@ -1758,6 +1786,7 @@ async function openPlayer(ctx, errors, trace) {
     // Let the frames attach so their origins can be cleared too, then clear and reload.
     await page.waitForTimeout(8000);
     const n = await clearAppCache(page);
+    CONSENT_EXPECTED = true;
     log('  --fresh: deleted ' + n + ' IndexedDB database(s) and the Cache Storage; reloading');
     await page.reload({ waitUntil: 'domcontentloaded' });
   }
@@ -2380,7 +2409,8 @@ async function cmdSave() {
     if (editorTornDown(scan)) log(TORN_DOWN_NOTE);
     await capture(studio, 'save-not-found'); await browser.close(); process.exitCode = 4; return;
   }
-  await dismissBubbles(hit.frame);
+  // The welcome dialog was measured over the command bar from another frame: dismiss in every frame.
+  for (const f of new Set([hit.frame, ...studio.frames()])) await dismissBubbles(f).catch(() => 0);
   if (await hit.frame.locator(css('studio.closePreview')).count() > 0) {
     log('  !! Studio is in PREVIEW. A push that landed while in Preview was lost on Save twice when measured;');
     log('     exit Preview, read the change back in the formula bar, then save.');

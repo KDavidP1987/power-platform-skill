@@ -526,6 +526,13 @@ export function flatten(doc, file) {
 }
 
 // Numeric constants defined once: Set(name, number) in App.OnStart, Named Formulas "name = number;".
+// A layout width with a floor (lyW = Max(1230, App.Width)) never renders below it: the 390 px pass on such
+// an app reported contrast and fit findings no one can see. The largest floor found, or 0.
+export function widthFloor(appText) {
+  let n = 0;
+  for (const m of String(appText || '').matchAll(/Max\(\s*(\d+)\s*,\s*App\.Width\s*\)|Max\(\s*App\.Width\s*,\s*(\d+)\s*\)/g)) n = Math.max(n, Number(m[1] || m[2]));
+  return n;
+}
 export function readConstants(appText) {
   const consts = new Map();
   if (!appText) return consts;
@@ -959,7 +966,9 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
         `reaches nothing, and a walk that clicks "${t}" can land on the container instead. Start the label with the caption ("${t} - ...").` });
   }
   // ---- text contrast ----
-  const WIDTHS = [...new Set([screenWidth, 390])];
+  const floor = widthFloor(appText);
+  stats.widthFloor = floor > 390 ? floor : 0;
+  const WIDTHS = [...new Set([screenWidth, ...(stats.widthFloor ? [] : [390])])];
   const constsAt = new Map(WIDTHS.map((w) => [w, evalFormulaConstants(appText, readConstants(appText), w, screenHeight)]));
   const geoAt = new Map();
   function gnum(c, k, w) {
@@ -1091,6 +1100,28 @@ export function analyse(files, { schema = null, screenWidth = 1366, screenHeight
           `${need === 3 ? 'large text needs 3:1' : 'text needs 4.5:1 (3:1 only from 18 pt, or 14 pt bold)'}. Use a darker ink token on light grounds, or a lighter one on dark grounds.` });
     } else if (unsure) skip(unsure);
     else stats.contrastExamined++;
+  }
+  // ---- modern buttons whose appearance draws dark text on what is behind them ----
+  // Secondary, Subtle and Transparent take their text colour from the theme (dark ink) and have no explicit
+  // Fill or Color to compare, so the contrast pass above never sees them. Measured: a Secondary Delete
+  // button on a navy header rendered dark on navy and was unreadable in the player.
+  const INK = [36, 36, 36, 1];
+  for (const c of all) {
+    if (hidden(c) || !/^(Button|ModernButton)(@|$)/i.test(c.control) || c.props.Color || c.props.FontColor || c.props.BasePaletteColor) continue;
+    const ap = (c.props.Appearance?.v || '').match(/\.(Secondary|Subtle|Transparent)\b/);
+    if (!ap) continue;
+    for (const w of WIDTHS) {
+      const bx = boxAt(c, w);
+      if (!bx || gnum(c, 'Visible', w) === 0) continue;
+      const bg = behind(c, w, bx);
+      if (!bg.sure || !bg.opts.length || bg.opts.some((x) => !x.rgba)) continue;
+      const r = Math.min(...bg.opts.map((x) => contrastRatio(INK, x.rgba)));
+      if (r >= 4.5) continue;
+      findings.push({ level: 'error', code: 'button-appearance-on-dark', file: c.file, line: c.props.Appearance.line || c.line, control: c.name,
+        msg: `${c.name}: Appearance ${ap[1]} draws theme ink (dark text) on ${rgbaText(bg.opts[0].rgba)} behind it (${r.toFixed(2)}:1 at ${w} px). ` +
+          'Use Appearance Primary (or a token Fill and Color) on a dark band, or move the button off it.' });
+      break;
+    }
   }
   // ---- lists: can the user narrow this gallery? ----
   const inputs = new Set(all.filter((c) => INPUT_CONTROLS.test(c.control)).map((c) => c.name));
@@ -1250,7 +1281,8 @@ function report(res, json) {
     `${stats.literalColours} literal colour(s), ${stats.literalFonts} literal font(s); ${stats.galleries} gallery(ies), ` +
     `${stats.listsWithoutFilter} with no filter, search or grouping (advisory); ${stats.literalMeasured} literal text control(s) measured; ` +
     `${stats.nameChecked} control(s) needing a name, ${stats.unnamed} without one; text contrast: ${stats.contrastExamined} examined, ` +
-    `${stats.lowContrast} below the minimum, ${stats.contrastUnexamined} not examined (colour or backdrop unresolved - not a pass).`);
+    `${stats.lowContrast} below the minimum, ${stats.contrastUnexamined} not examined (colour or backdrop unresolved - not a pass).` +
+    (stats.widthFloor ? ` 390 px not checked: the layout width has a ${stats.widthFloor} px floor (Max(${stats.widthFloor}, App.Width)).` : ''));
   console.log('Room is an estimate that errs toward "does not fit"; confirm a borderline case in the running app.');
   const v = vacuity(stats);
   if (v.level !== 'ok') console.log('\n!! ' + v.msg);
@@ -1484,6 +1516,13 @@ function selftest() {
   expect('name: hidden input', free([['txtOld', 'TextInput', { ...box, Visible: '=false' }]]), []);
   expect('name: label that does not contain the caption', free([['btnAdd', 'Button', { ...box, Text: '="Add manual actual"', AccessibleLabel: '="Record a cost"', OnSelect: '=Set(x, 1)' }]]), ['label-not-in-name']);
   expect('name: label that starts with the caption', free([['btnAdd', 'Button', { ...box, Text: '="Add manual actual"', AccessibleLabel: '="Add manual actual - opens the cost form"', OnSelect: '=Set(x, 1)' }]]), []);
+  // Modern button appearances on a dark band (navy header): Secondary is flagged, Primary is not.
+  const band = (ap) => free([['recHead', 'Rectangle', { X: '=0', Y: '=0', Width: '=App.Width', Height: '=60', Fill: '=clrNavy' }],
+    ['btnDel', 'Button@0.0.45', { X: '=20', Y: '=10', Width: '=120', Height: '=40', Text: '="Delete"', OnSelect: '=Set(x, 1)', Appearance: `='ButtonCanvas.Appearance'.${ap}` }]]);
+  expect('button: Secondary on a navy band', band('Secondary'), ['button-appearance-on-dark']);
+  expect('button: Primary on a navy band', band('Primary'), []);
+  expect('button: Secondary on white', free([['btnDel', 'Button@0.0.45', { X: '=20', Y: '=10', Width: '=120', Height: '=40', Text: '="Delete"', OnSelect: '=Set(x, 1)', Appearance: "='ButtonCanvas.Appearance'.Secondary" }]]), []);
+  if (widthFloor('lyW = Max(1230, App.Width);') !== 1230 || widthFloor('lyW = Max(App.Width - 18, 320);') !== 0) fails.push('widthFloor: Max(1230, App.Width) is a 1230 floor; Max(App.Width - 18, 320) is none');
   // Contrast: grey 150 on the default white screen is 2.96:1, grey 130 is 3.95:1 (fails normal, passes large).
   expect('contrast: light grey on white', free([['lblHint', 'Label', { ...box, Text: '="Due"', Color: '=RGBA(150, 150, 150, 1)' }]]), ['low-contrast'],
     (r) => (r.stats.lowContrast === 1 ? null : `lowContrast ${r.stats.lowContrast}`));

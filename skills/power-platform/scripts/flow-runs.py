@@ -22,7 +22,7 @@ Options:
     --config PATH       identity config (default: ./scripts/canvas-app.json if present)
     --top N             runs to list (default 20)
     --max-chars N       trim each inputs/outputs body to N characters (default 800; 0 = omit them)
-    --token-cmd CMD     command that prints a token for https://service.flow.microsoft.com/
+    --token-cmd CMD     command that prints a token for https://service.flow.microsoft.com/ ("{resource}" replaced)
     --token-env NAME    environment variable holding that token (default: FLOW_TOKEN)
     --selftest          run the built-in tests against recorded, anonymised responses and exit
 
@@ -101,7 +101,8 @@ def get_token(token_cmd=None, token_env="FLOW_TOKEN"):
         return p.returncode, (p.stdout or "").strip(), (p.stderr or "").strip()
 
     if token_cmd:
-        rc, out, err = run(token_cmd, shell=True)
+        # "{resource}" is replaced as in deploy-flows.py, so one shared token command serves every script.
+        rc, out, err = run(token_cmd.replace("{resource}", AUDIENCE), shell=True)
         if rc == 0 and out:
             return out.splitlines()[-1].strip(), "--token-cmd"
         raise CannotRun("--token-cmd failed (exit %d): %s" % (rc, err[-300:]))
@@ -476,6 +477,8 @@ def selftest():
             rc = main(["list", "--env", env, "--token-env", "FLOW_RUNS_SELFTEST_TOKEN",
                        "--token-cmd", "exit 3"])
         check("a failing token command exits 2 with no API call", rc == 2)
+        tok, how = get_token(sys.executable + ' -c "import sys; print(sys.argv[1])" {resource}', None)
+        check("--token-cmd gets {resource} replaced by the flow audience", tok == AUDIENCE and how == "--token-cmd")
         d = action_map(definition)
         check("the definition map reaches actions inside else branches and nested loops",
               d["No_date"]["parent"] == "Has_a_date" and d["Record_sent"]["loop"] == "Send_each_line")
