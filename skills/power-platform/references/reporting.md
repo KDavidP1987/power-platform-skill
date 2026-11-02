@@ -360,6 +360,11 @@ the signed-in person's photo and the organisation's logo, and the workspace rail
   `visualContainerObjects.general.keepLayerOrder = true` on the background visual and on every visual
   laid over it, and turn the background's visual header off. Check: click the band in reading view,
   then confirm the slicers are still there.
+- **Size the row headers of a wide matrix.** A matrix with several text row fields and many period
+  columns let the row headers take the whole width, and the values were cut off at the right edge in
+  the service while validation passed. Set `columnWidth` per row-field `queryRef` and per value
+  `queryRef`, and `columnHeaders.autoSizeColumnWidth` false, then look at it in reading view:
+  validation cannot see layout (and `validate-report.py` does not resolve fields against the model).
 - **A matrix opens expanded only when every row projection is active.** `expansionStates` alone
   (levels `isCollapsed` / `isPinned`, root `isToggled`) passed schema validation and deployed, and the
   service still opened the matrix at its first level, in two variants. What opened it to the last

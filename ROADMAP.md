@@ -21,7 +21,7 @@ README and the documentation front page, and CI fails when they differ. Update i
 | 6 | Re-run the graded evaluation on the current version: ten or more task types (adding Power Pages, model-driven and SharePoint), three runs each, the held-out triggering set | A 1.0 criterion; the last graded run was 0.7.1 (217/222 with the skill, 136/222 without) and much has changed since | Open |
 | 7 | Publish the 0.7.x results and the measured builds on the evaluation page | The page still shows the 0.5.1 run | Open |
 | 8 | A model-driven app with a responsive canvas companion, built and verified in a tenant | Clears most of the snippets still marked "confirm in your tenant" | Open |
-| 9 | SharePoint as a data source: delegation, the 5,000-item threshold, staying on a standard licence | Common in real tenants; written down nowhere yet | Open |
+| 9 | SharePoint as a data source: delegation, the 5,000-item threshold, staying on a standard licence | Common in real tenants; written down nowhere yet | Partly done in 0.38: `references/sharepoint-lists-and-forms.md` (lists, views and site pages by REST; customised list forms). Open: delegation, the 5,000-item threshold, licence limits |
 | 10 | Approvals in Teams and Outlook, and the one-Approvals-connection-per-person limit | Every approval flow meets it | Open |
 | 11 | Two independent real builds in different tenants | A 1.0 criterion; every build so far ran in one tenant | Open: needs a second tenant |
 | 12 | Driver commands `add-data` and `refresh-source` for an existing app | Both were done by hand-written browser helpers in two projects; the recipe is in `browser-verification.md` section 12 | Open: port and prove against a live Studio session before release |

@@ -11,6 +11,43 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-02
+
+Lessons from a SharePoint list with two front ends (a canvas app on a site page and a customised list
+form), a Fabric medallion, a Power BI report and two canvas builds. Where a tool could catch the fault,
+the tool changed, with self-tests; the rest went into the references.
+
+### Added
+
+- `references/sharepoint-lists-and-forms.md`: creating a list, its columns, formatting and views by
+  REST in the signed-in browser (one `views/add` with its fields, 3 s pacing for writes, Board and
+  Gallery views made once in the UI and kept by REST); a canvas app on a site page; and customised list
+  forms: co-authoring off by default, the SharePointIntegration handlers missing from source (rules go
+  on the cards), column defaults not applied in New mode, the classic combo box that lists empty rows
+  and the ModernCombobox swap, the fixed hosted size (Landscape dialog or Portrait panel, never both),
+  Studio rewriting card geometry when the form's size changes, pages by card visibility, a summary that
+  follows unsaved edits, Patch actions that close the form, and publishing to SharePoint.
+- `lint-flows.mjs`: the error `expression-unbalanced`. A Compose with one parenthesis too many passed
+  the lint and was refused only by the deploy, which leaves the flow on its old definition and can stop
+  a manifest deploy part-way. Checked against 34 real flows with no false finding.
+- `check-published-order.py`: `SCRAMBLED`, for a push that added many controls and interleaved them
+  (measured twice). The fix is to reload Studio and push the same source again, not to edit the source;
+  run the check on a sync of the held session before saving.
+
+### Changed
+
+- `canvas-browser.mjs save`: when the click leaves the Save stamp old or unchanged, it sends Ctrl+S once
+  and reads the stamp again before reporting UNPROVEN. A real click did nothing after a clean push, and
+  Ctrl+S then saved.
+- `check-pa-yaml.mjs`: control names that hold spaces or parentheses (Studio names form cards
+  `Amount (USD)_DataCard1`) open their own mapping. Studio's own form output had produced 50 false
+  "duplicate key" findings; it now produces none.
+- References: a local DuckDB run that stalls (threads=1 before debugging SQL); sizing a wide matrix's row
+  headers; a back-dated change and the snapshots it misses; a modern combo box's
+  `CountRows(SelectedItems)` reading blank; the attachments card's `{Attachments}` DataField; the Back
+  button from a new app's first minute; Studio dialogs located by text, not position; modal scrims must
+  cover the whole screen for the overlap check; heredocs that drop backslashes.
+
 ## [0.37.0] - 2026-10-23
 
 Lessons from three projects folded in. Where a tool could catch or prevent the fault, the tool changed;

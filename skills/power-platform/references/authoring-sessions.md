@@ -19,7 +19,9 @@ control elsewhere". The authoring `connect` then answers a **bare HTTP 422 with 
 
 What strands the lock:
 
-- **Killing the tab** instead of closing through the editor's Back button.
+- **Killing the tab** instead of closing through the editor's Back button. This includes a
+  brand-new blank app: navigating its tab away in the first minutes, instead of Back, left it locked
+  for editing by the same user until the lock timed out.
 - **A Studio crash mid-push** (white screen, `TypeError: Cannot read properties of undefined`) -
   same 422 / read-only signature.
 - **An ordinary push/save/publish cycle**, observed in one project with nothing killed.

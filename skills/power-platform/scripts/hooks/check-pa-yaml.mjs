@@ -84,7 +84,9 @@ export function checkPaYaml(text) {
 
     // 7. A key twice in one mapping (two AccessibleLabel lines on a control): the YAML parser refuses
     //    the file. Seen when parallel edits each added the same property to one control.
-    const key = line.match(/^(\s*)(?:- )?([A-Za-z0-9_]+):(?:\s|$)/);
+    // A list item's control name may hold spaces or parentheses: Studio names a form card
+    // "Amount (USD)_DataCard1". It still opens a new mapping, or its siblings' keys read as duplicates.
+    const key = line.match(/^(\s*)(?:- )?([A-Za-z0-9_]+):(?:\s|$)/) || line.match(/^(\s*)- ([^:#'"\s][^:#'"]*?|'[^']+'|"[^"]+"):(?:\s|$)/);
     if (key && !/^\s*#/.test(line)) {
       const listItem = /^\s*- /.test(line);
       const at = listItem ? indent + 2 : indent;
@@ -467,6 +469,15 @@ function selftest() {
     'Screens:',
     '  Home:',
     '    Children:',
+    // Studio's own card names hold spaces and parentheses; siblings are separate mappings.
+    '      - Category_DataCard1:',
+    '          Control: TypedDataCard',
+    '          Properties:',
+    '            DataField: ="Category"',
+    '      - Amount (USD)_DataCard1:',
+    '          Control: TypedDataCard',
+    '          Properties:',
+    '            DataField: ="Amount"',
     '      - lblTotal:',
     '          Control: Label',
     '          Properties:',

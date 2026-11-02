@@ -746,7 +746,8 @@ seven at write time, and the continuation-indent fault below.
 
 - **Generated YAML through a shell heredoc can lose `$`.** An unquoted heredoc expanded `$-en` in
   `"[$-en-US]"` into garbage. Write generated `.pa.yaml` with a file tool or a quoted heredoc
-  (`<<'EOF'`). The hook also refuses two more unknown properties: `Tooltip` on a modern TextInput and
+  (`<<'EOF'`). A Python edit script passed through a heredoc also lost backslashes in Power Fx
+  strings; write the script to a file with a file tool, then run it. The hook also refuses two more unknown properties: `Tooltip` on a modern TextInput and
   `Self.Items` inside a modern DropDown (repeat the Items expression or use a named formula).
 
 ## 12. Reading compile output

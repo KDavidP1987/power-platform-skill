@@ -445,6 +445,12 @@ Details that made several of these worth running:
 
 Some invariants live in data or in the environment, where no source audit can see them.
 
+- **A back-dated change does not reach snapshots already taken.** A rate changed from a past date
+  left 124 approved records carrying the old rate, because approval had copied (snapshotted) the rate
+  onto each; 64 needed re-saving. A back-dated change must re-resolve every snapshot from its
+  effective date (park the flows that watch those rows first), and the audit should also list
+  approved rows missing the fields approval writes: the same sweep found one approval the flow never
+  finished.
 - **Live-data audits**: overlapping effective-dated windows (compare pairwise - a back-dated row can
   overlap a non-adjacent closed window), more than one current row per grain (get the grain right:
   per person on one table, per person **and** type on another), records with no resolvable approver,

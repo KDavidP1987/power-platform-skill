@@ -1652,6 +1652,8 @@ function selftest() {
     ['no time in the stamp', stampVerdict('just now', null, click) === 'landed-untimed'],
     ['PM parsed', stampTime('Saved 2:05 PM', click).t.getHours() === 14],
     ['yesterday late is old', stampVerdict('11:59:00 PM', null, click) === 'old'],
+    ['old stamp after a click gets one Ctrl+S', keyFallback('old') && keyFallback('unchanged')],
+    ['a landed or unread save sends no keystroke', !keyFallback('landed') && !keyFallback('landed-untimed') && !keyFallback('none')],
     // second-tab must leave the held tab open until after publish (closing it first lost the push).
     ['second-tab closes no tab', !secondTabClosesTabs()],
     // save / publish / dirty use the tab whose authoring frame holds a Save button, not the newest.
@@ -2432,6 +2434,16 @@ async function cmdSave() {
     after = await readSaveStamp(studio, hit.frame);
     verdict = stampVerdict(after, before, clickedAt);
   }
+  // Measured: after a clean push that Studio had applied, a real click on Save did nothing (the flyout
+  // kept the pre-push time); Ctrl+S then saved. Send it once before calling the save unproven.
+  if (keyFallback(verdict)) {
+    log('  the click did not move "Saved:" (' + (after || 'unread') + '); sending Ctrl+S once ...');
+    await studio.keyboard.press('Control+s');
+    await studio.waitForTimeout(Number(flag('after', 25000)));
+    const keyed = await readSaveStamp(studio, hit.frame);
+    const kv = stampVerdict(keyed, before, clickedAt);
+    if (kv === 'landed' || kv === 'landed-untimed') { log('  Ctrl+S saved where the click did not.'); after = keyed; verdict = kv; }
+  }
   await capture(studio, 'save-after');
   if (verdict === 'old') {
     // Measured: "SAVE LANDED: Saved: 10:28:27" printed at 10:40 - the flyout's OLD stamp, after a click
@@ -2466,6 +2478,8 @@ async function cmdSave() {
 }
 const SAVE_PROOF = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'save-proof.json');
 const SAVE_STAMP_RETRIES = 2;
+// A click that left the stamp old or unchanged gets one Ctrl+S before the verdict stands. Pure.
+export function keyFallback(verdict) { return verdict === 'old' || verdict === 'unchanged'; }
 // What a save verdict means: only a stamp at or after the click writes save-proof.json and exits 0;
 // every other outcome is UNPROVEN and exits 7, an unread stamp included (it once exited 0 while the
 // docs promised 7). An unread stamp is read again before that verdict stands. Pure.

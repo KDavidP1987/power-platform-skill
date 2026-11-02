@@ -253,6 +253,9 @@ copying a working control from the same app.
 - **A ComboBox over `Choices(...)` yields records**; `Patch` wants `Combo.Selected.Value`.
 - **Multi-select predicates**: `r.Region.Name in cmbRegion.SelectedItems.Value` works; test
   emptiness with `CountRows(cmbRegion.SelectedItems) > 0`, not `IsBlank`.
+  On a **modern** combo box with nothing selected, `CountRows(cmb.SelectedItems) = 0` evaluated blank
+  in the player, so a "no filter" branch was false and a list showed 0 of 15 items: write
+  `Coalesce(CountRows(cmb.SelectedItems), 0) = 0`.
 - **A single-select ComboBox gives users no way to clear it** (unverified across versions). Filter
   screens need an explicit Clear that resets every filter.
 - **`DefaultSelectedItems` fed from a lookup read off a row is a partial record**
@@ -485,6 +488,13 @@ copying a working control from the same app.
   whole-population question (missing, overdue) issues its own query, independent of the view.
 
 ## 12. Saving: write handlers, concurrency, partial failure
+
+- **A SharePoint attachments card's `DataField` is `"{Attachments}"`, with braces.** A hand-written
+  card with `DataField: ="Attachments"` compiled cleanly, and SubmitForm then ran `OnSuccess` with no
+  write at all (no request in the trace; the file stayed "Unsaved"). `OnAddFile: =SubmitForm(form)`
+  did not save in the player either: save with an explicit button, and prove it with a REST read of
+  the item's `AttachmentFiles`. A new item needs saving before it can take an attachment. More on list
+  forms: `sharepoint-lists-and-forms.md`.
 
 - **Create-and-select needs a fallback.** `Set(rec, Patch(T, Defaults(T), {...}));
   Set(gblSelId, rec.'Primary Key')` left one newly created row unselected, while the identical

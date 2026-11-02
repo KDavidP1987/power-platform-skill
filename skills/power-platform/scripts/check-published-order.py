@@ -19,7 +19,13 @@ Each finding is named for its cause:
   APPENDED   one control sits last in the published order but not in the repo: a push adds a NEW control
              at the end of its parent whatever its place in the source. Move it last in the source (unless
              it must sit below something) so the two agree, or reorder it in Studio.
-  ORDER      any other difference: a control moved under another.
+  SCRAMBLED  several controls out of place, neither reversed nor one appended: a push that ADDED many controls
+             at once interleaved them (measured twice: a totals bar drew over its own labels, a dialog's scrim
+             over its form). Do not edit the source: reload Studio, push the SAME source again, and compare
+             again; the re-push restored the source order exactly both times.
+  ORDER      one control moved under another.
+The first folder can be any Src tree: after a push that added controls, give it a sync of the held session
+(canvas-mcp.py sync <dir>) in place of the published download, BEFORE saving, not only after publish.
 Exit codes: 0 order matches, 1 a container is out of order, 2 nothing compared.
 """
 import json
@@ -47,8 +53,24 @@ def siblings(path):
     return out
 
 
+def displaced(repo_order, pub_order):
+    """How many controls must move to turn pub_order into repo_order (length minus the longest kept run)."""
+    pos = [pub_order.index(k) for k in repo_order]
+    best = []
+    for v in pos:  # longest increasing subsequence, patience sort
+        lo, hi = 0, len(best)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if best[mid] < v:
+                lo = mid + 1
+            else:
+                hi = mid
+        best[lo:lo + 1] = [v]
+    return len(pos) - len(best)
+
+
 def diagnose(repo_order, pub_order):
-    """'same', 'reversed', 'appended' or 'moved' for two orders of the same names."""
+    """'same', 'reversed', 'appended', 'scrambled' or 'moved' for two orders of the same names."""
     if repo_order == pub_order:
         return 'same'
     pos = {k: i for i, k in enumerate(pub_order)}
@@ -58,7 +80,7 @@ def diagnose(repo_order, pub_order):
     last = pub_order[-1]
     if [k for k in repo_order if k != last] + [last] == pub_order:
         return 'appended'
-    return 'moved'
+    return 'scrambled' if displaced(repo_order, pub_order) > 1 else 'moved'
 
 
 def compare(pub, repo, out=print):
@@ -83,6 +105,9 @@ def compare(pub, repo, out=print):
                 elif kind == 'appended':
                     out(f'APPENDED  {f}  {parent}: {pub_order[-1]} is last (on top) in the published app only; if it is new in '
                         'this push, the push appended it - move it last in the source or reorder it in Studio')
+                elif kind == 'scrambled':
+                    out(f'SCRAMBLED  {f}  {parent}: {displaced(common, pub_order)} controls out of place - a push that added '
+                        'controls interleaved them; reload Studio and push the same source again, do not edit the source')
                 else:
                     out(f'ORDER  {f}  {parent}: repo has {a} before {b}, published has it after (so {a} draws on top)')
     return bad, compared
@@ -96,6 +121,7 @@ def selftest():
     for name, repo, pub, want in [('diagnose reversed', ['a', 'b', 'c', 'd'], ['d', 'c', 'b', 'a'], 'reversed'),
                                   ('diagnose appended', ['a', 'new', 'b', 'c'], ['a', 'b', 'c', 'new'], 'appended'),
                                   ('diagnose moved', ['a', 'b', 'c', 'd'], ['b', 'a', 'c', 'd'], 'moved'),
+                                  ('diagnose scrambled', ['a', 'b', 'scrim', 'box', 'ok', 'c'], ['a', 'box', 'b', 'ok', 'scrim', 'c'], 'scrambled'),
                                   ('diagnose same', ['a', 'b'], ['a', 'b'], 'same')]:
         good = diagnose(repo, pub) == want
         ok &= good
