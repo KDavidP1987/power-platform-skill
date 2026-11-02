@@ -565,6 +565,53 @@ function checkApostrophes(flow, add) {
   });
 }
 
+// An expression with unbalanced parentheses, brackets or quotes is refused by the PATCH that deploys
+// it (TemplateValidationError "expected token EndOfData and actual RightParenthesis"). The flow keeps
+// its old definition, so a manifest deploy of several flows stops part-way. Found offline here.
+function expressionBalance(expr) {
+  let paren = 0, bracket = 0, q = false;
+  for (let i = 0; i < expr.length; i++) {
+    const c = expr[i];
+    if (q) { if (c === "'") { if (expr[i + 1] === "'") i++; else q = false; } continue; }
+    if (c === "'") q = true;
+    else if (c === '(') paren++;
+    else if (c === ')') { if (--paren < 0) return `a ')' at character ${i + 1} closes nothing`; }
+    else if (c === '[') bracket++;
+    else if (c === ']') { if (--bracket < 0) return `a ']' at character ${i + 1} closes nothing`; }
+  }
+  if (q) return 'a quoted literal never closes';
+  if (paren) return `${paren} '(' never close`;
+  if (bracket) return `${bracket} '[' never close`;
+  return null;
+}
+function expressionsIn(s) {
+  const out = [];
+  if (typeof s !== 'string') return out;
+  if (s.startsWith('@') && !s.startsWith('@@') && !s.startsWith('@{')) { out.push(s.slice(1)); return out; }
+  for (let i = s.indexOf('@{'); i !== -1; i = s.indexOf('@{', i + 2)) {
+    if (i > 0 && s[i - 1] === '@') continue;
+    let depth = 0, q = false, end = -1;
+    for (let j = i + 2; j < s.length; j++) {
+      const c = s[j];
+      if (q) { if (c === "'") { if (s[j + 1] === "'") j++; else q = false; } continue; }
+      if (c === "'") q = true; else if (c === '{') depth++; else if (c === '}') { if (depth === 0) { end = j; break; } depth--; }
+    }
+    if (end !== -1) out.push(s.slice(i + 2, end)); // an unclosed segment is apostrophe-in-literal's finding
+  }
+  return out;
+}
+function checkExpressionBalance(flow, add) {
+  walk(flow.def.actions, (n, a) => {
+    for (const s of stringsIn(JSON.parse(ownJson(a)))) {
+      for (const e of expressionsIn(s)) {
+        const why = expressionBalance(e);
+        if (why) add('error', 'expression-unbalanced', `'${n}': ${why} in the expression ${e.length > 80 ? e.slice(0, 80) + '...' : e} - ` +
+          `the deploy refuses it and the flow keeps its old definition.`);
+      }
+    }
+  });
+}
+
 // An action may read only: its transitive runAfter closure in its own scope, everything nested
 // inside those, and what the enclosing scope inherited. Anything else is rejected at activation.
 function scopeErrors(scope, inherited, add) {
@@ -879,6 +926,7 @@ export function lint(flows, { entitySets = null, dateOnly = null, safeRecipients
     checkSelfWrite(flow, t, add);
     if (safeRecipients) checkSafeRecipients(flow, add);
     checkApostrophes(flow, add);
+    checkExpressionBalance(flow, add);
     scopeErrors(flow.def.actions || {}, new Set(), add);
     checkSends(flow, add);
     checkEntitySets(flow, entitySets, add);
@@ -912,6 +960,9 @@ function fixture(bad) {
         // Date-only column (app_approvedon) used as an instant in bad; a date-time stamp (app_approvedat) in good.
         Minutes_since_approval: { type: 'Compose', runAfter: { Get_the_request: ['Succeeded'] },
           inputs: `@div(sub(ticks(outputs('Get_the_request')?['body/modifiedon']), ticks(outputs('Get_the_request')?['body/${bad ? 'app_approvedon' : 'app_approvedat'}'])), 600000000)` },
+        // A Compose with one ')' too many in bad; balanced in good (the string literal holds a ')' that must not count).
+        Digest_line: { type: 'Compose', runAfter: { Get_the_request: ['Succeeded'] },
+          inputs: bad ? "@concat('Key changes (', string(length(body('Get_the_request')))))" : "@concat('Key changes (', string(length(body('Get_the_request'))), ')')" },
         // GrantAccess body: a single-'@' key is refused at activation; '@@' is the escape.
         Share_with_approver: { type: 'OpenApiConnection', runAfter: { Minutes_since_approval: ['Succeeded'] }, inputs: { host: host('PerformBoundAction'),
           parameters: { entityName: 'app_requests', actionName: 'GrantAccess', recordId: "@outputs('Get_the_request')?['body/app_requestid']",
@@ -1034,7 +1085,7 @@ function selftest() {
   const bad = lint([fixture(true)], { dateOnly }).results[0].items.filter((i) => i.level !== 'info').map((i) => i.code);
   const good = lint([fixture(false)], { dateOnly }).results[0].items.filter((i) => i.level !== 'info');
   const want = ['runtime-invoker', 'trigger-message-mismatch', 'self-trigger-loop', 'apostrophe-in-literal', 'not-on-runafter-path', 'send-after-failed',
-                'at-property-name', 'multiple-triggers', 'date-only-as-instant'];
+                'at-property-name', 'multiple-triggers', 'date-only-as-instant', 'expression-unbalanced'];
   const graphFails = [];
   for (const [name, flows, expect] of GRAPH_CASES) {
     const codes = lint(flows).cycles.map((c) => c.split(' ')[0]);

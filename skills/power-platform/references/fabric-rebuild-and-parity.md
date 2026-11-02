@@ -174,6 +174,12 @@ run the service reported green.
   DuckDB refused to register it ("must have at least one column"); the next notebook in the chain failed.
   Build an empty table from the Delta log schema (`dt.schema().to_pyarrow()`), and test every pipeline
   with at least one empty table and with a re-run over existing tables.
+- **A local run that stalls on a fast query: suspect the workstation's DuckDB first.** A window query
+  (row_number over 81k rows) that takes 0.2 s hung at full CPU for over an hour in a local run. It
+  reproduced 1 run in 6 on a DuckDB newer than Fabric's pinned version, multi-threaded, querying
+  registered Arrow tables and returning Arrow; 0 in 40 on one thread and 0 in 40 on the pinned
+  version, and Fabric itself was unaffected. Set `threads=1` for local runs on a DuckDB newer than the
+  pin before debugging the SQL. With a total order (below) the thread count cannot change results.
 - **Never number rows without a total order.** `row_number() OVER ()` follows scan order, which differs
   between DuckDB versions and thread counts, and a multi-file Delta table comes back in a different file
   order from each reader: 15,380 ids differed between runs. Sort each feed on all columns (`ORDER BY ALL`)

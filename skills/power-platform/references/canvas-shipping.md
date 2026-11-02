@@ -341,6 +341,11 @@ preconditions change.
    0 differences), the publish from the `canvasapps` record, then the player and its build stamp.
    A property diff cannot see stacking order: run `check-published-order.py` on the downloaded
    package, which names a REVERSED screen (re-push from one tab) apart from an APPENDED control.
+   **A push that ADDS many controls can interleave them** in the held session (measured twice: about 40
+   controls, then about 20; a totals bar drew over its own labels, a dialog's scrim over its form).
+   After any push that adds controls, sync the held session and run `check-published-order.py <sync>
+   <repo Src>` BEFORE saving; it names this SCRAMBLED. Do not edit the source to compensate: reload
+   Studio and push the same source again. Both times the re-push restored the source order exactly.
 
 **For a data-bound change, walk Studio's Preview between the save proof and Publish.** In the
 reloaded, saved session, Preview (F5) runs against live data: one build proved its new screens there

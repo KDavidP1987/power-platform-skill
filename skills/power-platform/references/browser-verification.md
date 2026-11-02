@@ -499,6 +499,11 @@ negative. Use it for "is my code right?" and the player for "what do users get?"
   the typed text went nowhere (it could as easily have gone into a control). Click the formula
   editor's `.view-lines` element, then check that `textarea[aria-label="Power fx formula edit field."]`
   is `document.activeElement` before any keystroke, and read the property name and value back after.
+- **Studio's dialogs move with the viewport.** The Publish dialog's button sat at y 583 in one session
+  and y 611 in the next (a different viewport height after a browser restart), so a fixed-coordinate
+  click missed silently, and `getByRole` from the page found nothing (the dialog lives in a Studio
+  frame). Locate the button by its text across frames (`frame.locator('button:has-text("Publish")')`
+  in each frame), or take a screenshot immediately before any coordinate click.
 - **Studio's tree search changes what a coordinate click selects.** With the tree filtered, a
   click meant for App landed on a screen, and the no-op edit typed into that screen's `Fill`. Select
   by name, read the property dropdown and the selected-control name before typing, and restore from

@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.37.0"
+  version: "0.38.0"
 ---
 
 # Power Platform development
@@ -185,6 +185,7 @@ Read only the reference the task needs; each topic has one home.
 | Layout: responsive screens, text width and clipping, the fit rule, gallery rows, scrollbars, z-order, unclickable controls, theme tokens | `references/canvas-layout.md` |
 | Driving Studio or the published app with Playwright: scenarios, iframes, input, dropdowns, stale cache, Add data and Refresh, sweeps, OData trace, the acceptance contract | `references/browser-verification.md` |
 | Power Pages: choosing the app type, a site in git, table permissions and the Web API, sign-in, Liquid, the cache, per-person visibility, refusals with `site-walk.mjs`, security review, the organisation's brand, site lifecycle | `references/power-pages.md` |
+| SharePoint lists and customised list forms: creating a list and its views by REST, a canvas app on a site page, the form app (cards hold the rules, column defaults, the fixed hosted size, pages, actions, publishing) | `references/sharepoint-lists-and-forms.md` |
 | Dataverse solutions and schema: pack/unpack, imports that never remove, what cannot change, shared tables, column types, delete behaviour, effective dating | `references/dataverse.md` |
 | Scripting the Web API: idempotent provisioning, retries, metadata, choices, alternate keys, paging, `systemuser`, PowerShell 5.1 traps | `references/dataverse-web-api.md` |
 | Who can read or write: roles out of solutions, depth and sharing, Append/AppendTo, impersonation, column security, SharePoint virtual tables, onboarding users | `references/security-and-access.md` |
