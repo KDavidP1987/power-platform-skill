@@ -73,12 +73,17 @@
 //        --fresh          delete the player's IndexedDB/Cache Storage before loading (stale build)
 //        --accept-consent accept a connection consent prompt; without it (and without --fresh) a prompt stops
 //                         the walk with CONSENT NEEDED, exit 12 - the person decides
+//        --consent-wait <ms>  after the build stamp, the first scenario waits this long for a consent prompt
+//                         that arrives late (default 15000; 0 skips)
+//   walk: a SharePoint throttling banner (Throttle.htm) makes the run INVALID, exit 13, and stops the
+//        remaining scenarios - wait, then repeat one walk call
 //        --allow-writes   required to walk a scenario that declares "writes": true
 //        --skip-writes    skip those scenarios instead (a read-only pass, e.g. the reviewer's)
 //   publish: refused when the source is unchanged (--again), and from the third publish until
 //        docs/design-critique.md and docs/review/findings.json exist (--unreviewed "<reason>"; exit 8),
 //        and after the fix batch has shipped until a new batch is declared (--batch "<what>"; exit 10);
-//        exit 11 when "Publish this version" is still open in any Studio tab after the wait
+//        exit 11 when "Publish this version" is still open in any Studio tab after the wait;
+//        a SharePoint list form app's "Publish to SharePoint" is recognised and clicked the same way
 //   create: reopens the saved app and reads its Data pane; re-adds a missing table once, then fails
 //        (exit 4) naming it. --no-verify-sources skips the check.
 //        --keep-browser   close-studio: release the edit lock but leave the browser running
@@ -191,7 +196,8 @@ const SELECTOR_DEFAULTS = {
   'player.controlAttribute':  { surface: 'player', kind: 'attribute', value: 'data-control-name', check: 'required' },
   'player.consentAllow':      { surface: 'player', kind: 'role', role: 'button', name: '^allow$', flags: 'i', check: 'conditional' },
   'player.staleBanner':       { surface: 'player', kind: 'text', pattern: 'old version of this app', flags: 'i', check: 'conditional' },
-  'player.staleRefresh':      { surface: 'player', kind: 'role', role: 'button', name: '^refresh$', flags: 'i', check: 'conditional' },
+  'player.throttled':        { surface: 'player', kind: 'regex', pattern: 'Throttle\\.htm|does not match any known API routes', flags: 'i', check: 'conditional' },
+  'player.staleRefresh':     { surface: 'player', kind: 'role', role: 'button', name: '^refresh$', flags: 'i', check: 'conditional' },
   'player.batchUrl':          { surface: 'player', kind: 'regex', pattern: '/api/data/v9\\.\\d/\\$batch', flags: '', check: 'conditional' },
   'studio.titleEditing':      { surface: 'studio', kind: 'regex', pattern: '\\(Editing\\)', flags: 'i', check: 'required' },
   'studio.titleReadOnly':     { surface: 'studio', kind: 'regex', pattern: '\\(Read-only\\)', flags: 'i', check: 'conditional' },
@@ -208,7 +214,11 @@ const SELECTOR_DEFAULTS = {
     { kind: 'role', role: 'button', name: 'publish this version', flags: 'i' },
     { kind: 'css', value: 'button:has-text("Publish this version")' },
     { kind: 'role', role: 'button', name: '^publish$', flags: 'i' }] },
-  'studio.closePreview':      { surface: 'studio', kind: 'css', value: 'button[aria-label^="Close preview" i]', check: 'conditional' },
+  'studio.publishToSharePoint': { surface: 'studio', kind: 'anyOf', check: 'conditional', anyOf: [
+    { kind: 'role', role: 'button', name: '^publish to sharepoint$', flags: 'i' },
+    { kind: 'css', value: 'button:has-text("Publish to SharePoint")' }] },
+  'studio.publishedToSharePoint': { surface: 'studio', kind: 'regex', pattern: 'All changes are saved and published', flags: 'i', check: 'conditional' },
+  'studio.closePreview':     { surface: 'studio', kind: 'css', value: 'button[aria-label^="Close preview" i]', check: 'conditional' },
   'studio.leaveButton':       { surface: 'studio', kind: 'css', value: 'button:has-text("Leave")', check: 'conditional' },
   'studio.backButton':        { surface: 'studio', kind: 'css', value: 'button[aria-label^="Back" i]', check: 'required' },
   'studio.gotIt':             { surface: 'studio', kind: 'anyOf', check: 'conditional', anyOf: [
@@ -523,6 +533,52 @@ async function acceptConsent(page) {
     }
   }
   return false;
+}
+
+// After a publish the consent prompt can arrive AFTER the new build stamp has rendered: measured, a
+// walk that started clicking on the stamp timed out with the consent iframe intercepting pointer
+// events. So the first scenario of a walk call waits for one after its stamp step (15 s by default,
+// --consent-wait <ms>, 0 skips); a granted consent holds for the profile, so later scenarios do not. Pure.
+export function lateConsentWait({ flagValue, alreadyWaited, hasBuild }) {
+  if (!hasBuild || alreadyWaited) return 0;
+  const n = flagValue === undefined || flagValue === null || flagValue === true || flagValue === '' ? 15000 : Number(flagValue);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+let LATE_CONSENT_WAITED = false;
+async function lateConsent(page, ms) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    const r = await acceptConsent(page);
+    if (r === 'needed') return 'needed';
+    if (r === true) return 'accepted';
+    await page.waitForTimeout(1000);
+  }
+  return 'none';
+}
+
+// SharePoint throttles per person. Under it the player shows a banner naming Throttle.htm ("...
+// does not match any known API routes"), and a save can show "Item saved." while nothing lands
+// (measured; direct REST from the same browser still worked, and the same walk passed ten minutes
+// later). Such a run proves nothing either way: the walk reports INVALID (exit 13), not a defect,
+// and stops the remaining scenarios, since more loads only spend more of the person's quota. Pure.
+export function throttleSign(texts) {
+  const r = rx('player.throttled');
+  for (const t of texts || []) {
+    const s = String(t || ''); const m = s.match(r);
+    if (m) return s.slice(Math.max(0, m.index - 60), m.index + 80).replace(/\s+/g, ' ').trim();
+  }
+  return null;
+}
+function logThrottled(sign) {
+  log('  !! INVALID RUN: SharePoint is throttling the signed-in person ("' + sign + '").');
+  log('     Nothing this walk saw is evidence, pass or fail: a save can say "Item saved." and land nothing.');
+  log('     The walk runs as the person\'s own account and spends their quota; they may now see this error');
+  log('     in normal use. Tell them, wait at least ten minutes, then repeat ONE walk call.');
+}
+async function pageTexts(page) {
+  const out = [];
+  for (const f of page.frames()) out.push(await f.locator('body').innerText({ timeout: 3000 }).catch(() => ''));
+  return out;
 }
 
 // THE APP RUNS IN AN IFRAME. The top page is Microsoft's chrome; every locator must target
@@ -1119,6 +1175,14 @@ async function runSteps(page, frameRef, steps, results) {
     let frame = frameRef.f;
     try {
       frame = frameRef.f = await ensureFresh(page, frame);
+      if (step.lateConsent) {
+        // Added by walk after the build stamp, never written in a scenario (see lateConsentWait).
+        const r = await lateConsent(page, Number(step.lateConsent));
+        if (r === 'needed') { results.consentNeeded = true; break; }
+        if (r === 'accepted') { const f2 = await waitForPlayer(page); if (f2) frame = frameRef.f = f2; await page.waitForTimeout(4000); }
+        log(tag + (r === 'accepted' ? 'a consent prompt appeared after the stamp and was accepted' : 'no late consent prompt within ' + step.lateConsent + ' ms'));
+        continue;
+      }
       if (step.wait) await page.waitForTimeout(Number(step.wait));
       if (step.viewport) {
         // Phone and desktop in one walk: the same session, re-laid out at another width.
@@ -1667,6 +1731,13 @@ function selftest() {
     ['publish hash: no push record -> source', publishHash(null, 'd2').hash === 'd2'],
     ['after a failed push the publish is refused', publishRefused(publishHash({ hash: 'p1' }, 'd2').hash, { hash: 'p1' }, false)],
     ['publish: a confirm left open anywhere fails the publish', publishDialogLeftOpen([2]) && !publishDialogLeftOpen([])],
+    ['publish: a form app\'s "Publish to SharePoint" is a confirm, tried after the canvas one', PUBLISH_CONFIRM_IDS.join() === 'studio.publishConfirm,studio.publishToSharePoint' && publishConfirmLabel('studio.publishToSharePoint') === 'Publish to SharePoint'],
+    ['publish: the SharePoint button matches by name, the canvas confirm does not', new RegExp(SEL['studio.publishToSharePoint'].anyOf[0].name, 'i').test('Publish to SharePoint') && !new RegExp(SEL['studio.publishToSharePoint'].anyOf[0].name, 'i').test('Publish this version') && !SEL['studio.publishConfirm'].anyOf.some((sp) => sp.kind === 'role' && new RegExp(sp.name, sp.flags).test('Publish to SharePoint'))],
+    ['publish: the form app notice is recognised', rx('studio.publishedToSharePoint').test('All changes are saved and published.')],
+    ['walk: a throttle banner is found in any frame or console line', /Throttle\.htm/.test(throttleSign(['Home', 'Error: /_layouts/15/Throttle.htm does not match any known API routes']) || '') && throttleSign(['Item saved.', 'Orders']) === null],
+    ['walk: the late-consent wait runs once per call, after a stamp', lateConsentWait({ flagValue: undefined, alreadyWaited: false, hasBuild: true }) === 15000 && lateConsentWait({ flagValue: undefined, alreadyWaited: true, hasBuild: true }) === 0 && lateConsentWait({ flagValue: undefined, alreadyWaited: false, hasBuild: false }) === 0],
+    ['walk: --consent-wait sets or skips the wait', lateConsentWait({ flagValue: '5000', alreadyWaited: false, hasBuild: true }) === 5000 && lateConsentWait({ flagValue: '0', alreadyWaited: false, hasBuild: true }) === 0],
+    ['walk: the internal lateConsent step is handled before any verb', /step\.lateConsent[\s\S]{0,600}continue;/.test(runSteps.toString())],
     ['walk: a flag value is not a scenario', positionals(['a.json', '--config', 'cfg.json', 'b.json', '--headless', 'c.json']).join() === 'a.json,b.json,c.json'],
     ['walk: a boolean flag keeps the next positional', positionals(['--allow-writes', 'walks', '--settle', '5000']).join() === 'walks'],
     ['selected: the value after the name', selectedMatches('Status | Active', 'Active', 'Status') && selectedMatches('Asset type Laptop', 'Laptop', 'Asset type')],
@@ -1853,6 +1924,11 @@ async function cmdWalk() {
     process.exitCode = 0;
     const v = await walkOne(f);
     summary.push([v || 'FAIL', f, process.exitCode || 0]);
+    if (v === 'INVALID' || process.exitCode === 12) {
+      const rest = files.slice(files.indexOf(f) + 1);
+      if (rest.length) log('  stopping: ' + rest.length + ' scenario(s) not run (' + (v === 'INVALID' ? 'throttled: more loads spend more of the person\'s quota' : 'consent needed') + ').');
+      break;
+    }
   }
   const counted = summary.filter((x) => x[0] !== 'SKIP');
   if (files.length > 1) {
@@ -1899,15 +1975,28 @@ async function walkOne(file) {
   const errors = []; const trace = has('trace') || flag('trace-body') ? [] : null;
   const { page, frame, signedIn } = await openPlayer(ctx, errors, trace);
   if (!signedIn) { log('NOT SIGNED IN - run `login` first.'); await ctx.close(); process.exitCode = 2; return; }
-  if (!frame) { log('App frame never appeared. Cannot perform the task.'); await ctx.close(); process.exitCode = 3; return; }
+  if (!frame) {
+    const sign = throttleSign([...await pageTexts(page), ...errors]);
+    if (sign) { logThrottled(sign); await ctx.close(); process.exitCode = 13; return 'INVALID'; }
+    log('App frame never appeared. Cannot perform the task.'); await ctx.close(); process.exitCode = 3; return;
+  }
   const results = { passed: [], failed: [] };
   const frameRef = { f: frame };
   // Optional top-level "build": the stamp the ship wrote. Without it, a result may describe
   // the previous package while every offline check says the new one shipped.
-  const steps = scenario.build ? [{ expect: scenario.build }, ...scenario.steps] : scenario.steps;
+  const wait = lateConsentWait({ flagValue: flag('consent-wait'), alreadyWaited: LATE_CONSENT_WAITED, hasBuild: !!scenario.build });
+  if (scenario.build) LATE_CONSENT_WAITED = true;
+  const steps = scenario.build ? [{ expect: scenario.build }, ...(wait ? [{ lateConsent: wait }] : []), ...scenario.steps] : scenario.steps;
   const runStart = Date.now();
   if (scenario.writes === true) logWrite(scenario.name);
   await runSteps(page, frameRef, steps, results);
+  if (results.consentNeeded) { await ctx.close(); process.exitCode = 12; return 'FAIL'; }
+  const sign = throttleSign([...await pageTexts(page), ...errors]);
+  if (sign) {
+    logThrottled(sign);
+    if (scenario.writes === true) log('  RESTORE CHECK: read the rows back over REST; a save under throttling may or may not have landed. ' + scenario.restore);
+    await ctx.close(); process.exitCode = 13; return 'INVALID';
+  }
   const real = reportConsole(errors, scenario.name);
   writeTrace(trace, scenario.name);
   // Confirm where the write lands, every run: the screen saying "Saved" proves nothing about the row.
@@ -2504,6 +2593,9 @@ function srcHash() {
 const PUBLISH_LOG = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'publish-log.json');
 const LAST_PUSH = () => join(resolve(REPO, APP.workDir || '.ship-work'), 'last-push.json');
 // Which hash a publish ships: the last clean push's when there is one, else the source on disk.
+// The publish dialog's confirm, in the order tried: a canvas app's, then a SharePoint form app's.
+export const PUBLISH_CONFIRM_IDS = ['studio.publishConfirm', 'studio.publishToSharePoint'];
+export function publishConfirmLabel(id) { return id === 'studio.publishToSharePoint' ? 'Publish to SharePoint' : 'Publish this version'; }
 export function publishDialogLeftOpen(openFrames) { return Array.isArray(openFrames) && openFrames.length > 0; }
 export function publishHash(push, disk) { return push && push.hash ? { hash: push.hash, from: 'push' } : { hash: disk, from: 'source' }; }
 export function publishRefused(h, last, again) { return !!(h && last && last.hash === h && !again); }
@@ -2595,25 +2687,43 @@ async function cmdPublish() {
   // landed, "Publish this version" stayed open elsewhere, every later click timed out behind it, and
   // the old toast made it look done. Look in the clicked frame first, then every Studio tab.
   const studioFrames = () => [hit.frame, ...ctx.pages().filter(isStudioTab).flatMap((p) => p.frames().filter((f) => rx('studio.authoringFrameUrl').test(f.url()))).filter((f) => f !== hit.frame)];
-  let confirmed = false;
+  // A customised SharePoint list form app has no "Publish this version": its dialog's button is
+  // "Publish to SharePoint" (measured: the driver stopped at it; a click by role and name across the
+  // frames completed the publish). Both shapes are tried in every frame.
+  let confirmed = null;
   for (const f of studioFrames()) {
-    for (const c of locsOf(f, 'studio.publishConfirm')) {
-      try { if (await c.first().count() === 0) continue; await c.first().click({ timeout: 15000 }); log('  confirmed "Publish this version"' + (f === hit.frame ? '' : ' (in another Studio tab)')); confirmed = true; break; }
-      catch { /* next shape */ }
+    for (const id of PUBLISH_CONFIRM_IDS) {
+      for (const c of locsOf(f, id)) {
+        try { if (await c.first().count() === 0) continue; await c.first().click({ timeout: 15000 }); confirmed = id; break; }
+        catch { /* next shape */ }
+      }
+      if (confirmed) { log('  confirmed "' + publishConfirmLabel(confirmed) + '"' + (f === hit.frame ? '' : ' (in another Studio tab)')); break; }
     }
     if (confirmed) break;
   }
-  if (!confirmed) log('  !! no "Publish this version" button in any Studio tab - the dialog may not have opened.');
+  if (!confirmed) log('  !! no "Publish this version" or "Publish to SharePoint" button in any Studio tab - the dialog may not have opened.');
   await studio.waitForTimeout(Number(flag('after', 30000)));
   await capture(studio, 'publish-done');
   const stillOpen = [];
   for (const [n, f] of studioFrames().entries()) {
-    for (const c of locsOf(f, 'studio.publishConfirm')) { if (await c.first().isVisible().catch(() => false)) { stillOpen.push(n); break; } }
+    let open = false;
+    for (const c of locsOf(f, 'studio.publishConfirm')) { if (!open && await c.first().isVisible().catch(() => false)) open = true; }
+    // Only inside a dialog: a form app's command bar may carry a button of the same name.
+    if (!open) open = await f.evaluate(() => [...document.querySelectorAll('[role="dialog"] button, [role="alertdialog"] button')]
+      .some((b) => /^\s*publish to sharepoint\s*$/i.test(b.getAttribute('aria-label') || b.innerText || '') && b.getBoundingClientRect().width > 0)).catch(() => false);
+    if (open) stillOpen.push(n);
   }
   if (publishDialogLeftOpen(stillOpen)) {
-    log('  !! "Publish this version" is still open in ' + stillOpen.length + ' authoring frame(s): this publish did not start, and every');
+    log('  !! the publish dialog is still open in ' + stillOpen.length + ' authoring frame(s): this publish did not start, and every');
     log('     later click lands behind the dialog. Close the extra Studio tabs (`tidy --studio`), then publish again.');
     await browser.close(); process.exitCode = 11; return;
+  }
+  if (confirmed === 'studio.publishToSharePoint') {
+    let notice = false;
+    for (const f of studioFrames()) { const t = await f.locator('body').innerText().catch(() => ''); if (rx('studio.publishedToSharePoint').test(t)) notice = true; }
+    log(notice ? '  Studio says "All changes are saved and published."' : '  !! no "All changes are saved and published." notice yet; read the form before believing the publish.');
+    log('  A form app has no Dataverse lastpublishtime to read. Proof is the form\'s own build stamp, read in the list');
+    log('  (New, or EditForm.aspx?ID=<n>) after a reload: the list can serve the previous build for a reload or two.');
   }
   log('  Do NOT read success from the "Publish successful" toast: it stays pinned showing a PREVIOUS');
   log('  publish\'s time. Proof is the app\'s Dataverse row (solution-aware apps):');

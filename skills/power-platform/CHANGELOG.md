@@ -11,6 +11,42 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-06
+
+Lessons from a SharePoint list app and its customised form, and from two Dataverse canvas apps. Four
+of them became tool changes, with self-tests; the rest went into the reference that owns the topic.
+
+### Added
+
+- `canvas-browser.mjs walk`: a run under SharePoint throttling is INVALID (exit 13), not a pass or a
+  failure, and the rest of the call is not run. Under throttling the player showed a banner naming
+  `Throttle.htm`, and a save said "Item saved." while nothing landed; the same walk passed ten minutes
+  later. Walks run as the signed-in person and spend their quota, so the message says to tell them.
+- `canvas-browser.mjs walk`: after the build stamp, the first scenario of a call waits up to 15 s for
+  a consent prompt that arrives late (`--consent-wait <ms>`, 0 skips) and answers it by the 0.37.0
+  rule. After a publish the prompt appeared once the stamp had rendered and intercepted the first
+  click.
+- `check-published-order.py`: `NEW-ON-TOP`, for a control the app does not have yet that is not last
+  among its siblings. A push adds it on top, and a renamed control counts as new: a push that renamed
+  controls drew a note under a panel's scrim. Run it before the push against a sync of the session.
+- `canvas-mcp.py compile`: STALE SESSION, when errors say a type differs from itself ("expects X and
+  you're using X"). After a Data pane change and a publish, a compile in the same Studio session
+  failed nine times that way; a reload and the same source compiled clean.
+
+### Changed
+
+- `canvas-browser.mjs publish` recognises a SharePoint list form app's "Publish to SharePoint" button
+  (form apps have no "Publish this version"), clicks it in any frame, and reads the "All changes are
+  saved and published." notice. The publish-dialog-left-open check (exit 11) covers it too.
+- References: hide a required SharePoint column by writing it silently, never by dropping it from the
+  write (every save failed, and neither the compile nor the app checker said so); `Remove()` on a
+  SharePoint item goes to the site recycle bin, with a delete-with-confirmation pattern
+  (`sharepoint-lists-and-forms.md`, new section 8); renamed controls and z-order
+  (`canvas-shipping.md` 4); a type that differs from itself (`authoring-sessions.md`); the late
+  consent prompt and throttled runs (`browser-verification.md` 10); a denormalised filter column needs
+  an owner on the create path, and a default filter on it must OR a column every new record has
+  (`canvas-controls-and-patterns.md` 11).
+
 ## [0.38.0] - 2026-11-02
 
 Lessons from a SharePoint list with two front ends (a canvas app on a site page and a customised list

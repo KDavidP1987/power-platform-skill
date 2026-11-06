@@ -51,6 +51,10 @@
       "surface": "player", "kind": "text", "pattern": "old version of this app", "flags": "i",
       "purpose": "Banner shown when the player runs a cached build", "check": "conditional", "lastVerified": "0.1.0"
     },
+    "player.throttled": {
+      "surface": "player", "kind": "regex", "pattern": "Throttle\\.htm|does not match any known API routes", "flags": "i",
+      "purpose": "SharePoint throttling the signed-in person: the connector's error banner names Throttle.htm; a walk under it is invalid, not a failure", "check": "conditional", "lastVerified": "0.39.0"
+    },
     "player.staleRefresh": {
       "surface": "player", "kind": "role", "role": "button", "name": "^refresh$", "flags": "i",
       "purpose": "The stale banner's own Refresh button", "check": "conditional", "lastVerified": "0.1.0"
@@ -104,6 +108,18 @@
         { "kind": "role", "role": "button", "name": "^publish$", "flags": "i" }
       ],
       "purpose": "Confirm button in the publish dialog (doctor never publishes, so never exercises it)", "check": "conditional", "lastVerified": "0.1.0"
+    },
+    "studio.publishToSharePoint": {
+      "surface": "studio", "kind": "anyOf",
+      "anyOf": [
+        { "kind": "role", "role": "button", "name": "^publish to sharepoint$", "flags": "i" },
+        { "kind": "css", "value": "button:has-text(\"Publish to SharePoint\")" }
+      ],
+      "purpose": "The publish dialog's button in a customised SharePoint list form app (form apps have no 'Publish this version')", "check": "conditional", "lastVerified": "0.39.0"
+    },
+    "studio.publishedToSharePoint": {
+      "surface": "studio", "kind": "regex", "pattern": "All changes are saved and published", "flags": "i",
+      "purpose": "The notice after a form app's Publish to SharePoint completed", "check": "conditional", "lastVerified": "0.39.0"
     },
     "studio.closePreview": {
       "surface": "studio", "kind": "css", "value": "button[aria-label^=\"Close preview\" i]",

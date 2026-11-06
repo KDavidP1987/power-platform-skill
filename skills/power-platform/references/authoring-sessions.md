@@ -98,6 +98,13 @@ retrying", and each new `connect` restarts that clock.
   recognized" until the app is Saved and Published in Studio AND the authoring session is
   re-connected. A probe compile naming the new table is the cheap test; revert the probe so the
   tree stays green until the source resolves.
+- **A type that differs from itself is a stale session.** Straight after a data source was removed
+  in the Data pane (Studio re-added it, still in use) and the app saved and published, a compile in
+  the same Studio session failed with nine errors of the form "expects OptionSetValue (Status
+  (Orders)) and you're using OptionSetValue (Status (Orders))", on Patches the change never touched.
+  Reloading Studio and compiling the same source passed clean. Do not edit the source for it: reload
+  Studio, wait for `(Editing)`, compile again. `canvas-mcp.py compile` prints STALE SESSION when it
+  sees one (0.39.0).
 
 ### Contract drift
 
