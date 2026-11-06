@@ -24,9 +24,15 @@ Each finding is named for its cause:
              over its form). Do not edit the source: reload Studio, push the SAME source again, and compare
              again; the re-push restored the source order exactly both times.
   ORDER      one control moved under another.
+  NEW-ON-TOP a control in the source that the app does not have yet, and that is not last among its
+             siblings: a push adds it on top of them, not where the source puts it. A RENAMED control counts
+             as new (measured: a push that renamed controls re-added them on top, a note drew under a panel's
+             scrim, and the order check said SCRAMBLED). Keep the old name; to add a control lower down,
+             reuse the name of a control the change removes; otherwise put it last or expect to reorder.
 The first folder can be any Src tree: after a push that added controls, give it a sync of the held session
 (canvas-mcp.py sync <dir>) in place of the published download, BEFORE saving, not only after publish.
-Exit codes: 0 order matches, 1 a container is out of order, 2 nothing compared.
+Run it BEFORE a push too, against a sync of the session (or the published download), to see NEW-ON-TOP early.
+Exit codes: 0 order matches, 1 a container is out of order (or a control would be added on top), 2 nothing compared.
 """
 import json
 import os
@@ -83,6 +89,15 @@ def diagnose(repo_order, pub_order):
     return 'scrambled' if displaced(repo_order, pub_order) > 1 else 'moved'
 
 
+def new_on_top(repo_order, app_order):
+    """Controls the app lacks whose source place differs from where a push puts them (appended, in order)."""
+    new = [k for k in repo_order if k not in app_order]
+    if not new:
+        return []
+    predicted = [k for k in app_order if k in repo_order] + new
+    return [k for k in new if predicted.index(k) != repo_order.index(k)]
+
+
 def compare(pub, repo, out=print):
     bad = compared = 0
     for f in sorted(os.listdir(repo)):
@@ -90,8 +105,17 @@ def compare(pub, repo, out=print):
             continue
         compared += 1
         r, p = siblings(os.path.join(repo, f)), siblings(os.path.join(pub, f))
+        known = {'(screen)'} | set(p) | {k for ks in p.values() for k in ks}
         for parent, kids in r.items():
             pk = p.get(parent, [])
+            on_top = new_on_top(kids, pk) if parent in known else []
+            if on_top:
+                bad += 1
+                gone = [k for k in pk if k not in kids]
+                hint = (f'; the app still has {", ".join(gone)}, which the source dropped: if this is a rename, keep the '
+                        'old name, or reuse a removed name for a new control') if gone else '; put it last in the source or reorder in Studio after the push'
+                out(f'NEW-ON-TOP  {f}  {parent}: {", ".join(on_top)} not in the app yet; a push adds '
+                    f'{"them" if len(on_top) > 1 else "it"} on top of the siblings, not where the source puts {"them" if len(on_top) > 1 else "it"}{hint}')
             common = [k for k in kids if k in pk]
             pub_order = [k for k in pk if k in common]
             if common != pub_order:
@@ -126,8 +150,16 @@ def selftest():
         good = diagnose(repo, pub) == want
         ok &= good
         print(('ok    ' if good else 'FAIL  ') + name)
+    for name, repo, pub, want in [('new-on-top: a new control placed before others', ['a', 'new', 'b'], ['a', 'b'], ['new']),
+                                  ('new-on-top: a new control placed last is fine', ['a', 'b', 'new'], ['a', 'b'], []),
+                                  ('new-on-top: a rename counts as new', ['scrim', 'noteRenamed', 'panel'], ['scrim', 'note', 'panel'], ['noteRenamed']),
+                                  ('new-on-top: reusing a removed name keeps its place', ['scrim', 'note', 'panel'], ['scrim', 'note', 'panel', 'old'], [])]:
+        good = new_on_top(repo, pub) == want
+        ok &= good
+        print(('ok    ' if good else 'FAIL  ') + name)
     for name, repo, pub, want in [('same order', ['lblA', 'galB', 'cardC'], ['lblA', 'galB', 'cardC'], 0),
-                                  ('card moved under gallery', ['lblA', 'galB', 'cardC'], ['lblA', 'cardC', 'galB'], 1)]:
+                                  ('card moved under gallery', ['lblA', 'galB', 'cardC'], ['lblA', 'cardC', 'galB'], 1),
+                                  ('renamed control below a sibling', ['lblA', 'lblNote2', 'cardC'], ['lblA', 'lblNote', 'cardC'], 1)]:
         with tempfile.TemporaryDirectory() as t:
             for side, order in (('repo', repo), ('pub', pub)):
                 os.makedirs(os.path.join(t, side))

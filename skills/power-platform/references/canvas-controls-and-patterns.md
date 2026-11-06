@@ -442,6 +442,12 @@ copying a working control from the same app.
   - The filter it is read with must itself be delegable, so ride status and active flags onto the
     rollup row; a table with no parent key cannot be filtered by parent attributes, so scope it at
     build time and adjust by hand on a status change.
+  - A denormalised column needs an owner on the create path. A delegable text rollup on each record
+    (`"|FY26|FY27|"`) was the gallery's only default-visibility filter, and only a batch script
+    filled it: every record created in the app afterwards was hidden until the user chose Show all.
+    Have the app's create and save paths (or a flow) write it, and OR the default filter with a
+    column the create path always sets (status, an active flag), so a new record shows before any
+    recompute.
   - Maintain it on save with a delta (and mirror the delta into the in-memory collection), and keep
     an idempotent server-side rebuild that follows `@odata.nextLink` - reading one page reintroduces
     the truncation it exists to remove - and checks each read model's size against the limit.

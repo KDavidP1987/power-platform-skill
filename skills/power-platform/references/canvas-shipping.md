@@ -527,6 +527,14 @@ save, and diff a fresh sync before trusting the clean push; a re-push of the fix
   with the card drawn over the gallery. Append new controls after the existing ones; when existing
   controls must change order, rename them so the push creates them fresh in repo order; then run the
   order check in `audits.md` section 7 on the downloaded app.
+- **A renamed control is a new control, and a push adds new controls on top.** A push that renamed
+  existing controls (a tidy-up, no layout change) re-added them at the top of their parent's z-order:
+  a panel note drew under the panel's scrim and the order check said SCRAMBLED. Reverting the names,
+  and giving the one genuinely new note the name of a control the change removed, published in source
+  order. So rename only to bring a control to the top; otherwise keep names stable through a change,
+  and to add a control below existing ones, reuse a removed control's name. `check-published-order.py`
+  reports `NEW-ON-TOP` for a control the app lacks and that is not last among its siblings: run it
+  before the push against a sync of the session (0.39.0).
 - **The compile does not report what it pushed.** It answers "do these formulas bind". One round
   touched three screens, reported `PASSED, 29 files`, and two of the three never reached the
   server. `sync_canvas` into a scratch directory (never into `Src`) and compare **semantic

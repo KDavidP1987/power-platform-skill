@@ -91,6 +91,31 @@ def parse_compile(txt):
     return errors, no_session, int(validated.group(1))
 
 
+SAME_TYPE = re.compile(r"expects\s+(.+?)\s+and\s+you\W?re\s+using\s+(.+)$", re.IGNORECASE)
+TRAIL = re.compile(r"[^\w(]+$")   # closing quotes, brackets and the full stop, any apostrophe style
+
+
+def same_type_errors(txt):
+    """Error lines whose expected and supplied types are the SAME type: 'expects X and you're using X'.
+
+    Measured: straight after a data source was removed and re-added in Studio's Data pane and the app
+    saved and published, a compile in the same Studio session failed with nine of these on Patches the
+    change never touched; reloading Studio and compiling the same source again passed clean. The
+    source cannot cause a type to differ from itself: it is the session's stale type cache."""
+    out = []
+    for line in txt.splitlines():
+        m = SAME_TYPE.search(line.strip())
+        if m and TRAIL.sub("", m.group(1)) == TRAIL.sub("", m.group(2)):
+            out.append(line.strip())
+    return out
+
+
+STALE_SESSION_NOTE = ("STALE SESSION: %d error(s) say a type differs from itself (\"expects X and you're using X\").\n"
+                      "  The source is not the cause. After a Data pane change, or a save and publish in this Studio\n"
+                      "  session, the session's types are stale: reload Studio (canvas-browser.mjs studio --reload), wait\n"
+                      "  for (Editing), and compile the same source again before changing anything.")
+
+
 # --------------------------------------------------------------------------- push record, save proof
 
 def src_hash(src_dir):
@@ -320,6 +345,14 @@ def selftest():
     def check(name, cond):
         checks.append((name, bool(cond)))
 
+    # A type that differs from itself is a stale session, not the source.
+    same = (" : error PA2: The function 'Patch' has some invalid arguments. expects OptionSetValue (Status (Orders)) "
+            "and you're using OptionSetValue (Status (Orders)).\n")
+    other = " : error PA2: Invalid argument type. expects Number and you're using Text.\n"
+    check("stale session: 'expects X and you're using X' found", len(same_type_errors(same * 3 + other)) == 3)
+    check("stale session: a real mismatch is not", same_type_errors(other) == [])
+    check("stale session: a quoted message is read", len(same_type_errors("error: 'expects Record (Orders) and you're using Record (Orders)'")) == 1)
+
     # The hold releases only after a save newer than the push (or an explicit word).
     check("release: no proof waits", release_verdict("", None, 1000) == "wait")
     check("release: proof older than the push waits", release_verdict("", {"atMs": 900}, 1000) == "wait")
@@ -520,6 +553,9 @@ def run(c, action, args, cfg, root):
             print("  Open the app for edit in Studio, wait for (Editing), then re-run.")
             return 1
         print(txt, flush=True)
+        stale = same_type_errors(txt)
+        if stale:
+            print("\n" + STALE_SESSION_NOTE % len(stale))
         if errors is None:
             print("\nCould not read an error count from the compile output. Do not assume anything was pushed.")
             return 1

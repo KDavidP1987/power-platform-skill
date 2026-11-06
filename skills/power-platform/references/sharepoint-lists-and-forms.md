@@ -14,6 +14,7 @@ front ends, a planner canvas app and a customised form over the same items.
 5. Size and layout of a form
 6. Pages, a summary and actions in a form
 7. Shipping and verifying a form
+8. Saving and deleting items from an app
 
 ## 1. Choosing the front end
 
@@ -155,7 +156,10 @@ list. Most of the skill applies; these do not, or apply differently.
 
 ## 7. Shipping and verifying a form
 
-- **Publishing is "Publish to SharePoint"** (the publish dialog's button), not Publish.
+- **Publishing is "Publish to SharePoint"** (the publish dialog's button), not "Publish this version".
+  `canvas-browser.mjs publish` recognises and clicks it in any frame (0.39.0); it then reads Studio's
+  "All changes are saved and published." notice. A form app has no Dataverse `lastpublishtime`, so
+  the proof is the form's build stamp read in the list.
 - **A push does not mark Studio dirty here either** (`canvas-shipping.md`, section 4): make a trivial
   edit, Save, read the save time, then publish. Studio's "Publish successful" toast can show an
   earlier publish; judge by the form itself.
@@ -164,6 +168,15 @@ list. Most of the skill applies; these do not, or apply differently.
   the first one or two reloads, and the dialog size lagged one publish. Read the stamp after each
   reload; space the reloads (quick reloads got the site throttled: `Throttle.htm`, then connector 429
   and 504).
+- **A throttled walk proves nothing.** Under throttling the player showed a banner naming
+  `Throttle.htm` ("does not match any known API routes"), and a save then said "Item saved." while the
+  item was unchanged on REST; the same walk passed ten minutes later. `canvas-browser.mjs walk` reports
+  such a run INVALID (exit 13) and stops the rest of the call. Wait, then repeat one walk call.
+- **Walks spend the signed-in person's quota.** The walks run as the person's own account, and
+  SharePoint throttles per person: about fifteen player loads plus Studio and REST reads in two hours
+  left the owner seeing the throttle error in normal use the next morning. Budget the loads (one walk
+  call per build, several scenarios in it, reloads spaced), and say in the hand-back that the walks
+  used their account, so an error they meet afterwards has a known cause.
 - **Walk it in the list**: New from the command bar (the form sits in two frames,
   `webPlayer-iFrame-1` then `fullscreen-app-host`), or `NewForm.aspx` / `EditForm.aspx?ID=n` as full
   pages. Save is SharePoint's own command bar button, outside the frames. Read the item back over
@@ -172,3 +185,20 @@ list. Most of the skill applies; these do not, or apply differently.
 - **Studio's Fields pane** (Add field) needed `click({force: true})` on the field checkboxes.
 - **Modern combo box popups** in the player were not reachable by locator from the outer page;
   click them by coordinates read from a fresh screenshot.
+
+## 8. Saving and deleting items from an app
+
+- **Hide a required column by writing it silently, never by dropping it from the write.** Removing a
+  required choice column from a canvas app's `Patch` (to hide it from the app) made every save fail in
+  the player with "Field '<column>' is required", new items included. The compile and the app checker
+  said nothing; only performing the save found it. Keep the column out of the UI and keep writing it:
+  the item's own value on edit, the column's default on a new item
+  (`Category: If(IsBlank(rec), {Value: "Standard"}, rec.Category)`). In a form app, move the card to a
+  tab that is never shown, so `SubmitForm` still sends it (section 6). Before removing any column from
+  a write, read its `Required` flag (`_api/web/lists/getbytitle('<list>')/fields?$select=InternalName,Required`).
+- **`Remove()` sends a SharePoint item to the site recycle bin.** `Remove(Orders, LookUp(Orders, ID =
+  x))` from a canvas app left the item in `<site>/_api/web/RecycleBin` (with the list's folder as
+  `DirName`), so a site owner can restore it; prove a delete with that read, not only with the item's
+  absence. Put a confirmation before it: a dialog that names the item and counts the items that link
+  to it (a parent or predecessor lookup, which resolves blank after the delete), then `Remove` and
+  check `Errors(Orders)` before closing the dialog.

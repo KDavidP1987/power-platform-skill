@@ -437,6 +437,16 @@ for (const d of await indexedDB.databases()) indexedDB.deleteDatabase(d.name);  
   flow reached the environment showed one, and every screen behind it looked broken. The driver stops
   with CONSENT NEEDED (exit 12) instead of reporting screen failures; ask, then run again with
   `--accept-consent`.
+- **The consent prompt can arrive after the build stamp.** After a publish, the connection consent
+  iframe appeared once the new stamp had rendered; a walk that started clicking on the stamp timed
+  out with Playwright's "subtree intercepts pointer events". The walk's first scenario now waits for a
+  late prompt after its stamp step (15 s, `--consent-wait <ms>`, 0 skips) and answers it by the rule
+  above (0.39.0). A hand-written walk does the same: stamp, then consent, then the first click.
+- **A throttled run is invalid, not failed.** SharePoint throttles per person; under it the player
+  shows a banner naming `Throttle.htm` and a save can say it saved while nothing lands. `walk` reports
+  INVALID (exit 13) and stops the call; wait at least ten minutes, then repeat one walk call. Walks run
+  as the signed-in person and spend their quota, so budget player loads and say so in the hand-back
+  (`sharepoint-lists-and-forms.md`, section 7).
 - **Publish propagation is slow and variable** - measured from 4 to more than 10 minutes, with a
   success toast and nothing written in between (`canvas-shipping.md`, "The player serves the previous
   build"). **A negative result inside the first ten-plus minutes proves nothing.**
