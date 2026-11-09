@@ -458,7 +458,8 @@ running it is a trap:
   change and its import).
 - **A client time-out is not a failed import.** An import that timed out on the client still landed
   (the app was published) and left active flows in Draft. Read `importjobs` and the live flow states
-  before deciding it failed, and run the state diff above either way.
+  before deciding it failed (`scripts/import-watch.py` reads both; `--flows-off-ok` names the flows
+  meant to be off), and run the state diff above either way.
 - **A package built from a live export copies the live drift.** Before importing, compare every
   flow's `StateCode` in the package with the repo's sidecar and refuse a package that would switch
   one. That pre-import comparison is still a manual step (a check for it is on the roadmap); the

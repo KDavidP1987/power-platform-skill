@@ -65,6 +65,8 @@ matters.
 | A shared table changed: record it in the shared registry | hook (reminder) | `shared-guard.mjs` | only when shared prefixes are configured |
 | The repo is the source of truth (1); assert on the artifact (2); perform the task as the role (3); verify where it lands (4) | instruction, plus script checks where a tool exists (`inspect-artifact.py`, walks with Dataverse confirms) | SKILL.md 1 to 4 | judgement per task; no file test decides them |
 | An audit must not pass vacuously (11) | instruction; every bundled check has a floor and a self-test | SKILL.md 11 | a design rule for checks, not a project state |
+| Feedback about the skill carries technical details and never the person's data; filed only as the person chose (ask, auto, off) | hook (before tools, in **every** folder, not switched off by `pluginGate`), plus script check | `plugin-gate.mjs` rule E denies a raw issue or comment on the skill's repository (`gh`, `gh api`, a GitHub MCP tool); `feedback.mjs` scrubs, applies the mode, the daily limit and the duplicate check | owner requirement; a public issue cannot be taken back once cached or indexed, and the scrub is mechanical. Whether a problem is worth filing stays a judgement |
+| A refusal covers one action, not the task: try every later step, hand back only a refused step | instruction | SKILL.md "How to behave"; `orchestration.md` 5 | a measured agent handed six steps to the owner after one refusal; done by the agent on request, none was refused. Not mechanical: no file or transcript test separates a fair hand-back from this one |
 
 ### Canvas
 
@@ -86,6 +88,7 @@ matters.
 | No modern NumberInput for data entry (`number-input-entry`); a classic TextInput with `Format: =TextFormat.Number` instead | hook note (each write), never blocks | `check-canvas-format.mjs` | Save clicked straight after typing wrote the previous value and reported success |
 | A button's AccessibleLabel contains its caption (WCAG 2.5.3) | hook note (each write), never blocks | `check-canvas-format.mjs` `label-not-in-name` | a walk click by caption landed on the container and reported OK |
 | After every publish, the first screen renders signed-in data | instruction | `canvas-shipping.md` 7 | package checks passed on a build where OnStart stopped part-way |
+| After a schema change, the data-source refresh in Studio is the agent's (remove, confirm the re-add, save, publish) | tool, plus instruction | `canvas-browser.mjs refresh-source` (refuses to save when a source is not back); `manifest-caches.md` 6 | the round trip ran unattended in about 3 minutes after an agent had handed it to the owner |
 
 ### Power Pages
 
@@ -105,6 +108,8 @@ matters.
 | Select before apply (12): plan by default, the apply acts only on what the plan showed | script check, plus hook (before tools) | `deploy-tables.py`, `seed-data.py` (an apply refuses unless a recorded plan of the same inputs lists the same changes); `plugin-gate.mjs` rule D (no inline Web API write, no write script without a plan mode) | applies that failed part-way or wrote wrong rows: a plan and an apply on different code paths (HTTP 400 after 46 creates), labels never requested (322 rows written blank), a reconcile script with no plan mode |
 | Schema before screens (6); security roles out of the solution (7) | instruction | SKILL.md 6, 7; `dataverse.md`, `security-and-access.md` | a role-carrying import reset live access once; deciding "this import carries roles" from source is possible but has not been missed in a measured build |
 | Before a bulk write, ask what watches the table (9) | instruction, plus `lint-flows.mjs --require-safe-recipients` | SKILL.md 9 | |
+| Every lookup's delete behaviour is chosen, and the app's delete dialog says the same; orphans are audited | script check (plan warning), plus instruction | `deploy-tables.py` warns on any lookup with no `"onDelete"`; `dataverse.md` 12; orphan query in `audits.md` 12 | a header-to-lines link left at RemoveLink kept 262 children of 13 deleted parents, still summed by whole-table totals; the delete dialog promised otherwise. The dialog text is a judgement, so no hook |
+| An import's outcome is read from the server, with the flow states after it | script check | `import-watch.py` (importjobs result per component; flows left off, exit 4) | three imports whose client hung or timed out after the server had finished, one at 20+ minutes for a 6.5-minute job |
 | Model-driven apps | no hook | `model-driven-and-docs.md` | no measured model-driven build; the build gate stays silent for a solution-only folder |
 
 ### Power Automate

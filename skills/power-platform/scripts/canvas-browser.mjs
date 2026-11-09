@@ -54,6 +54,11 @@
 //                                                  left it disabled: a trailing space, or --toggle the selected
 //                                                  property to another value and back (read back); exit 7 if
 //                                                  Save stays disabled
+//   node canvas-browser.mjs refresh-source "<Display name>"[=<logical>] [...] [--publish]
+//                                                  after a schema change: in the held Studio, remove each data source,
+//                                                  confirm Studio re-added it (or add it back by logical name), then
+//                                                  save (and publish --again) so new columns reach the app; exit 4 when
+//                                                  a source is not back (nothing is saved then)
 //   save / publish / dirty act on the Studio tab whose authoring frame holds a Save button, not the newest
 //   node canvas-browser.mjs shot <url> <name>      navigate anywhere, screenshot + aria dump
 //   node canvas-browser.mjs lint <scenario.json>   check a scenario's verbs without a browser
@@ -240,6 +245,9 @@ const SELECTOR_DEFAULTS = {
   'studio.dataSearch':        { surface: 'studio', kind: 'role', role: 'searchbox', name: '^search$', flags: 'i', check: 'conditional' },
   'studio.dataItemDescription': { surface: 'studio', kind: 'template', value: 'Table {logical}', check: 'conditional' },
   'studio.dataSourceAdded':   { surface: 'studio', kind: 'regex', pattern: 'data source was successfully added|was added to your app', flags: 'i', check: 'conditional' },
+  'studio.dataSourceMore':    { surface: 'studio', kind: 'template', value: 'More options for {display}', check: 'conditional' },
+  'studio.dataSourceRemove':  { surface: 'studio', kind: 'role', role: 'menuitem', name: '^remove$', flags: 'i', check: 'conditional' },
+  'studio.dataSourceRemoved': { surface: 'studio', kind: 'regex', pattern: 'successfully removed from (the )?app', flags: 'i', check: 'conditional' },
   'studio.dataPane':          { surface: 'studio', kind: 'anyOf', check: 'conditional', anyOf: [
     { kind: 'role', role: 'tab', name: '^data$', flags: 'i' },
     { kind: 'role', role: 'button', name: '^data$', flags: 'i' }] },
@@ -1702,6 +1710,10 @@ function selftest() {
     ['source dropped on save named', missingSources([{ display: 'Loan Assets', logical: 'x_asset' }, { display: 'Equipment Loans', logical: 'x_loan' }], 'Data\nLoan Assets\nOffice 365').map((t) => t.logical).join() === 'x_loan'],
     ['empty pane misses all', missingSources([{ display: 'A', logical: 'x_a' }], '').length === 1],
     ['blank display falls back to logical', missingSources([{ display: '', logical: 'x_a' }], 'nothing here').length === 1],
+    ['refresh-source: display names and Display=logical', JSON.stringify(parseSourceArgs(['Orders', ' Vendor Sites = app_vendorsite ', ''])) === JSON.stringify([{ display: 'Orders', logical: null }, { display: 'Vendor Sites', logical: 'app_vendorsite' }])],
+    ['refresh-source: flags are not source names', parseSourceArgs(positionals(['Orders', '--publish', '--batch', 'new column', 'Vendors'])).map((t) => t.display).join() === 'Orders,Vendors'],
+    ['refresh-source: menu name fills from the display name', tpl('studio.dataSourceMore', { display: 'Orders' }) === 'More options for Orders'],
+    ['refresh-source: removed status is recognised', rx('studio.dataSourceRemoved').test('Orders successfully removed from app')],
   ].filter(([, okc]) => !okc).map(([k]) => 'publish/tabs: ' + k);
   tabs.push(...P);
   // Save proof: a stamp older than the click is the previous save, not this one.
@@ -3024,28 +3036,7 @@ async function cmdCreate() {
   }
 
   // Data sources, each chosen by its logical name.
-  const addSources = async (list) => {
-    for (const t of list) {
-      const add = await inEditor(page, 'studio.addData', { wait: 30000 });
-      if (!add) { log('  !! Add data not found'); process.exitCode = 4; break; }
-      await add.ctl.click();
-      const box = await inEditor(page, 'studio.dataSearch', { wait: 15000, visible: true });
-      if (!box) { log('  !! Add data search box not found'); process.exitCode = 4; break; }
-      await box.ctl.fill(t.display);
-      await page.waitForTimeout(4000);
-      const desc = new RegExp('\\b' + tpl('studio.dataItemDescription', { logical: t.logical }).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
-      const item = box.frame.getByRole('listitem', { description: desc }).first();
-      if (await item.count() === 0) {
-        log(`  !! no result for "${t.display}" whose table is ${t.logical}. Nothing added; check the display name.`);
-        await capture(page, 'create-no-table-' + t.logical); await page.keyboard.press('Escape').catch(() => {}); process.exitCode = 4; continue;
-      }
-      await item.click();
-      let ok = false;
-      for (let i = 0; i < 30 && !ok; i++) { await page.waitForTimeout(1000); ok = rx('studio.dataSourceAdded').test(await box.frame.evaluate(() => document.body.innerText || '').catch(() => '')); }
-      log(ok ? `   added ${t.display} (${t.logical})` : `   !! ${t.display} (${t.logical}): no "added" confirmation seen - check the Data pane`);
-      if (!ok) process.exitCode = 4;
-    }
-  };
+  const addSources = (list) => addDataSources(page, list, 'create');
   const saveNow = async (label) => {
     const s2 = await inEditor(page, 'studio.saveButton', { wait: 15000, visible: true });
     if (!s2) { log('   !! Save button not found - treat the save as unproven'); return false; }
@@ -3122,6 +3113,108 @@ async function cmdCreate() {
   ctx.on('close', () => { process.exit(process.exitCode || 0); });
   try { await page.waitForTimeout(Number(flag('hold', 3600000))); } catch { /* closed */ }
   await ctx.close().catch(() => {});
+}
+
+// Add Dataverse tables through Studio's Add data, each chosen by its logical name (the search matches
+// display names only, and two tables can share one). Sets exit 4 on any table not confirmed added.
+async function addDataSources(page, list, tag) {
+  for (const t of list) {
+    const add = await inEditor(page, 'studio.addData', { wait: 30000 });
+    if (!add) { log('  !! Add data not found'); process.exitCode = 4; break; }
+    await add.ctl.click();
+    const box = await inEditor(page, 'studio.dataSearch', { wait: 15000, visible: true });
+    if (!box) { log('  !! Add data search box not found'); process.exitCode = 4; break; }
+    await box.ctl.fill(t.display);
+    await page.waitForTimeout(4000);
+    const desc = new RegExp('\\b' + escapeRx(tpl('studio.dataItemDescription', { logical: t.logical })) + '\\b', 'i');
+    const item = box.frame.getByRole('listitem', { description: desc }).first();
+    if (await item.count() === 0) {
+      log(`  !! no result for "${t.display}" whose table is ${t.logical}. Nothing added; check the display name.`);
+      await capture(page, tag + '-no-table-' + t.logical); await page.keyboard.press('Escape').catch(() => {}); process.exitCode = 4; continue;
+    }
+    await item.click();
+    let ok = false;
+    for (let i = 0; i < 30 && !ok; i++) { await page.waitForTimeout(1000); ok = rx('studio.dataSourceAdded').test(await box.frame.evaluate(() => document.body.innerText || '').catch(() => '')); }
+    log(ok ? `   added ${t.display} (${t.logical})` : `   !! ${t.display} (${t.logical}): no "added" confirmation seen - check the Data pane`);
+    if (!ok) process.exitCode = 4;
+  }
+}
+
+// --- refresh-source: the new-column round trip, done in Studio by the driver ------------------
+// A column added to a table does not exist for the app until the data source is re-added in Studio
+// and the app saved and published (manifest-caches.md 6). That round trip is agent work, not the
+// person's: a measured run did it unattended in about 3 minutes, after which the ship's column-cache
+// check passed where it had refused. For a source the formulas use, Studio re-adds it the moment it is
+// removed ("<name> successfully removed from app", and the entry is back) - that re-add IS the
+// refresh. A source nothing uses stays removed; give "Display=logical" and it is added back.
+// Args: display names, or "Display=logical". Pure.
+export function parseSourceArgs(args) {
+  return (args || []).map((a) => String(a).trim()).filter(Boolean).map((a) => {
+    const i = a.indexOf('=');
+    return i > 0 ? { display: a.slice(0, i).trim(), logical: a.slice(i + 1).trim() } : { display: a, logical: null };
+  });
+}
+async function dataSourceMenu(page, display, wait) {
+  const name = new RegExp('^' + escapeRx(tpl('studio.dataSourceMore', { display })) + '$', 'i');
+  const until = Date.now() + wait;
+  do {
+    for (const f of page.frames()) {
+      if (!rx('studio.authoringFrameUrl').test(f.url())) continue;
+      try { const b = f.getByRole('button', { name }).first(); if (await b.count() > 0) return { frame: f, ctl: b }; } catch { /* detached */ }
+    }
+    if (Date.now() < until) await page.waitForTimeout(1000);
+  } while (Date.now() < until);
+  return null;
+}
+async function cmdRefreshSource() {
+  const want = parseSourceArgs(positionals(argv.slice(1)));
+  if (!want.length) {
+    log('usage: refresh-source "<Display name>"[=<logical>] [...] [--publish] [--batch "<what>"]');
+    log('  Removes each Dataverse source in the held Studio and confirms Studio re-added it (or adds it back');
+    log('  by its logical name), saves, and with --publish publishes, so new columns reach the app.');
+    process.exitCode = 1; return;
+  }
+  const { browser, ctx } = await attach();
+  const { page, scan } = await editingTab(ctx);
+  await page.bringToFront();
+  if (rx('studio.titleReadOnly').test(await page.title())) { log('  READ-ONLY - nothing can be refreshed from here.'); await browser.close(); process.exitCode = 3; return; }
+  if (scan && scan.disconnected) { log('  !! Studio shows "There\'s been a disconnect". Not touching the data sources.'); log(DISCONNECT_NOTE); await browser.close(); process.exitCode = 3; return; }
+  for (const f of page.frames()) await dismissBubbles(f).catch(() => 0);
+  const pane = await inEditor(page, 'studio.dataPane', { wait: 30000, visible: true });
+  if (!pane) { log('  !! the Data pane was not found in the left rail'); await capture(page, 'refresh-no-pane'); await browser.close(); process.exitCode = 4; return; }
+  await pane.ctl.click().catch(() => {});
+  await page.waitForTimeout(2500);
+  let failed = 0;
+  for (const t of want) {
+    log('  ' + t.display);
+    const more = await dataSourceMenu(page, t.display, 15000);
+    if (!more) { log('    !! not in the Data pane (names are display names, as the pane lists them)'); await capture(page, 'refresh-missing'); failed++; continue; }
+    await more.ctl.click();
+    const rm = await inEditor(page, 'studio.dataSourceRemove', { wait: 10000, visible: true });
+    if (!rm) { log('    !! no Remove in its menu'); await page.keyboard.press('Escape').catch(() => {}); await capture(page, 'refresh-no-remove'); failed++; continue; }
+    await rm.ctl.click();
+    let removed = false;
+    for (let i = 0; i < 30 && !removed; i++) { await page.waitForTimeout(1000); removed = rx('studio.dataSourceRemoved').test(await framesText(page)); }
+    log(removed ? '    removed' : '    !! no "removed" confirmation seen');
+    const back = await dataSourceMenu(page, t.display, 20000);
+    if (back) { log('    re-added by Studio (the formulas use it) - that is the refresh'); continue; }
+    if (t.logical) { log('    not re-added by Studio (nothing uses it yet); adding it back as ' + t.logical); await addDataSources(page, [t], 'refresh'); if (process.exitCode === 4) failed++; continue; }
+    log('    !! REMOVED and not back. Add it again: refresh-source "' + t.display + '=<logical name>" or Add data by hand.');
+    failed++;
+  }
+  await capture(page, 'refresh-done');
+  await browser.close();
+  if (failed) { log('\n  ' + failed + ' source(s) not refreshed - not saving. Fix them, then run refresh-source again.'); process.exitCode = 4; return; }
+  log('\n  Saving ...');
+  await cmdSave();
+  if (process.exitCode) { log('  The save is unproven (above) - not publishing.'); return; }
+  if (has('publish')) {
+    // The .pa.yaml source is unchanged by a data-source refresh, so publish's unchanged-source guard
+    // would refuse it; this publish ships the new data-source manifest, not new source.
+    if (!argv.includes('--again')) argv.push('--again');
+    await cmdPublish();
+  } else log('  Saved. Publish (`publish --again`) before a build: the published manifest is what the column cache reads.');
+  log('  Prove it: the ship\'s column-cache check, or `pac canvas download` and the manifest read in manifest-caches.md 6.');
 }
 
 // --- doctor: are the UI anchors still where the driver expects them? ---------------------------
@@ -3445,7 +3538,8 @@ async function autoTidy() {
 
 const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, connection: cmdConnection, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
   keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot,
-  tabs: cmdTabs, tidy: cmdTidy, 'second-tab': cmdSecondTab, 'studio-has': cmdStudioHas, dirty: cmdDirty, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm };
+  tabs: cmdTabs, tidy: cmdTidy, 'second-tab': cmdSecondTab, 'studio-has': cmdStudioHas, dirty: cmdDirty, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm,
+  'refresh-source': cmdRefreshSource };
 
 if (argv.includes('--selftest')) selftest();
 else if (!commands[cmd]) {
@@ -3456,6 +3550,7 @@ else if (!commands[cmd]) {
   log('  create --name N --solution-id GUID [--form-factor tablet|phone] [--layout responsive|fixed] [--tables a,b] [--publish] [--close]');
   log('  studio [--reload] | keys [combo] | save | publish [--reload-first] | close-studio [--keep-browser] | shot <url> <name>');
   log('  tabs | tidy [--all] [--studio] [--dry-run] | second-tab [--expect a,b] | studio-has <name...> | dirty [--toggle <formula>]');
+  log('  refresh-source "<Display name>"[=<logical>] [...] [--publish]   new columns: remove, re-add, save (and publish) a source');
   log('  doctor [--player-only|--studio-only] [--record]   are the UI anchors in assets/selectors.json still valid?\n');
   log('  config:  ' + (CONFIG_PATH || '(none found - pass --config or create scripts/canvas-app.json)'));
   if (APP.appId) log('  app:     ' + (APP.appName || '') + '  ' + APP.appId);

@@ -256,8 +256,18 @@ else is the agent's work.
   driver uses (`reporting.md`, "The refresh runs in Fabric").
 - Sign-in: once per identity, at the start (`references/first-run.md`), never repeated mid-build.
 - When the person must act, give one line to run in the session and verify the effect yourself.
+- **A refusal covers that one action, not the rest of the task.** After the permission layer refused
+  one production action (an in-place flow deploy), a measured agent turned every remaining step into
+  a checklist for the owner: run the deploy, run a setting migration, remove and re-add a data source
+  in Studio, save, publish, import. Asked to do it all itself, it did every step - a Web API migration,
+  the Studio data-source refresh and publish through the browser, the ship, the import, the flow
+  check, even the in-place deploy - and none was refused. So: try each later step yourself; hand back
+  only a step that is itself refused, as one `!` line saying why; Studio steps (Data pane refresh,
+  Save, Publish) are driver work (`canvas-browser.mjs refresh-source`, `save`, `publish`), never the
+  person's. In the hand-back, list what you did before what you need.
 - Collect every decision you need at the start (theme, names, who receives messages, sample-data
-  volume) so the build then runs without stopping.
+  volume, how feedback about the skill is filed - `feedback.md` section 2) so the build then runs
+  without stopping.
 
 ## 6. Browser hygiene
 

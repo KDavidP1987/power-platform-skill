@@ -191,11 +191,20 @@ Refresh did rebind a new column for one source while other evidence says it does
 unknown. Never trust it - verify by downloading the published app.) The cure:
 
 1. In Studio: **Remove** the data source, **Add data** it back (section 9 for what that click path
-   really does).
+   really does). For a source the formulas use, Studio re-adds it the moment it is removed (status
+   "<name> successfully removed from app", and the entry is back): that re-add is the refresh.
 2. **Save and Publish from Studio** (a save alone never reaches the shipping path, because
    `pac canvas download` returns the PUBLISHED app).
 3. Confirm the new columns in a fresh download.
 4. Re-ship from git, and confirm `LoadFromYaml` is true again (publishing from Studio flipped it).
+
+Steps 1 and 2 are the agent's, not the person's: `canvas-browser.mjs refresh-source "<Display
+name>" [...] --publish` does them in the held Studio (a source nothing uses yet needs
+`"<Display name>=<logical name>"` so it can be added back), and refuses to save when a source is not
+back. Measured: the same steps, driven by hand through Playwright, ran unattended in about 3 minutes,
+and the ship's column-cache check then passed where it had refused 10 minutes earlier. The command
+itself is new and not yet run against a live Studio: if it reports a control not found, do the two
+steps through the driver's `studio` session by hand and report it (`feedback.md`).
 
 A freshly added source can also snapshot **incomplete** metadata: a junction table's first snapshot
 lacked one lookup column, and a Studio refresh fixed it. Check a new source's columns before

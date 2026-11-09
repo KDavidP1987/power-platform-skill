@@ -619,6 +619,16 @@ function planReady(root) {
 export function evaluatePre(root, input = {}, env = process.env) {
   const tool = input.tool_name || '';
   const ti = input.tool_input || {};
+  // E. feedback about the skill goes out only through feedback.mjs (references/feedback.md), so its privacy
+  //    scrub always runs. In every folder, and not switched off by "pluginGate": false - it guards the
+  //    person's data, not a build order.
+  if (rawSkillIssueWrite(tool, ti, root)) {
+    return 'power-platform plugin [feedback]: an issue or comment on the skill\'s repository is written through ' +
+      'scripts/feedback.mjs, never directly: `feedback.mjs template <defect|lesson>`, fill it in generic terms, ' +
+      '`feedback.mjs draft --kind ... --title ... --body-file ...`, then `feedback.mjs file <draft> [--yes]` ' +
+      '(or `comment <issue> <draft>`). It adds the technical details and refuses project names, ids, URLs and data ' +
+      '(references/feedback.md).';
+  }
   const isFile = /^(Write|Edit|MultiEdit)$/.test(tool);
   const isShell = /^(Bash|PowerShell)$/.test(tool);
   if (!isFile && !isShell) return null;
@@ -674,6 +684,35 @@ export function evaluatePre(root, input = {}, env = process.env) {
     }
   }
   return null;
+}
+
+// Does this tool call write an issue or comment on the skill's own repository by hand? The shell form
+// is a gh segment (issue create / comment, issue edit with a title or body, or gh api on .../issues);
+// it targets the skill when it names the repository, or names none while running inside the skill's
+// own clone. The MCP form is a GitHub server's issue or comment tool with the skill's repo. feedback.mjs
+// itself calls gh as a child process, which no hook sees.
+const SKILL_REPO = /KDavidP1987\/power-platform-skill\b/i;
+function isSkillClone(root) {
+  try { return JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8')).name === 'power-platform'; } catch { return false; }
+}
+export function rawSkillIssueWrite(tool, ti, root) {
+  if (/^mcp__.+__(issue_write|create_issue|add_issue_comment|update_issue_comment|create_issue_comment|update_issue)$/.test(tool)) {
+    return /^power-platform-skill$/i.test(String(ti.repo || '')) && (!ti.owner || /^KDavidP1987$/i.test(String(ti.owner)));
+  }
+  if (!/^(Bash|PowerShell)$/.test(tool)) return false;
+  const cmd = withoutHeredocs(String(ti.command || ''));
+  for (const seg of cmd.split(/&&|\|\||[;|\n]/)) {
+    const s = seg.trim();
+    const m = s.replace(/^&\s*/, '').match(/^"([^"]+)"|^'([^']+)'|^(\S+)/);
+    const prog = m ? (m[1] || m[2] || m[3]).replace(/\.exe$/i, '') : '';
+    if (!/(^|[\\/])gh$/i.test(prog)) continue;
+    const writes = /\bissue\s+(create|new|comment)\b/i.test(s) || (/\bissue\s+edit\b/i.test(s) && /\s(--title|-t|--body|-b|--body-file|-F)\b/.test(s))
+      || (/\bapi\b/i.test(s) && /\/issues\b/i.test(s) && /(-X\s*|--method\s+)(POST|PATCH)\b|\s(-f|-F|--field|--raw-field|--input)\s/i.test(s));
+    if (!writes) continue;
+    if (SKILL_REPO.test(s)) return true;
+    if (!/\s(--repo|-R)\s/.test(s) && !/repos\//.test(s) && isSkillClone(root)) return true;
+  }
+  return false;
 }
 
 // Does this shell command RUN the schema deployer for real? Only a segment whose program is the script
@@ -992,6 +1031,30 @@ function selftest() {
     check('non-token lakehouse write passes', evaluate(tmp, {}, env), silent);
     rm('canvas'); rm('DESIGN.md'); rm('design');
     check('unrelated write stays silent', evaluatePre(tmp, { tool_name: 'Write', tool_input: { file_path: 'notes/readme.md' } }, env), silent);
+    // E. feedback through feedback.mjs only
+    {
+      const fb = (tool, ti, root = tmp) => evaluatePre(root, { tool_name: tool, tool_input: ti }, env);
+      const denied = (g) => typeof g === 'string' && g.includes('feedback.mjs');
+      check('E: gh issue create on the skill repo is denied', fb('Bash', { command: 'gh issue create --repo KDavidP1987/power-platform-skill --title x --body y' }), denied);
+      check('E: full-path gh.exe comment is denied', fb('PowerShell', { command: '& "C:\\Tools\\gh\\bin\\gh.exe" issue comment 3 -R KDavidP1987/power-platform-skill --body x' }), denied);
+      check('E: gh api POST to the skill\'s issues is denied', fb('Bash', { command: 'gh api repos/KDavidP1987/power-platform-skill/issues -f title=x' }), denied);
+      check('E: a GitHub MCP issue write on the skill repo is denied', fb('mcp__github__issue_write', { owner: 'KDavidP1987', repo: 'power-platform-skill', title: 'x' }), denied);
+      check('E: another repository is not touched', fb('Bash', { command: 'gh issue create --repo someone/other --title x' }), silent);
+      check('E: an MCP write on another repo is not touched', fb('mcp__github__issue_write', { owner: 'someone', repo: 'other' }), silent);
+      check('E: reading issues is allowed', fb('Bash', { command: 'gh issue list --repo KDavidP1987/power-platform-skill' }), silent);
+      check('E: gh issue close is allowed', fb('Bash', { command: 'gh issue close 4 --repo KDavidP1987/power-platform-skill' }), silent);
+      check('E: running feedback.mjs is allowed', fb('Bash', { command: 'node scripts/feedback.mjs file .ship-work/feedback/a.md --yes' }), silent);
+      check('E: a heredoc that quotes the command is data', fb('Bash', { command: "cat > notes.md <<'EOF'\ngh issue create --repo KDavidP1987/power-platform-skill\nEOF" }), silent);
+      const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-gate-clone-'));
+      fs.mkdirSync(path.join(clone, '.claude-plugin'));
+      fs.writeFileSync(path.join(clone, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'power-platform' }));
+      check('E: a bare gh issue create inside the skill clone is denied', fb('Bash', { command: 'gh issue create --title x --body y' }, clone), denied);
+      fs.mkdirSync(path.join(clone, 'scripts'));
+      fs.writeFileSync(path.join(clone, 'scripts', 'canvas-app.json'), JSON.stringify({ pluginGate: false }));
+      check('E: holds even with pluginGate false', fb('Bash', { command: 'gh issue create --title x --body y' }, clone), denied);
+      check('E: a quoted path with spaces is still gh', fb('PowerShell', { command: '& "C:\\Program Files\\GitHub CLI\\gh.exe" issue create -R KDavidP1987/power-platform-skill -t x -b y' }), denied);
+      fs.rmSync(clone, { recursive: true, force: true });
+    }
     put('fabric/report/App.Report/definition.pbir', '{}');
     check('report only, no DESIGN.md blocks (no prototype demand)', evaluate(tmp, {}, env), (g) => blocks('DESIGN.md is missing')(g) && !g.includes('prototype.html is missing'));
     rm('fabric');

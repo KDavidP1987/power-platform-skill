@@ -465,11 +465,18 @@ often more than one row.
 - **Measured: every lookup a provisioning script had created was RemoveLink**, including those into
   shared vendor, cost-centre and GL tables read by three apps. Nothing had failed; the first delete of a
   shared row would have blanked the field across all of them. `deploy-tables.py` takes `"onDelete"` per
-  lookup and warns at plan time on a lookup to a shared table without one. To change an EXISTING
+  lookup and warns at plan time on every lookup without one (shared or the manifest's own). To change an EXISTING
   relationship, PUT `RelationshipDefinitions(<id>)` with the full `OneToManyRelationshipMetadata` body
   (read it, change `CascadeConfiguration.Delete`, send it all back), prove it with a parent/child test
   pair (the parent's delete must be refused), and export the solution so the next import does not put
   RemoveLink back.
+- **Measured: a header-to-lines link left at the RemoveLink default kept 262 child rows of 13
+  deleted parents**, each with a blank lookup and still carrying its amounts. A parent-first screen stopped
+  showing them; a whole-table `Sum` and a Power BI fact over the child table kept counting them, so
+  totals differed by screen. The app's delete dialog had promised the children went too. So: set the
+  cascade deliberately on every parent-child link, make the delete dialog say exactly what the
+  relationship does (Cascade: "and its N lines"; Restrict: "delete its lines first"), and run the
+  orphan audit (`audits.md` section 12) after any delete feature ships.
 - **Restrict into a shared table stops every app deleting those rows** - which is why shared rows are
   deactivated, not deleted. Record it in the shared change log, and count inbound Restrict links
   before planning any delete of a shared row.

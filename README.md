@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.39.0](https://img.shields.io/badge/plugin-0.39.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.40.0](https://img.shields.io/badge/plugin-0.40.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.39.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.40.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -62,7 +62,7 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 | 9 | SharePoint as a data source: delegation, the 5,000-item threshold, staying on a standard licence | Common in real tenants; written down nowhere yet | Partly done in 0.38 and 0.39: `references/sharepoint-lists-and-forms.md` (lists, views and site pages by REST; customised list forms; required columns, deletes and throttled walks). Open: delegation, the 5,000-item threshold, licence limits |
 | 10 | Approvals in Teams and Outlook, and the one-Approvals-connection-per-person limit | Every approval flow meets it | Open |
 | 11 | Two independent real builds in different tenants | A 1.0 criterion; every build so far ran in one tenant | Open: needs a second tenant |
-| 12 | Driver commands `add-data` and `refresh-source` for an existing app | Both were done by hand-written browser helpers in two projects; the recipe is in `browser-verification.md` section 12 | Open: port and prove against a live Studio session before release |
+| 12 | Driver commands `add-data` and `refresh-source` for an existing app | Both were done by hand-written browser helpers in two projects; the recipe is in `browser-verification.md` section 12 | Partly done in 0.40: `refresh-source` shipped, selftested but not yet run against a live Studio (its three selectors are marked unverified; prove it on the next schema change and record `lastVerified`). `add-data` open |
 | 13 | SKILL.md against Anthropic's current skill guidance: body under 5,000 tokens with the must-hold rules first (Claude Code keeps only the first 5,000 tokens of a skill after compaction), and a measured check that the newest models do not need the prescriptive passages | The body is about 10,500 tokens; after compaction everything from the tool table down is lost | Done in 0.31: about 4,100 tokens, 141 of 148 graded checks as before, 9% cheaper; CI fails a body over 20,000 characters |
 | 14 | Driver command `insert-gallery --screen S --name N` for the measured new-gallery workaround (Insert > Blank vertical gallery, rename, save) | Studio tears down on a push that adds a gallery to an existing screen; the workaround is measured twice but its Studio steps are still hand-driven | Open: port and prove against a live Studio session before release |
 | 15 | A pre-import check that refuses a package whose flow StateCode differs from the repo | A client-side import timeout left active flows in Draft, and a package rebuilt from the live export would have carried the drift into the next import; only the post-import state diff exists today | Open |
@@ -155,7 +155,7 @@ The method and references need nothing installed. The tools need:
 | Need | For | Notes |
 |---|---|---|
 | **Node 20+** | Hooks, flow linter, browser driver | No npm dependencies for the hooks or the linter |
-| **Python 3** | `ship-canvas.py`, `inspect-artifact.py`, `check-drift.py`, `deploy-tables.py`, `canvas-mcp.py`, `flow-runs.py`, `run-flow.py`, `audit-pages-permissions.py`, `check-published-order.py`, `seed-data.py`, `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `pbi-theme.py` | Standard library only |
+| **Python 3** | `ship-canvas.py`, `inspect-artifact.py`, `check-drift.py`, `deploy-tables.py`, `canvas-mcp.py`, `flow-runs.py`, `run-flow.py`, `import-watch.py`, `audit-pages-permissions.py`, `check-published-order.py`, `seed-data.py`, `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `pbi-theme.py` | Standard library only |
 | **.NET 10 SDK** | The canvas authoring server (`canvas-mcp.py`) | Started with `dnx`; nothing else to install |
 | **PowerShell** (optional) | `dv-token.ps1`, owner scripts | Windows PowerShell 5.1 or PowerShell 7 |
 | **Power Platform CLI** (`pac`) | Packing, importing, environment checks | `pac org who` is part of every pre-flight |
@@ -705,6 +705,8 @@ skills/power-platform/
   scripts/contract-to-walk.mjs  acceptance contract to walk scenarios, with coverage checks
   scripts/flow-runs.py          why a flow run failed, read only
   scripts/run-flow.py           run a scheduled flow once after a deploy, and count what it sent
+  scripts/import-watch.py       an import's outcome from the server, and the flows it left off
+  scripts/feedback.mjs          feedback about the skill as an issue: technical details, no project data
   scripts/audit-pages-permissions.py  Power Pages permissions, allow-lists and headers
   scripts/dv-token.ps1          a Dataverse token with one sign-in
   scripts/hooks/                preflight, check-pa-yaml, check-standards, shared-guard, audit-stop, lib
@@ -735,9 +737,12 @@ CI runs the same checks plus every bundled tool's `--selftest`, and fails if any
 
 ## Contributing
 
-Issues and pull requests are welcome; agents using the skill offer issues the way
-[`references/feedback.md`](skills/power-platform/references/feedback.md) describes (the skill's behaviour only,
-never what you are building). The most useful contributions are **traps with signatures**:
+Issues and pull requests are welcome. Agents using the skill give feedback the way
+[`references/feedback.md`](skills/power-platform/references/feedback.md) describes: the skill's behaviour
+only, never what you are building, through `scripts/feedback.mjs`, which adds the technical details and
+refuses project names, ids, URLs and data. You choose whether the agent asks first each time (the
+default), files on its own, or never offers: `node skills/power-platform/scripts/feedback.mjs mode
+ask|auto|off`. The most useful contributions are **traps with signatures**:
 a Power Platform failure, the symptom it shows, the cause, and the shortest test that proves it.
 Please keep examples generic (no tenant, company or person identifiers), add a `--selftest` case
 for any new checker rule, and record the change under `[Unreleased]` in the changelog.
