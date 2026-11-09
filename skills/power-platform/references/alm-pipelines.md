@@ -415,7 +415,8 @@ with `--packagetype Both` (section 3). A team that ships unmanaged replaces `Man
 ## 13. What a green pipeline does not prove
 
 - **That the import landed what was built.** [Observed] The client can time out while the server
-  finishes, or report success for a job that did not publish. Read the `importjobs` row, and
+  finishes, or report success for a job that did not publish. Read the `importjobs` row
+  (`scripts/import-watch.py`), and
   download the app and read `LoadFromYaml` for canvas changes (`canvas-shipping.md`).
 - **That the published player runs the new build.** [Observed] The player caches. Confirm the build
   stamp in the browser (`browser-verification.md` section 10).

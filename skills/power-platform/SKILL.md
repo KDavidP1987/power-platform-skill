@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.39.0"
+  version: "0.40.0"
 ---
 
 # Power Platform development
@@ -92,9 +92,9 @@ refuses, which stay instructions, and the surface each applies to.
   names, recipients, sample-data volume); do Studio steps through the driver, create this build's
   own connections, sign in once. With no person present, take your own recommendations, record them
   in `docs/decisions.md`, and never end a turn on a question. `references/orchestration.md` section 5.
-- **When a step is the person's, hand them one `!`-prefixed line** to run in this session, after
-  running every offline step yourself: absolute quoted paths, what it does, what to expect; then
-  verify the effect. `references/tooling-and-auth.md`.
+- **A refusal covers one action, not the task.** Try every later step yourself (Studio steps too, by
+  the driver). Hand back only a step that is itself refused, as one `!`-prefixed line with why: done
+  offline first, absolute quoted paths, what to expect; then verify. `references/orchestration.md` 5.
 - **Read the first diagnostic, not the loudest.** One broken `ClearCollect` in `App.OnStart` produces
   hundreds of errors on screens nobody touched.
 - **Never reload Studio or import while a co-authoring push is held, and close Studio through its
@@ -104,8 +104,9 @@ refuses, which stay instructions, and the surface each applies to.
 - **Leave the machine as you found it**: close the tabs you opened, release every Studio session,
   run `canvas-browser.mjs tidy` before the hand-back.
 - **Write lessons where the next person will look** - the shared standards, not only one project's
-  notes. When the skill itself misled you or had no answer, offer the person a GitHub issue about the
-  skill's behaviour only - never what they are building, names or ids. `references/feedback.md`.
+  notes. When the skill itself misled you or had no answer, give feedback as a GitHub issue through
+  `scripts/feedback.mjs` (it adds technical details and refuses project data): offer it, or file it
+  yourself when the person chose `mode auto`. `references/feedback.md`.
 - **Keep the skill current.** The plugin checks for a newer release weekly at session start; relay
   its notice once and update only on a yes. Without the plugin's hooks, run
   `node scripts/hooks/update-check.mjs --print` once per session. What changed: `CHANGELOG.md` here.

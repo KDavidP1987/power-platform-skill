@@ -36,7 +36,7 @@ in on a new machine, and the smoke test that proves the setup, see `first-run.md
   `out/` with timestamps, and stop.
 - **The client can misreport a server-side result.** Twice `pac solution import` timed out or hung
   (30 minutes; killed at 25) while the server job had finished in three to five minutes with zero
-  failures - only the publish was missing. Read the `importjobs` table (progress, completion time)
+  failures - only the publish was missing. Read the `importjobs` table (`scripts/import-watch.py`)
   before believing the client's exit or a wrapper's "nothing was imported"; run `pac solution
   publish` if the import landed unpublished; stamp the ship from the job's completion time.
 - **pac has no flow commands, and `pac canvas validate` is retired.** Flow definitions are authored

@@ -225,6 +225,15 @@ from the start (`tooling-and-auth.md` section 6):
 Granting app access is the same shape: one script that assigns the roles, updates any in-app
 administrator list, and shares the app with no invitation email, then reads all three back.
 
+The list is short: everything else, including every later step after one refusal, is the agent's
+(`orchestration.md` section 5).
+
+**One more setup decision: feedback about the skill.** Ask once, with the others: when the skill
+itself gets something wrong, should the agent file a GitHub issue about it automatically, ask first
+each time (the default), or never? Record it with `node scripts/feedback.mjs mode auto|ask|off`; it
+holds for every project on the machine. Issues carry technical details only, never the project's
+data (`feedback.md`).
+
 ## 11. The smoke test
 
 Run all of it before the first change. Every line must pass; a line that cannot run is not a pass.

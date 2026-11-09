@@ -472,6 +472,14 @@ Some invariants live in data or in the environment, where no source audit can se
   principals). `Depth` comes back as a string. A decision written in one project's log does not
   constrain another project's role on a shared table - only an audit of the environment does
   (`shared-environments.md`).
+- **Orphans: child rows whose parent is gone.** For each lookup that the app treats as required
+  but the schema does not (`RequiredLevel` None), count child rows where it is blank:
+  `GET <child set>?$filter=_<lookup>_value eq null&$count=true&$top=0`, and list the relationships'
+  `CascadeConfiguration.Delete` beside the counts (`EntityDefinitions(LogicalName='<parent>')/
+  OneToManyRelationships`). A nonzero count on a RemoveLink link is the deletes the app made; the
+  measured case was 262 children of 13 deleted parents, still summed by every whole-table total
+  (`dataverse.md` section 12). Decide per link: delete them (plan first), relink them, or change the
+  cascade - never leave totals that differ by screen.
 - **Ask the data, not the code.** In one app, four consecutive defects were tables modelled but
   never populated, or seeded but never read; none could fail a build, a test or a screenshot. An
   audit counting rows, rows with an author, and readers per table found them.

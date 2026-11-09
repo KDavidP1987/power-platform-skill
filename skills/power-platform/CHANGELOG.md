@@ -11,6 +11,63 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-09
+
+Feedback about the skill, from a person who uses it to the skill's issues, with technical details and
+none of their data; and four lessons from three Dataverse canvas apps, three of them as tools. Each
+was sorted into instruction, tool or hook by the promotion criteria in `rules-and-scope.md` section 2.
+
+### Added
+
+- `scripts/feedback.mjs`: `template`, `draft`, `scrub`, `file`, `comment`, `mode`. `draft` appends the
+  technical details an issue needs (skill version, install kind, OS, Node, Python and pac versions, the
+  reference or script involved and its exit code) and refuses text carrying GUIDs, URLs and tenant
+  hosts, email addresses, IP addresses, tokens and keys, connection strings, user folders, this
+  machine's user, host and git identity, and the project's own names and publisher prefix (read from
+  its config, `Solution.xml`, `"feedbackPrivateTerms"` or a `.feedback-private` file). No override
+  flag. `file` applies the person's mode, finds an issue with the same title (exit 6, add a
+  `comment` instead), and files through `gh`, or prints a filled-in new-issue link.
+- Feedback modes, chosen once by the person (`feedback.mjs mode`, kept per machine):
+  `ask` (the default: draft, show, file on a yes), `auto` (the agent files a clean draft itself, at
+  most 3 a day, labelled `agent-filed`, and tells the person the link), `off`. Asked with the other
+  setup decisions (`first-run.md` section 10).
+- Plugin gate rule E, in every folder and not switched off by `"pluginGate": false`: an issue or
+  comment on the skill's repository written any other way (`gh issue create` or `comment`, `gh api`
+  on its issues, a GitHub MCP issue tool) is denied, so the scrub always runs. The PreToolUse matcher
+  now includes the GitHub MCP issue tools.
+- `scripts/import-watch.py`: a solution import's outcome from the server's `importjobs` row
+  (per-component results from its data), then whether every cloud flow in the solution is on (exit 4
+  for a flow left off; `--flows-off-ok` for those meant to be). Run beside `pac solution import` with
+  `--wait`: a measured client sat at "Solution Importing..." for over 20 minutes for a job the server
+  had completed in 6.5. Read-only; proved against a live import (196 components succeeded, 16
+  warnings, one flow off by design).
+- `canvas-browser.mjs refresh-source "<Display name>"[=<logical>] ... [--publish]`: the new-column
+  round trip in the held Studio. Removes each data source, confirms Studio re-added it (it does, at
+  once, for a source the formulas use) or adds it back by logical name, then saves and publishes.
+  Nothing is saved when a source is not back (exit 4). A measured run of the same steps by hand
+  through Playwright took about 3 minutes, after an agent had handed them to the owner. **Not yet run
+  against a live Studio**: its three selectors are marked unverified in `assets/selectors.json`.
+
+### Changed
+
+- `deploy-tables.py --plan` warns on every lookup with no `"onDelete"`, not only one into a shared
+  table: a header-to-lines link left at RemoveLink kept 262 child rows of 13 deleted parents, still
+  summed by whole-table totals, while the app's delete dialog said they went too.
+- Hand-backs: a refusal covers one action, not the task. After one refused production action, an
+  agent handed six later steps to the owner; done by the agent on request, none was refused. SKILL.md
+  "How to behave" and `orchestration.md` section 5 (an instruction: no hook can tell a fair hand-back
+  from this one).
+- `references/feedback.md` rewritten around the modes, the tool and what is and is not enforced.
+- References: the orphan audit (`audits.md` 12), cascade and delete-dialog text (`dataverse.md` 12),
+  the refresh as the agent's step (`manifest-caches.md` 6, `canvas-shipping.md`), the server-side
+  import read (`canvas-shipping.md`, `alm-pipelines.md` 13, `power-automate.md`, `tooling-and-auth.md`),
+  and the new rules in the `rules-and-scope.md` matrix.
+
+### Fixed
+
+- The issue forms' `defect` and `lesson` labels did not exist on the repository, so GitHub dropped
+  them; they now exist, with `agent-filed`.
+
 ## [0.39.0] - 2026-11-06
 
 Lessons from a SharePoint list app and its customised form, and from two Dataverse canvas apps. Four

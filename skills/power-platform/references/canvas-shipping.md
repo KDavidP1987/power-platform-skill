@@ -218,7 +218,9 @@ pac solution import --path import-me.zip --publish-changes
 
 **The live baseline is the PUBLISHED app.** The manifest the build starts from - including each
 data source's cached column list - is the published version's, not the last save. After a schema
-change, refresh the changed data sources in Studio, save **and publish**, then build. Measured on
+change, refresh the changed data sources in Studio, save **and publish**, then build
+(`canvas-browser.mjs refresh-source "<Display name>" --publish` does all three; never hand it to the
+person - `manifest-caches.md` section 6). Measured on
 one build: four tables refreshed and saved but not published; the build refused with eleven
 "column exists live but not in the app's cached column list" findings; after a publish of the same
 refreshed (otherwise unchanged) app, the rebuild had 0 drift. `ship-canvas.py` prints that remedy
@@ -647,9 +649,12 @@ bound - keep the gate).
   solution import` timed out at 30 minutes and the wrapper printed "import failed; nothing was
   imported" while the server job had finished in about five minutes with 0 failures (only the
   publish was missing); and once it never returned and was killed at 25 minutes while the server
-  had finished in about three. Read the **`importjobs`** table (progress, completion time) before
-  believing an exit code or a wrapper's summary; run `pac solution publish` if the import landed
-  unpublished; write any ship stamp from the job's completion time.
+  had finished in about three; a third sat at "Solution Importing..." for over 20 minutes while
+  the job had completed in 6.5. Read the **`importjobs`** table (progress, completion time) before
+  believing an exit code or a wrapper's summary - start the import, then run `scripts/import-watch.py
+  --solution <name> --since <start time> --wait 1800` beside it: COMPLETED is the answer, so stop a
+  client still waiting; it also lists flows the import left off. Run `pac solution publish` if the
+  import landed unpublished; write any ship stamp from the job's completion time.
 - **Print `pac org who` before every import.** The environment is part of the artifact.
 - **Shared solution first.** When several apps' solutions take lookups into a shared reference
   solution, import the shared one first, or the dependent import fails on missing dependencies.

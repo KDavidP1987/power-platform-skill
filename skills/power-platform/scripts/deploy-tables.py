@@ -43,7 +43,9 @@ What it will and will not do:
   - A lookup's delete behaviour is its "onDelete": "RemoveLink" (the default), "Restrict" or
     "Cascade". A lookup to a shared table with no "onDelete" draws a plan warning: RemoveLink there
     means a delete of a shared row in any app silently blanks this column on every row that pointed
-    at it. The behaviour of an existing relationship is never changed here.
+    at it. A lookup between this manifest's own tables with no "onDelete" draws a warning too:
+    RemoveLink keeps the children with a blank lookup, and a total read from the child table keeps
+    counting them. The behaviour of an existing relationship is never changed here.
   - A yes/no column should carry "default": true or false; without one every new row reads No, and
     the plan warns. A live default that differs is reported, never changed.
   - Names Dataverse reserves are refused: <table>id, and the virtual <column>name of a lookup,
@@ -793,6 +795,12 @@ def build_plan(api, m, ctx):
                                   "shared table in any app blanks this column with no error. Set \"Restrict\" "
                                   "(and deactivate shared rows rather than delete them), or \"RemoveLink\" to "
                                   "accept it" % (ln, cl, tg))
+            elif "onDelete" not in c:
+                p.warnings.append("%s.%s -> %s: no \"onDelete\" set, so it will be RemoveLink: deleting a %s row "
+                                  "keeps its %s rows with this column blank, and any total read straight from %s "
+                                  "keeps counting them. Choose deliberately: \"Cascade\" (children go with the "
+                                  "parent), \"Restrict\" (no delete while children exist) or \"RemoveLink\" - and "
+                                  "make the app's delete dialog say the same" % (ln, cl, tg, tg, ln, ln))
             p.add("+ lookup %s.%s -> %s (relationship %s, delete: %s)"
                   % (ln, cl, tg, rel, c.get("onDelete", "RemoveLink")),
                   lambda t=t, c=c: api.post("RelationshipDefinitions", relationship_body(m, t, c, lcid),
@@ -1382,7 +1390,17 @@ def selftest():
         check("plan warns that a lookup to a shared table with no onDelete will be RemoveLink",
               "abc_request.abc_requester -> core_person has no \"onDelete\"" in out
               and "abc_category has no \"onDelete\"" not in out)
+        check("plan warns that a parent-child lookup with no onDelete keeps orphaned children",
+              "abc_request.abc_category -> abc_category: no \"onDelete\" set" in out)
         check("plan shows each lookup's delete behaviour", "delete: RemoveLink)" in out)
+        m_pc = copy.deepcopy(base)
+        for tbl in m_pc["tables"]:
+            for col in tbl.get("columns", []):
+                if col.get("type") == "lookup" and "onDelete" not in col:
+                    col["onDelete"] = "Cascade"
+        rc, out_pc = go(m_pc, org, "--plan")
+        check("an explicit onDelete on a parent-child lookup silences its warning",
+              rc == 0 and "no \"onDelete\" set" not in out_pc)
         m_rs = copy.deepcopy(base)
         m_rs["tables"][1]["columns"][6]["onDelete"] = "Restrict"
         rc, out_rs = go(m_rs, org, "--plan")
