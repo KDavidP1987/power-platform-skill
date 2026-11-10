@@ -38,12 +38,21 @@ What it writes (PATH.md, PATH.html, PATH.json):
   and the source columns it ultimately comes from; flagged columns; and the gaps: input tables with
   no known producer, columns the trace could not follow, and drift.
 
-Exit: 0 written; 1 written, with gaps or drift to read; 2 cannot run.
+Evaluate an existing document (read-only; the JSON records what it was built from):
+  python lineage.py evaluate --doc PATH[.json] [--dataflows DIR] [--notes NOTES.md] [--max-age-days 90]
+  Checks: every column traced, no gaps, drift checked and clean, age, freshness (a dataflow in the
+  chain changed since generation: regenerate), curated notes cover purpose, owner, consumers,
+  refresh and verification, every sensitive column explained in the notes, a consumer and a refresh
+  named. Prints PASS / WARN / FAIL per check.
+
+Exit (doc): 0 written; 1 written, with gaps or drift to read; 2 cannot run.
+Exit (evaluate): 0 no FAIL; 1 a FAIL; 2 cannot run.
 Python 3 standard library only.
 """
 import argparse
 import base64
 import datetime as dt
+import hashlib
 import html
 import importlib.util
 import json
@@ -1543,7 +1552,11 @@ def cmd_doc(a, transport=None):
         f.write(to_html(doc, graph))
     with open(a.out + ".json", "w", encoding="utf-8", newline="\n") as f:
         json.dump({"nodes": [graph.nodes[n] for n in sorted(graph.nodes)], "edges": [{"from": s, "to": t, "item": i, "query": q} for s, t, i, q in sorted(set(graph.edges))],
-                   "focus": doc["focus"], "columns": doc["columns"], "gaps": doc["gaps"], "live": doc["live"]}, f, indent=1, default=str)
+                   "focus": doc["focus"], "columns": doc["columns"], "gaps": doc["gaps"], "live": doc["live"],
+                   "title": doc["title"], "generated": doc["generated"], "items": doc["items"], "notes": doc["notes"],
+                   "consumers": doc["consumers"], "pipelines": [p["name"] for p in doc["pipelines"]],
+                   "inputs": {d.name: text_hash(d.text) for d in list(graph.dfs.values()) + list(graph.ext) if d.name in doc["items"] and getattr(d, "path", None) and d.kind != "External"}},
+                  f, indent=1, default=str)
     traced = sum(1 for rows in doc["columns"].values() for r in rows if r["sources"])
     total = sum(len(rows) for rows in doc["columns"].values())
     print("wrote %s.md, .html, .json: %d tables in scope, %d of %d focus columns traced to a source, %d gap(s)"
@@ -1553,9 +1566,82 @@ def cmd_doc(a, transport=None):
     return 1 if doc["gaps"] else 0
 
 
+def text_hash(text):
+    norm = "\n".join(l.rstrip() for l in (text or "").replace("\r\n", "\n").strip().split("\n"))
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
+
+
+NOTE_TOPICS = [("purpose", r"(?i)\bpurpose\b"), ("owner", r"(?i)\bowner"), ("consumers", r"(?i)\bconsumer"),
+               ("refresh", r"(?i)\brefresh|schedule"), ("verification", r"(?i)\bverif|reconcil|acceptance")]
+
+
+def evaluate(doc, dataflows_dir=None, max_age_days=90, today=None):
+    """[(level, check, detail)] for a lineage document's JSON. level: PASS, WARN, FAIL."""
+    out = []
+    rows = [r for rs in (doc.get("columns") or {}).values() for r in rs]
+    if not rows:
+        return [("FAIL", "coverage", "the document traces no column (no --focus output or an empty one)")]
+    untraced = [r["column"] for r in rows if not r.get("sources")]
+    out.append(("FAIL" if untraced else "PASS", "coverage", "%d of %d columns traced to a source%s" % (
+        len(rows) - len(untraced), len(rows), (": missing " + ", ".join(untraced[:10])) if untraced else "")))
+    gaps = doc.get("gaps") or []
+    out.append(("FAIL" if gaps else "PASS", "gaps", "; ".join(gaps)[:400] if gaps else "every input table has a producer"))
+    live = doc.get("live")
+    if not live:
+        out.append(("WARN", "drift", "not checked: generated without --workspace, so the deployed definitions were never compared"))
+    else:
+        bad = {k: v for k, v in (live.get("drift") or {}).items() if v != "same"}
+        out.append(("FAIL" if bad else "PASS", "drift", ", ".join("%s %s" % kv for kv in bad.items()) if bad else "repo matches the deployed definitions"))
+    gen = doc.get("generated")
+    if gen:
+        age = ((today or dt.date.today()) - dt.date.fromisoformat(gen[:10])).days
+        out.append(("WARN" if age > max_age_days else "PASS", "age", "generated %s (%d days ago)" % (gen[:10], age)))
+    inputs = doc.get("inputs") or {}
+    if dataflows_dir:
+        now = {d.name: text_hash(d.text) for d in read_dataflows(dataflows_dir)}
+        changed = sorted(n for n, h in inputs.items() if n in now and now[n] != h)
+        gone = sorted(n for n in inputs if n not in now and not n.startswith("ext:"))
+        if not inputs:
+            out.append(("WARN", "freshness", "the document records no input hashes (made by an older lineage.py): regenerate it"))
+        else:
+            out.append(("FAIL" if changed else "PASS", "freshness", ("changed since generated: " + ", ".join(changed)) if changed else
+                        "no dataflow in the chain changed since generated%s" % ("; not in the folder: " + ", ".join(gone) if gone else "")))
+    notes = doc.get("notes") or ""
+    if not notes.strip():
+        out.append(("FAIL", "curated notes", "none: purpose, owner, consumers, refresh and verification are not recorded"))
+    else:
+        missing = [t for t, rx in NOTE_TOPICS if not re.search(rx, notes)]
+        out.append(("FAIL" if missing else "PASS", "curated notes", ("missing: " + ", ".join(missing)) if missing else "purpose, owner, consumers, refresh, verification"))
+    sens = [r["column"] for r in rows if r.get("sensitive")]
+    if sens:
+        unexplained = [c for c in sens if c.lower() not in notes.lower()]
+        out.append(("FAIL" if unexplained else "PASS", "sensitive columns", ("not explained in the notes: " + ", ".join(unexplained)) if unexplained else
+                    "%d flagged, each explained in the notes" % len(sens)))
+    if not doc.get("consumers") and not re.search(r"(?i)consumer", notes):
+        out.append(("WARN", "consumers", "no reader outside the chain is named; add --external or say who reads it in the notes"))
+    if not doc.get("pipelines") and not re.search(r"(?i)schedule|refresh", notes):
+        out.append(("WARN", "refresh", "no pipeline or schedule recorded"))
+    return out
+
+
+def cmd_evaluate(a):
+    with open(a.doc if a.doc.endswith(".json") else a.doc + ".json", encoding="utf-8") as f:
+        doc = json.load(f)
+    if a.notes:
+        doc["notes"] = open(a.notes, encoding="utf-8-sig").read()
+    res = evaluate(doc, a.dataflows, a.max_age_days)
+    for level, check, detail in res:
+        print("%-4s  %-17s %s" % (level, check, detail))
+    fails = sum(1 for r in res if r[0] == "FAIL")
+    print("%s: %d check(s), %d failing, %d warning" % (doc.get("title") or a.doc, len(res), fails, sum(1 for r in res if r[0] == "WARN")))
+    return 1 if fails else 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="lineage.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
-    ap.add_argument("command", nargs="?", choices=["doc"])
+    ap.add_argument("command", nargs="?", choices=["doc", "evaluate"])
+    ap.add_argument("--doc")
+    ap.add_argument("--max-age-days", type=int, default=90)
     ap.add_argument("--dataflows")
     ap.add_argument("--pipelines")
     ap.add_argument("--external", action="append")
@@ -1571,6 +1657,15 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.selftest:
         return selftest()
+    if a.command == "evaluate":
+        if not a.doc:
+            ap.print_help()
+            return 2
+        try:
+            return cmd_evaluate(a)
+        except (OSError, ValueError, KeyError) as e:
+            print("cannot run: %s" % e)
+            return 2
     if a.command != "doc" or not a.dataflows or not a.focus or not a.out:
         ap.print_help()
         return 2
@@ -1672,6 +1767,17 @@ def selftest():
         check("markdown has mermaid and curated notes", "```mermaid" in md and "About this data (curated)" in md and "PL_REFRESH" in md)
         check("html has svg, tokens, dark mode", "<svg" in page and ":root{" in page and "prefers-color-scheme:dark" in page)
         check("comments carried into steps", "hours times rate" in md and "approved sheets only" in md)
+        # evaluate: the fixture document (notes lack topics; Rate and Cost unexplained), then fresh notes, then a changed dataflow
+        ev = {c: lv for lv, c, _ in evaluate(data, os.path.join(tmp, "df"), today=dt.date.today())}
+        check("evaluate: coverage, gaps and freshness pass; thin notes fail", ev.get("coverage") == "PASS" and ev.get("gaps") == "PASS"
+              and ev.get("freshness") == "PASS" and ev.get("curated notes") == "FAIL" and ev.get("sensitive columns") == "FAIL" and ev.get("drift") == "WARN")
+        data["notes"] = "Purpose: x. Owner: a team. Consumers: Finance query. Refresh: PL_REFRESH daily. Verification: reconciled. Rate and Cost are pay data."
+        ev = {c: lv for lv, c, _ in evaluate(data, os.path.join(tmp, "df"))}
+        check("evaluate: complete notes pass", ev.get("curated notes") == "PASS" and ev.get("sensitive columns") == "PASS")
+        with open(os.path.join(tmp, "df", "DF_GOLD", "mashup.pq"), "a", encoding="utf-8") as f:
+            f.write("\n// changed\n")
+        ev = {c: lv for lv, c, _ in evaluate(data, os.path.join(tmp, "df"))}
+        check("evaluate: a changed dataflow makes the document stale", ev.get("freshness") == "FAIL")
         # an input with no producer is a gap
         os.remove(os.path.join(tmp, "df", "DF_BRONZE", "mashup.pq"))
         with contextlib.redirect_stdout(buf):
@@ -1707,7 +1813,7 @@ def selftest():
         print("selftest FAILED (%d ok): %s" % (ok, "; ".join(fails)))
         return 1
     print("selftest ok: %d checks (graph edges through helper queries and an outside SQL consumer, column lineage: renamed, computed, joined "
-          "through a record shape, passthrough, a later modification, a SharePoint list through a generic function, sensitive flags; gaps; md/html/json output; lexer)" % ok)
+          "through a record shape, passthrough, a later modification, a SharePoint list through a generic function, sensitive flags; gaps; md/html/json output; evaluate; lexer)" % ok)
     return 0
 
 

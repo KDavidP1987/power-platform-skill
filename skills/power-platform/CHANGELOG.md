@@ -11,6 +11,34 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-10
+
+How to build and how to judge a lineage document, and the next documentation artifacts across app
+development, database design, Power BI and Fabric ETL on the roadmap (23 to 30).
+
+### Added
+
+- `lineage.py evaluate --doc PATH [--dataflows DIR]`: PASS, WARN or FAIL per check on an existing
+  document: every column traced, no gaps, drift checked and clean, age, freshness (a dataflow in the
+  chain changed since the document was made), curated notes covering purpose, owner, consumers,
+  refresh and verification, every sensitive column explained, a consumer and a refresh named. Exit 1
+  on a FAIL. The document JSON now records what it was built from (input hashes, notes, consumers,
+  pipelines). 23 self-test checks.
+- `data-lineage-docs.md`: the build method step by step (offline, live, close the gaps, notes, look,
+  evaluate, commit, keep current), the evaluation table, and a rubric for lineage documents the tool
+  did not make (hand-written pages, lineage-view screenshots, catalogue exports).
+- `assets/templates/lineage-notes.md`: the curated notes skeleton.
+- ROADMAP 23 to 30: architecture decision records and a solution design document; test plans and
+  acceptance scripts with requirement traceability; an integration catalogue; an entity-relationship
+  diagram and schema document from Dataverse metadata; a database design review check with a schema
+  change log; a Power BI report specification and accessibility review; data contracts for gold
+  tables; a data quality and reconciliation report.
+
+### Proved
+
+- `evaluate` on the production timesheet document: the copy made by 0.46.0 failed (no notes or input
+  hashes recorded); regenerated, 7 of 7 checks pass.
+
 ## [0.46.0] - 2026-11-10
 
 Data lineage documents for Fabric medallions (ROADMAP 16, done), and the next documentation types on
