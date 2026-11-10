@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.45.1](https://img.shields.io/badge/plugin-0.45.1-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.46.0](https://img.shields.io/badge/plugin-0.46.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.45.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.46.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -66,6 +66,13 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 | 13 | SKILL.md against Anthropic's current skill guidance: body under 5,000 tokens with the must-hold rules first (Claude Code keeps only the first 5,000 tokens of a skill after compaction), and a measured check that the newest models do not need the prescriptive passages | The body is about 10,500 tokens; after compaction everything from the tool table down is lost | Done in 0.31: about 4,100 tokens, 141 of 148 graded checks as before, 9% cheaper; CI fails a body over 20,000 characters |
 | 14 | Driver command `insert-gallery --screen S --name N` for the measured new-gallery workaround (Insert > Blank vertical gallery, rename, save) | Studio tears down on a push that adds a gallery to an existing screen; the workaround is measured twice but its Studio steps were hand-driven | Done in 0.44: `insert-gallery` and its undo `delete-control`, proved live (insert, rename, save, reopen; then delete, save, reopen) |
 | 15 | A pre-import check that refuses a package whose flow StateCode differs from the repo | A client-side import timeout left active flows in Draft, and a package rebuilt from the live export would have carried the drift into the next import; only the post-import state diff exists today | Done in 0.42: `flow-state-check.py` (package against live and repo, exit 4; proved on a real 17-flow package) |
+| 16 | Data lineage documents for Fabric medallions: column-level lineage from the dataflow M to Dataverse and SharePoint sources, refresh, drift, sensitive columns, curated notes | Teams that read a gold table, access reviews and auditors ask where each column comes from; hand-written lineage goes stale with the next dataflow change | Done in 0.46: `lineage.py` and `data-lineage-docs.md`, proved on a production timesheet chain (33 tables, 50 of 50 columns traced, live drift check) |
+| 17 | Semantic model documentation: tables, relationships, every measure with its DAX, description and the columns it reads, RLS roles, refresh; extending lineage from gold through the model to report visuals | The model is where most report questions land, and measure logic is the least documented part of a Power BI estate | Open |
+| 18 | A data dictionary per app and per medallion layer: every table and column with type, meaning, allowed values (choices by label), source and owner, generated from Dataverse metadata and the lakehouse schema with curated meanings | The most requested document for any data platform; onboarding, report building and audits all start from it | Open |
+| 19 | Operations runbook and dependency map: schedules, refresh order, connections and whose sign-in they use, gateways, what to do when each item fails, who to tell; generated from the live workspace and solution with a curated part | The person on call needs it at the worst moment; one-identity connections and unchained refreshes surface here | Open |
+| 20 | Security and access matrix and a sensitive-data register: roles, column security, sharing, workspace access and the sensitive columns each one exposes (input to a privacy impact assessment) | Access reviews and privacy assessments ask for it, and today it is assembled by hand | Open |
+| 21 | Solution inventory and release notes: every component of a solution (tables, apps, flows, connection references, roles) and, between two versions, what changed, generated from the exported solution and git | Change-advisory boards and the next maintainer need it; release notes drift from what actually shipped | Open |
+| 22 | Report catalogue: every report and page, its model, audience, owner, usage over 90 days and refresh, from the workspace and the usage metrics model | Answers "which report should I use" and finds the unused ones; the workspace audit already reads most of it | Open |
 <!-- backlog:end -->
 
 ## Not yet fully tested
@@ -99,6 +106,7 @@ written from Microsoft's documentation and marked so in the reference (`[Unteste
 | `seed-data.py`, `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `pbi-theme.py` | Self-test only | Generalised from scripts a measured build ran in a tenant | A live run of the bundled versions | The next full build |
 | `run-flow.py --run` (run a scheduled flow once) | Self-test only | Its refusals, by self-test | A run against an environment (one aimed at production was refused, correctly) | A test environment |
 | Approvals in Teams and Outlook | Proved | Live in 0.45: connection made by API, create and wait, approve and reject in the approval centre, outcome fields and the Approvals tables read back; the Teams card and Outlook actionable message confirmed by the recipient (0.45.1) | Group and guest approvers; custom and everyone-must-approve types | Next real approval flow |
+| `lineage.py` data lineage documents | Proved | 0.46: a production medallion chain (Dataverse and SharePoint bronze, silver, gold, a Gen1 consumer), 50 of 50 columns traced, live drift and runs read | Notebook (Python or Spark) transforms, DAX in semantic models, Gen1 dataflows as producers | ROADMAP 17 |
 | SharePoint as a data source: delegation, the 5,000-item threshold, licence limits | Not written | Lists, views, pages and list forms (0.38, 0.39) | These three topics | ROADMAP 9 |
 | Model-driven apps checked in the browser | Documentation only | Forms edited by script | A model-driven app built and walked | ROADMAP 8 |
 

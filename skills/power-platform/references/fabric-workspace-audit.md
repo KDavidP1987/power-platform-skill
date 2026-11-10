@@ -87,6 +87,9 @@ were reported empty, because same-titled empty lists existed on another site, an
 reached the audit document. Match by GUID within the node's own site; fall back to the title only within
 that site; and check any "empty list" finding against the list itself before it goes into a report.
 
+**To document one chain you own** (column by column, with the sensitive columns, refresh and drift),
+use `scripts/lineage.py` and `data-lineage-docs.md` instead of hand-written lineage.
+
 ## 4. Consumers the APIs cannot see: Excel workbooks
 
 Workbooks that read dataflows (project templates, finance workbooks) appear in no API. Before calling
