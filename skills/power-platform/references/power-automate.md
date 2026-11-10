@@ -1087,8 +1087,10 @@ custom types the chosen option), `responses` (responder, comments, date per pers
 The flow's wait timeout is not the approval's: the approval row's due date stayed open (year 9999)
 under a two-hour wait, so a timed-out wait leaves the request answerable in the centre.
 
-**Where it arrives** (documented). The approval centre in Power Automate (Approvals, Received) always;
-an Outlook actionable message and a Teams Approvals card while `enableNotifications` is true. The
+**Where it arrives** (measured for one user assignee, the rest documented). The approval centre in
+Power Automate (Approvals, Received) always; an Outlook actionable message and a Teams Approvals card
+while `enableNotifications` is true (both arrived for a `Basic` approval created by
+`CreateAnApproval`, confirmed by the recipient). The
 Teams card does not update when the person answers elsewhere, so it can show Pending after the flow
 has moved on. Actionable messages must be enabled for the tenant in Exchange Online, Outlook and OWA
 show only the first five custom responses, and guests never get an actionable email: they answer in
