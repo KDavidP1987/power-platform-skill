@@ -205,9 +205,9 @@ name>=<logical name>" [...] --publish` does them in the held Studio: it adds bac
 source Studio did not re-add, and refuses to save when a source is not back. Give the logical name
 every time; without it a source Studio leaves removed stays removed (nothing is saved). Proved live in
 0.41.0: remove, add back by logical name, save, with all 14 sources present afterwards. Measured: the same steps, driven by hand through Playwright, ran unattended in about 3 minutes,
-and the ship's column-cache check then passed where it had refused 10 minutes earlier. The command
-itself is new and not yet run against a live Studio: if it reports a control not found, do the two
-steps through the driver's `studio` session by hand and report it (`feedback.md`).
+and the ship's column-cache check then passed where it had refused 10 minutes earlier. If the command
+reports a control not found (Studio moves its controls), do the two steps through the driver's
+`studio` session by hand and report it (`feedback.md`).
 
 A freshly added source can also snapshot **incomplete** metadata: a junction table's first snapshot
 lacked one lookup column, and a Studio refresh fixed it. Check a new source's columns before
