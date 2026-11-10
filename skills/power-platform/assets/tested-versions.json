@@ -8,11 +8,11 @@
     "npm: packages the scripts load. runtimes and tools: what the machine ran. Earlier versions may work",
     "but are not checked; the engines floor in package.json (Node 20) still applies."
   ],
-  "checkedWith": "0.41.0",
+  "checkedWith": "0.42.1",
   "checkedOn": "2026-11-10",
   "npm": {
     "playwright": "1.65.0",
-    "@playwright/mcp": "0.0.83"
+    "@playwright/mcp": "0.0.85"
   },
   "node": "24.17.0",
   "runtimes": {
@@ -33,6 +33,6 @@
   "liveChecks": {
     "playwright": "1.64.1",
     "what": "canvas-browser.mjs doctor (Studio anchors) and refresh-source (remove, add back by logical name, save) on a real tenant; selftests on 1.65.0",
-    "@playwright/mcp": "0.0.83 last checked; 0.0.85 not yet"
+    "@playwright/mcp": "0.0.85: started over stdio (25 tools; run code is browser_run_code_unsafe, as in 0.0.83), drove the signed-in published player with msedge and the saved profile, snapshot read the app and its build stamp"
   }
 }
