@@ -5,6 +5,7 @@ name: upkeep
 # with skills/power-platform/assets/tested-versions.json. If anything moved or failed it opens
 # (or updates) one issue with a checklist. It never touches a tenant: there are no secrets here,
 # and the live selector check (canvas-browser.mjs doctor) stays a manual step on the checklist.
+# The drivers' browser halves run on Chromium with the registry's current Playwright.
 
 on:
   schedule:
@@ -23,13 +24,23 @@ jobs:
   upkeep:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      # The browser half of a driver's selftest needs Playwright and a browser. Without them it
+      # refuses to pass (exit 2), which is right on a laptop and wrong here: it made every run red.
+      # Install the registry's current Playwright, so this run tests the version people will get.
+      - name: Install Playwright and Chromium
+        shell: bash
+        run: |
+          npm i --no-save --no-package-lock playwright@latest
+          npx playwright install --with-deps chromium
+          echo "PLAYWRIGHT_VERSION=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_ENV"
 
       # Every bundled script that offers --selftest runs; a failure is recorded, not fatal, so the
       # issue can list all of them at once.
@@ -43,6 +54,8 @@ jobs:
           failed=0
           while IFS= read -r f; do
             case "$f" in
+              # CI has no Chrome or Edge: the drivers' browser halves run on the bundled Chromium.
+              *site-walk.mjs) out=$(node "$f" --selftest --channel chromium 2>&1); rc=$? ;;
               *.mjs|*.js) out=$(node "$f" --selftest 2>&1); rc=$? ;;
               *.py)       out=$(python "$f" --selftest 2>&1); rc=$? ;;
               *) continue ;;
@@ -50,8 +63,9 @@ jobs:
             if [ $rc -eq 0 ]; then echo "- [x] \`$f\` - $(echo "$out" | tail -n 1)" >> selftests.md
             else failed=$((failed+1)); echo "- [ ] \`$f\` FAILED (exit $rc): $(echo "$out" | tail -n 3 | tr '\n' ' ')" >> selftests.md; fi
           done < <(grep -rl --include='*.mjs' --include='*.js' --include='*.py' -e '--selftest' "$dir" | sort)
-          # Offline, doctor must refuse to pass: no Playwright here, so it has to exit non-zero.
-          node "$dir/canvas-browser.mjs" doctor > doctor.txt 2>&1; rc=$?
+          echo "- Playwright installed for this run: ${PLAYWRIGHT_VERSION:-none}" >> selftests.md
+          # With no tenant and no sign-in, doctor must refuse to pass: it has to exit non-zero.
+          node "$dir/canvas-browser.mjs" doctor --channel chromium > doctor.txt 2>&1; rc=$?
           if [ $rc -eq 0 ] || [ $rc -eq 9 ]; then failed=$((failed+1)); echo "- [ ] \`canvas-browser.mjs doctor\` returned $rc offline - it must say CANNOT VERIFY" >> selftests.md
           else echo "- [x] \`canvas-browser.mjs doctor\` offline refuses to pass (exit $rc)" >> selftests.md; fi
           echo "failed=$failed" >> "$GITHUB_OUTPUT"
@@ -80,7 +94,7 @@ jobs:
 
       - name: Open or update the upkeep issue
         if: steps.selftests.outputs.failed != '0' || steps.versions.outputs.moved != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

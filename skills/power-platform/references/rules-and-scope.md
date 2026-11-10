@@ -88,7 +88,7 @@ matters.
 | No modern NumberInput for data entry (`number-input-entry`); a classic TextInput with `Format: =TextFormat.Number` instead | hook note (each write), never blocks | `check-canvas-format.mjs` | Save clicked straight after typing wrote the previous value and reported success |
 | A button's AccessibleLabel contains its caption (WCAG 2.5.3) | hook note (each write), never blocks | `check-canvas-format.mjs` `label-not-in-name` | a walk click by caption landed on the container and reported OK |
 | After every publish, the first screen renders signed-in data | instruction | `canvas-shipping.md` 7 | package checks passed on a build where OnStart stopped part-way |
-| After a schema change, the data-source refresh in Studio is the agent's (remove, confirm the re-add, save, publish) | tool, plus instruction | `canvas-browser.mjs refresh-source` (refuses to save when a source is not back); `manifest-caches.md` 6 | the round trip ran unattended in about 3 minutes after an agent had handed it to the owner |
+| After a schema change, the data-source refresh in Studio is the agent's (remove, confirm the re-add or add it back by logical name, save, publish) | tool, plus instruction | `canvas-browser.mjs refresh-source` (refuses to save when a source is not back); `manifest-caches.md` 6 | the round trip ran unattended in about 3 minutes after an agent had handed it to the owner |
 
 ### Power Pages
 

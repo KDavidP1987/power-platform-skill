@@ -191,17 +191,20 @@ Refresh did rebind a new column for one source while other evidence says it does
 unknown. Never trust it - verify by downloading the published app.) The cure:
 
 1. In Studio: **Remove** the data source, **Add data** it back (section 9 for what that click path
-   really does). For a source the formulas use, Studio re-adds it the moment it is removed (status
-   "<name> successfully removed from app", and the entry is back): that re-add is the refresh.
+   really does). For a source the formulas use, Studio sometimes re-adds it the moment it is
+   removed (status "<name> successfully removed from app", and the entry is back), and that re-add is
+   the refresh. **Not always:** a settings table read in `App.OnStart` stayed removed, twice
+   (measured). Always know the logical name before you remove, so you can add it back.
 2. **Save and Publish from Studio** (a save alone never reaches the shipping path, because
    `pac canvas download` returns the PUBLISHED app).
 3. Confirm the new columns in a fresh download.
 4. Re-ship from git, and confirm `LoadFromYaml` is true again (publishing from Studio flipped it).
 
 Steps 1 and 2 are the agent's, not the person's: `canvas-browser.mjs refresh-source "<Display
-name>" [...] --publish` does them in the held Studio (a source nothing uses yet needs
-`"<Display name>=<logical name>"` so it can be added back), and refuses to save when a source is not
-back. Measured: the same steps, driven by hand through Playwright, ran unattended in about 3 minutes,
+name>=<logical name>" [...] --publish` does them in the held Studio: it adds back by logical name any
+source Studio did not re-add, and refuses to save when a source is not back. Give the logical name
+every time; without it a source Studio leaves removed stays removed (nothing is saved). Proved live in
+0.41.0: remove, add back by logical name, save, with all 14 sources present afterwards. Measured: the same steps, driven by hand through Playwright, ran unattended in about 3 minutes,
 and the ship's column-cache check then passed where it had refused 10 minutes earlier. The command
 itself is new and not yet run against a live Studio: if it reports a control not found, do the two
 steps through the driver's `studio` session by hand and report it (`feedback.md`).
@@ -411,8 +414,10 @@ still belonged to a third project.
 
 **Remove has side effects:**
 
-- **Removing a source that formulas still reference re-adds it immediately.** The pane never shows
-  it gone. That automatic re-add IS the remove/re-add round trip; do not keep clicking Remove.
+- **Removing a source that formulas still reference often re-adds it immediately.** The pane never
+  shows it gone. That automatic re-add IS the remove/re-add round trip; do not keep clicking Remove.
+  It is not guaranteed (a table read only in `App.OnStart` stayed removed): if the entry is not back,
+  Add data it by its logical name before any save.
   Follow with Save, Publish, a fresh download showing the new columns, then re-ship from git.
 - **Removing a source drops the option sets it brought in.** An accidentally added table from
   another app had dragged in seven option sets, which left with it. Expect the app's option-set

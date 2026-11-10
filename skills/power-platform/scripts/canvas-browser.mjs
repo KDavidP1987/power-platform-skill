@@ -209,6 +209,8 @@ const SELECTOR_DEFAULTS = {
   'studio.authoringFrameUrl': { surface: 'studio', kind: 'regex', pattern: 'authoring\\..*powerapps\\.com', flags: '', check: 'required' },
   'studio.saveButton':        { surface: 'studio', kind: 'css', value: 'button[aria-label^="Save" i]', check: 'required' },
   'studio.saveFlyout':        { surface: 'studio', kind: 'anyOf', check: 'required', anyOf: [
+    // Studio (2026-11): Save is a split menu item; its chevron is a child button named "More options".
+    { kind: 'css', value: '[role="menuitem"][aria-label^="Save" i] button[aria-label="More options" i][aria-haspopup]' },
     { kind: 'css', value: 'button[aria-haspopup][aria-label*="save" i]:not([aria-label="Save" i]):not([aria-label^="Save (" i])' },
     { kind: 'css', value: 'button[aria-label*="more save" i]' },
     { kind: 'css', value: 'button[aria-label*="save options" i]' }] },
@@ -250,7 +252,9 @@ const SELECTOR_DEFAULTS = {
   'studio.dataSourceRemoved': { surface: 'studio', kind: 'regex', pattern: 'successfully removed from (the )?app', flags: 'i', check: 'conditional' },
   'studio.dataPane':          { surface: 'studio', kind: 'anyOf', check: 'conditional', anyOf: [
     { kind: 'role', role: 'tab', name: '^data$', flags: 'i' },
-    { kind: 'role', role: 'button', name: '^data$', flags: 'i' }] },
+    { kind: 'role', role: 'button', name: '^data$', flags: 'i' },
+    // Studio (2026-11): the left rail's Data is a button with role menuitem and aria-label "Data".
+    { kind: 'css', value: 'button[role="menuitem"][aria-label="Data" i]' }] },
   'studio.canvasRoute':       { surface: 'studio', kind: 'regex', pattern: '/canvas/', flags: '', check: 'required' },
   'studio.editUrl':           { surface: 'studio', kind: 'regex', pattern: '[?&]action=edit', flags: '', check: 'conditional' },
   'studio.formulaBar':        { surface: 'studio', kind: 'role', role: 'textbox', name: 'formula', flags: 'i', check: 'conditional' },
@@ -3121,14 +3125,46 @@ async function addDataSources(page, list, tag) {
   for (const t of list) {
     const add = await inEditor(page, 'studio.addData', { wait: 30000 });
     if (!add) { log('  !! Add data not found'); process.exitCode = 4; break; }
+    // The Data pane's own filter is also a searchbox named "Search" (measured, Studio 2026-11), so the
+    // Add data search is the one that appears after the click, not the first one on the page.
+    const visibleSearch = async () => {
+      const out = [];
+      for (const loc of locsOf(add.frame, 'studio.dataSearch')) {
+        try { for (let i = 0; i < await loc.count(); i++) if (await loc.nth(i).isVisible()) out.push(loc.nth(i)); } catch { /* detached */ }
+      }
+      return out;
+    };
+    const before = (await visibleSearch()).length;
     await add.ctl.click();
-    const box = await inEditor(page, 'studio.dataSearch', { wait: 15000, visible: true });
+    let box = null;
+    for (let i = 0; i < 15 && !box; i++) {
+      await page.waitForTimeout(1000);
+      const now = await visibleSearch();
+      if (now.length > before) box = { frame: add.frame, ctl: now[now.length - 1] };
+    }
     if (!box) { log('  !! Add data search box not found'); process.exitCode = 4; break; }
     await box.ctl.fill(t.display);
     await page.waitForTimeout(4000);
-    const desc = new RegExp('\\b' + escapeRx(tpl('studio.dataItemDescription', { logical: t.logical })) + '\\b', 'i');
-    const item = box.frame.getByRole('listitem', { description: desc }).first();
-    if (await item.count() === 0) {
+    const desc = '\\b' + escapeRx(tpl('studio.dataItemDescription', { logical: t.logical })) + '\\b';
+    // Each result names its table in a tooltip referenced by aria-describedby, but the Data pane's
+    // entries reuse the same ids (measured, Studio 2026-11: result 0 and pane entry 0 share one), so the
+    // page-wide accessible description can be another source's. Resolve each id from the result's
+    // nearest ancestor that holds it, and join the tooltip's text nodes with spaces.
+    const items = box.frame.getByRole('listitem');
+    const idx = await items.evaluateAll((els, d) => {
+      const re = new RegExp(d, 'i');
+      return els.findIndex((e) => (e.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean).some((id) => {
+        let a = e; const sel = '[id="' + id.replace(/"/g, '\\"') + '"]';
+        while (a && !a.querySelector(sel)) a = a.parentElement;
+        const tip = a && a.querySelector(sel);
+        if (!tip) return false;
+        const w = document.createTreeWalker(tip, NodeFilter.SHOW_TEXT); const parts = [];
+        while (w.nextNode()) parts.push(w.currentNode.nodeValue);
+        return re.test(parts.join(' ').replace(/\s+/g, ' '));
+      }));
+    }, desc).catch(() => -1);
+    const item = items.nth(Math.max(idx, 0));
+    if (idx < 0) {
       log(`  !! no result for "${t.display}" whose table is ${t.logical}. Nothing added; check the display name.`);
       await capture(page, tag + '-no-table-' + t.logical); await page.keyboard.press('Escape').catch(() => {}); process.exitCode = 4; continue;
     }
@@ -3144,9 +3180,10 @@ async function addDataSources(page, list, tag) {
 // A column added to a table does not exist for the app until the data source is re-added in Studio
 // and the app saved and published (manifest-caches.md 6). That round trip is agent work, not the
 // person's: a measured run did it unattended in about 3 minutes, after which the ship's column-cache
-// check passed where it had refused. For a source the formulas use, Studio re-adds it the moment it is
-// removed ("<name> successfully removed from app", and the entry is back) - that re-add IS the
-// refresh. A source nothing uses stays removed; give "Display=logical" and it is added back.
+// check passed where it had refused. For a source the formulas use, Studio often re-adds it the moment
+// it is removed ("<name> successfully removed from app", and the entry is back) - that re-add IS the
+// refresh. Not always (measured: a table read in App.OnStart stayed removed), so give "Display=logical"
+// and any source not back is added again by its logical name. Proved live in 0.41.0.
 // Args: display names, or "Display=logical". Pure.
 export function parseSourceArgs(args) {
   return (args || []).map((a) => String(a).trim()).filter(Boolean).map((a) => {
@@ -3166,6 +3203,23 @@ async function dataSourceMenu(page, display, wait) {
   } while (Date.now() < until);
   return null;
 }
+// The rail's Data control toggles the pane, and Add data closes it (measured): open it only when no
+// entry is showing. Returns false when the pane could not be opened.
+async function ensureDataPane(page) {
+  const showing = async () => {
+    for (const f of page.frames()) {
+      if (!rx('studio.authoringFrameUrl').test(f.url())) continue;
+      try { if (await f.locator('button[aria-label^="' + tpl('studio.dataSourceMore', { display: '' }).trim() + '"]').count() > 0) return true; } catch { /* detached */ }
+    }
+    return false;
+  };
+  if (await showing()) return true;
+  const pane = await inEditor(page, 'studio.dataPane', { wait: 30000, visible: true });
+  if (!pane) return false;
+  await pane.ctl.click().catch(() => {});
+  for (let i = 0; i < 8; i++) { await page.waitForTimeout(1000); if (await showing()) return true; }
+  return false;
+}
 async function cmdRefreshSource() {
   const want = parseSourceArgs(positionals(argv.slice(1)));
   if (!want.length) {
@@ -3180,15 +3234,27 @@ async function cmdRefreshSource() {
   if (rx('studio.titleReadOnly').test(await page.title())) { log('  READ-ONLY - nothing can be refreshed from here.'); await browser.close(); process.exitCode = 3; return; }
   if (scan && scan.disconnected) { log('  !! Studio shows "There\'s been a disconnect". Not touching the data sources.'); log(DISCONNECT_NOTE); await browser.close(); process.exitCode = 3; return; }
   for (const f of page.frames()) await dismissBubbles(f).catch(() => 0);
-  const pane = await inEditor(page, 'studio.dataPane', { wait: 30000, visible: true });
-  if (!pane) { log('  !! the Data pane was not found in the left rail'); await capture(page, 'refresh-no-pane'); await browser.close(); process.exitCode = 4; return; }
-  await pane.ctl.click().catch(() => {});
-  await page.waitForTimeout(2500);
+  if (!(await ensureDataPane(page))) { log('  !! the Data pane could not be opened from the left rail'); await capture(page, 'refresh-no-pane'); await browser.close(); process.exitCode = 4; return; }
   let failed = 0;
   for (const t of want) {
     log('  ' + t.display);
+    const readd = async (why) => {
+      log('    ' + why + '; adding it back as ' + t.logical);
+      const before = process.exitCode;
+      process.exitCode = 0;
+      await addDataSources(page, [t], 'refresh');
+      const ok = process.exitCode !== 4 && await ensureDataPane(page) && !!(await dataSourceMenu(page, t.display, 15000));
+      process.exitCode = before;
+      log(ok ? '    back in the Data pane' : '    !! still not in the Data pane');
+      return ok;
+    };
     const more = await dataSourceMenu(page, t.display, 15000);
-    if (!more) { log('    !! not in the Data pane (names are display names, as the pane lists them)'); await capture(page, 'refresh-missing'); failed++; continue; }
+    if (!more) {
+      // Already gone (an earlier run, or a Remove that Studio did not undo): add it, nothing to remove.
+      if (t.logical && await readd('not in the Data pane')) continue;
+      log('    !! not in the Data pane (names are display names, as the pane lists them' + (t.logical ? '' : '; give "Display=logical" to add it') + ')');
+      await capture(page, 'refresh-missing'); failed++; continue;
+    }
     await more.ctl.click();
     const rm = await inEditor(page, 'studio.dataSourceRemove', { wait: 10000, visible: true });
     if (!rm) { log('    !! no Remove in its menu'); await page.keyboard.press('Escape').catch(() => {}); await capture(page, 'refresh-no-remove'); failed++; continue; }
@@ -3196,10 +3262,13 @@ async function cmdRefreshSource() {
     let removed = false;
     for (let i = 0; i < 30 && !removed; i++) { await page.waitForTimeout(1000); removed = rx('studio.dataSourceRemoved').test(await framesText(page)); }
     log(removed ? '    removed' : '    !! no "removed" confirmation seen');
+    await ensureDataPane(page);
     const back = await dataSourceMenu(page, t.display, 20000);
-    if (back) { log('    re-added by Studio (the formulas use it) - that is the refresh'); continue; }
-    if (t.logical) { log('    not re-added by Studio (nothing uses it yet); adding it back as ' + t.logical); await addDataSources(page, [t], 'refresh'); if (process.exitCode === 4) failed++; continue; }
-    log('    !! REMOVED and not back. Add it again: refresh-source "' + t.display + '=<logical name>" or Add data by hand.');
+    if (back) { log('    re-added by Studio - that is the refresh'); continue; }
+    // Measured: Studio does not always re-add a source the formulas use (a settings table read in
+    // App.OnStart stayed removed), so the logical name is what makes the round trip safe.
+    if (t.logical) { if (!(await readd('not re-added by Studio'))) failed++; continue; }
+    log('    !! REMOVED and not back. Studio did not re-add it. Run again with "' + t.display + '=<logical name>" (it adds it back), or Add data by hand. Nothing was saved.');
     failed++;
   }
   await capture(page, 'refresh-done');

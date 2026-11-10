@@ -8,10 +8,10 @@
     "npm: packages the scripts load. runtimes and tools: what the machine ran. Earlier versions may work",
     "but are not checked; the engines floor in package.json (Node 20) still applies."
   ],
-  "checkedWith": "0.21.0",
-  "checkedOn": "2026-10-05",
+  "checkedWith": "0.41.0",
+  "checkedOn": "2026-11-10",
   "npm": {
-    "playwright": "1.63.0",
+    "playwright": "1.65.0",
     "@playwright/mcp": "0.0.83"
   },
   "node": "24.17.0",
@@ -22,12 +22,17 @@
   },
   "tools": {
     "pac": "2.8.1",
-    "claude-code": "2.1.289",
+    "claude-code": "2.1.322",
     "browser": "Chrome (channel chrome) on Windows 11; Chromium in CI"
   },
   "ci": {
     "node": "22",
     "python": "3.12",
     "os": "ubuntu-latest"
+  },
+  "liveChecks": {
+    "playwright": "1.64.1",
+    "what": "canvas-browser.mjs doctor (Studio anchors) and refresh-source (remove, add back by logical name, save) on a real tenant; selftests on 1.65.0",
+    "@playwright/mcp": "0.0.83 last checked; 0.0.85 not yet"
   }
 }
