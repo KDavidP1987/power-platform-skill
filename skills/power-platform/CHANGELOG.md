@@ -11,6 +11,37 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-10
+
+`add-data` (ROADMAP 12, now done), its undo `remove-data`, and two Studio behaviours found proving them.
+
+### Added
+
+- `canvas-browser.mjs add-data "<Display>=<logical>" | <logical> [...] [--external] [--publish]`: adds
+  Dataverse tables to an existing app in the held Studio, each chosen by its logical name (a bare
+  logical name has its display name read from Dataverse). Skips a table already in the app, flags a
+  `_1` suffix, refuses a table outside the app's prefix and the config's `"externalTables"` without
+  `--external`, saves, then reopens the saved app and reads its Data pane (exit 4 when a table is not
+  there). Proved live: a standard table picked by logical name from several search results, saved,
+  present after the reopen.
+- `canvas-browser.mjs remove-data "<Display>" [...]`: the undo. Refuses to save when Studio re-adds a
+  source the formulas use; saves, reopens, proves it gone. Proved live twice.
+- `close-studio --discard`: answers Studio's "Unsaved changes: Save / Don't save" prompt with Don't
+  save.
+
+### Fixed
+
+- `close-studio` with unsaved work: Studio 2026-11 asks "Save / Don't save" (an `alertdialog`), not
+  Leave, so it clicked Back twice and gave up. It now stops at the prompt and says so, and an editor
+  with that prompt open is no longer mistaken for one already gone (which closed the tab, losing
+  the choice). New anchors `studio.unsavedDialog` and `studio.unsavedDontSave`.
+
+### Changed
+
+- Not saving is not an undo: Studio's autosave saved a table added in a trial that never clicked
+  Save, within minutes (measured). `browser-verification.md` section 12, `authoring-sessions.md` and
+  `first-run.md` say so; the add-data trial flag that promised otherwise was removed before release.
+
 ## [0.42.2] - 2026-11-10
 
 ### Changed

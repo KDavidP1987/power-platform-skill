@@ -157,7 +157,8 @@ co-authoring (canvas authoring) MCP server compiles and syncs against that sessi
 2. Connect the authoring server, compile, and read the first line of the result: "no active
    coauthoring session" means it validated against nothing.
 3. Leave through the editor's Back button (`close-studio`), never by killing the tab, or the edit
-   lock is stranded.
+   lock is stranded. With unsaved work it stops at Studio's "Unsaved changes" prompt: `save`, or
+   `close-studio --discard`.
 
 The server needs the .NET 10 SDK and authenticates as the person; details and its traps are in
 `authoring-sessions.md`.

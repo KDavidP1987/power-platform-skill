@@ -130,6 +130,14 @@
       "surface": "studio", "kind": "css", "value": "button:has-text(\"Leave\")",
       "purpose": "Leave confirmation shown by Back when there is unsaved work", "check": "conditional", "lastVerified": "0.1.0"
     },
+    "studio.unsavedDontSave": {
+      "surface": "studio", "kind": "css", "value": "[role=\"alertdialog\"]:has-text(\"Unsaved changes\") button:has-text(\"Don't save\"), [role=\"dialog\"]:has-text(\"Unsaved changes\") button:has-text(\"Don't save\")",
+      "purpose": "Studio 2026-11: Back with unsaved work asks \"Save / Don't save\" (not Leave); close-studio --discard answers Don't save", "check": "conditional", "lastVerified": "0.43.0"
+    },
+    "studio.unsavedDialog": {
+      "surface": "studio", "kind": "css", "value": "[role=\"alertdialog\"]:has-text(\"Unsaved changes\"), [role=\"dialog\"]:has-text(\"Unsaved changes\")",
+      "purpose": "The unsaved-changes prompt itself, so close-studio can name it when it will not discard", "check": "conditional", "lastVerified": "0.43.0"
+    },
     "studio.backButton": {
       "surface": "studio", "kind": "css", "value": "button[aria-label^=\"Back\" i]",
       "purpose": "Leaves the editor and releases the edit lock", "check": "required", "lastVerified": "0.1.0"
