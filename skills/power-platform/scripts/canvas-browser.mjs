@@ -59,6 +59,14 @@
 //                                                  confirm Studio re-added it (or add it back by logical name), then
 //                                                  save (and publish --again) so new columns reach the app; exit 4 when
 //                                                  a source is not back (nothing is saved then)
+//   node canvas-browser.mjs add-data "<Display name>=<logical>" | <logical> [...] [--external] [--publish]
+//                                                  add Dataverse tables to an existing app in the held Studio, each by
+//                                                  logical name; refuses a table outside the app's prefix and
+//                                                  "externalTables" without --external; saves, then reopens the saved
+//                                                  app to prove each source stayed (exit 4 if not)
+//   node canvas-browser.mjs remove-data "<Display name>" [...] [--publish]
+//                                                  take data sources out (undoes add-data); refuses to save when Studio
+//                                                  re-adds one the formulas use; reopens to prove they are gone
 //   save / publish / dirty act on the Studio tab whose authoring frame holds a Save button, not the newest
 //   node canvas-browser.mjs shot <url> <name>      navigate anywhere, screenshot + aria dump
 //   node canvas-browser.mjs lint <scenario.json>   check a scenario's verbs without a browser
@@ -227,6 +235,8 @@ const SELECTOR_DEFAULTS = {
   'studio.publishedToSharePoint': { surface: 'studio', kind: 'regex', pattern: 'All changes are saved and published', flags: 'i', check: 'conditional' },
   'studio.closePreview':     { surface: 'studio', kind: 'css', value: 'button[aria-label^="Close preview" i]', check: 'conditional' },
   'studio.leaveButton':       { surface: 'studio', kind: 'css', value: 'button:has-text("Leave")', check: 'conditional' },
+  'studio.unsavedDontSave':   { surface: 'studio', kind: 'css', value: '[role="alertdialog"]:has-text("Unsaved changes") button:has-text("Don\'t save"), [role="dialog"]:has-text("Unsaved changes") button:has-text("Don\'t save")', check: 'conditional' },
+  'studio.unsavedDialog':     { surface: 'studio', kind: 'css', value: '[role="alertdialog"]:has-text("Unsaved changes"), [role="dialog"]:has-text("Unsaved changes")', check: 'conditional' },
   'studio.backButton':        { surface: 'studio', kind: 'css', value: 'button[aria-label^="Back" i]', check: 'required' },
   'studio.gotIt':             { surface: 'studio', kind: 'anyOf', check: 'conditional', anyOf: [
     { kind: 'role', role: 'button', name: '^got it$', flags: 'i' },
@@ -1718,6 +1728,9 @@ function selftest() {
     ['refresh-source: flags are not source names', parseSourceArgs(positionals(['Orders', '--publish', '--batch', 'new column', 'Vendors'])).map((t) => t.display).join() === 'Orders,Vendors'],
     ['refresh-source: menu name fills from the display name', tpl('studio.dataSourceMore', { display: 'Orders' }) === 'More options for Orders'],
     ['refresh-source: removed status is recognised', rx('studio.dataSourceRemoved').test('Orders successfully removed from app')],
+    ['add-data: a bare logical name, a pair and a display name', JSON.stringify(addDataTargets(['app_order', 'Vendor Sites=app_vendorsite', 'Orders', 'account'])) === JSON.stringify([{ display: null, logical: 'app_order' }, { display: 'Vendor Sites', logical: 'app_vendorsite' }, { display: 'Orders', logical: null }, { display: null, logical: 'account' }])],
+    ['add-data: own prefix and declared externals are allowed', tableAllowed('app_order', 'app_orders_1a2b3', []) && tableAllowed('core_person', 'app_orders_1a2b3', ['core_*']) && tableAllowed('account', 'app_x', ['account'])],
+    ['add-data: another team\'s table is refused', !tableAllowed('team2_order', 'app_orders_1a2b3', ['core_*']) && !tableAllowed('account', 'app_x', [])],
   ].filter(([, okc]) => !okc).map(([k]) => 'publish/tabs: ' + k);
   tabs.push(...P);
   // Save proof: a stamp older than the click is the previous save, not this one.
@@ -2757,8 +2770,8 @@ async function cmdPublish() {
 
 // Leave the editor the way a person does: exit Preview, Back, accept Leave. Returns which of
 // those controls were seen, so `doctor` can report them, and whether the lock is still held.
-async function leaveEditor(page) {
-  const seen = { back: false, leave: false, preview: false };
+async function leaveEditor(page, { discard = false } = {}) {
+  const seen = { back: false, leave: false, preview: false, unsaved: false };
   // Two authoring frames can exist (one a prefetch with no DOM): use the one holding Back or Leave.
   const editor = async () => {
     const fs = page.frames().filter((f) => rx('studio.authoringFrameUrl').test(f.url()));
@@ -2772,6 +2785,18 @@ async function leaveEditor(page) {
     if (!ed) break;
     const preview = ed.locator(css('studio.closePreview')).first();
     if (await preview.count() > 0) { seen.preview = true; await preview.click({ timeout: 12000 }).catch(() => {}); log('  exited preview'); await page.waitForTimeout(6000); continue; }
+    // Studio 2026-11 asks "Unsaved changes: Save / Don't save" instead of Leave. Discard only when the
+    // caller said so; otherwise stop and report, so an unsaved push is never thrown away by default.
+    if (await ed.locator(css('studio.unsavedDialog')).count().catch(() => 0) > 0) {
+      seen.unsaved = true;
+      if (!discard) break;
+      await ed.locator(css('studio.unsavedDontSave')).first().click({ timeout: 10000, noWaitAfter: true }).catch(() => {});
+      log('  unsaved changes: clicked Don\'t save (--discard)');
+      await page.waitForTimeout(9000);
+      let t0 = ''; try { t0 = await page.title(); } catch { t0 = '(page gone)'; }
+      if (!rx('studio.titleEditing').test(t0)) break;
+      continue;
+    }
     const leave = ed.locator(css('studio.leaveButton')).first();
     if (await leave.count() > 0) { seen.leave = true; await leave.click({ timeout: 10000, noWaitAfter: true }).catch(() => {}); log('  clicked Leave'); }
     else {
@@ -2799,7 +2824,7 @@ function killHolder() {
 }
 // A tab whose editor is gone (no Back, no Leave, still titled Editing) cannot be left through Back;
 // keeping it open kept the holder alive and the next `studio` failed PROFILE IN USE.
-export function editorGone(r) { return !!(r && r.stillEditing && !r.back && !r.leave && !r.preview); }
+export function editorGone(r) { return !!(r && r.stillEditing && !r.back && !r.leave && !r.preview && !r.unsaved); }
 
 async function cmdCloseStudio() {
   // Back, not a killed tab: a killed tab strands the edit lock (connect then returns a bare 422).
@@ -2821,7 +2846,11 @@ async function cmdCloseStudio() {
   let stillEditing = false;
   for (const [k, page] of pages.entries()) {
     page.on('dialog', async (d) => { await d.accept().catch(() => {}); });
-    const r = await leaveEditor(page);
+    const r = await leaveEditor(page, { discard: has('discard') });
+    if (r.unsaved && r.stillEditing && !has('discard')) {
+      log('  Studio asks "Unsaved changes: Save / Don\'t save". Nothing was discarded. Keep the work with `save`,');
+      log('  then close-studio again; or throw it away with `close-studio --discard`.');
+    }
     const gone = editorGone(r);
     log('  tab ' + (k + 1) + '/' + pages.length + ': ' + (gone ? 'editor gone (no Back button) - closing the tab; a lock it held ages out in 30-60 minutes'
       : r.stillEditing ? 'still in the editor' : 'left the editor'));
@@ -3286,6 +3315,155 @@ async function cmdRefreshSource() {
   log('  Prove it: the ship\'s column-cache check, or `pac canvas download` and the manifest read in manifest-caches.md 6.');
 }
 
+// --- add-data: add Dataverse tables to an existing app, in the held Studio ----------------------
+// Each table is chosen by its logical name (the search matches display names only, and two tables can
+// share one). A table outside the app's own prefix and the config's "externalTables" is refused
+// without --external: an app once acquired a sibling team's table through Add data by label.
+// Args: "Display=logical", or a bare logical name (its display name is read from Dataverse). Pure.
+export function addDataTargets(args) {
+  return parseSourceArgs(args).map((t) => {
+    if (t.logical) return t;
+    // A bare argument with no space and an underscore is a logical name; anything else is a display name.
+    return /^[a-z][a-z0-9]*_[a-z0-9_]+$|^[a-z]+$/.test(t.display) ? { display: null, logical: t.display } : { display: t.display, logical: null };
+  });
+}
+// Is a table this app's own (its publisher prefix) or a declared external one ("sbit_*", "account")? Pure.
+export function tableAllowed(logical, appLogicalName, patterns) {
+  const own = String(appLogicalName || '').split('_')[0];
+  if (own && String(logical).startsWith(own + '_')) return true;
+  return (patterns || []).some((p) => new RegExp('^' + String(p).split('*').map(escapeRx).join('.*') + '$', 'i').test(logical));
+}
+async function cmdAddData() {
+  const want = addDataTargets(positionals(argv.slice(1)));
+  if (!want.length || want.some((t) => !t.logical)) {
+    log('usage: add-data "<Display name>=<logical>" | <logical> [...] [--external] [--publish] [--no-verify-sources]');
+    log('  Adds each Dataverse table to the app in the held Studio, chosen by its logical name, then saves and');
+    log('  reopens the saved app to prove the source stayed (exit 4 if not). A display name alone is not enough:');
+    log('  give "Display=logical" or the logical name.');
+    process.exitCode = 1; return;
+  }
+  const foreign = want.filter((t) => !tableAllowed(t.logical, APP.appLogicalName, APP.externalTables));
+  if (foreign.length && !has('external')) {
+    log('  !! not this app\'s tables: ' + foreign.map((t) => t.logical).join(', '));
+    log('     The app\'s prefix is "' + String(APP.appLogicalName || '?').split('_')[0] + '_" and "externalTables" in the config is ' + JSON.stringify(APP.externalTables || []) + '.');
+    log('     Add the table to "externalTables" (a shared table the app is meant to read), or pass --external. Nothing was changed.');
+    process.exitCode = 4; return;
+  }
+  for (const t of want) {
+    if (t.display) continue;
+    t.display = await tableDisplayName(t.logical).catch(() => null);
+    if (!t.display) { log('  !! could not read the display name of ' + t.logical + ' (no Dataverse token, or no such table). Give "Display=' + t.logical + '".'); process.exitCode = 2; return; }
+  }
+  const { browser, ctx } = await attach();
+  const { page, scan } = await editingTab(ctx);
+  await page.bringToFront();
+  if (rx('studio.titleReadOnly').test(await page.title())) { log('  READ-ONLY - nothing can be added from here.'); await browser.close(); process.exitCode = 3; return; }
+  if (scan && scan.disconnected) { log('  !! Studio shows "There\'s been a disconnect". Not adding anything.'); log(DISCONNECT_NOTE); await browser.close(); process.exitCode = 3; return; }
+  for (const f of page.frames()) await dismissBubbles(f).catch(() => 0);
+  if (!(await ensureDataPane(page))) { log('  !! the Data pane could not be opened from the left rail'); await capture(page, 'add-data-no-pane'); await browser.close(); process.exitCode = 4; return; }
+  let failed = 0; let added = 0;
+  for (const t of want) {
+    log('  ' + t.display + ' (' + t.logical + ')');
+    if (await dataSourceMenu(page, t.display, 3000)) { log('    already in the app - nothing to add'); continue; }
+    const before = process.exitCode; process.exitCode = 0;
+    await addDataSources(page, [t], 'add-data');
+    const ok = process.exitCode !== 4 && await ensureDataPane(page) && !!(await dataSourceMenu(page, t.display, 15000));
+    process.exitCode = before;
+    // Studio appends _1 when the name is taken, and every formula naming the old one breaks.
+    const suffixed = await dataSourceMenu(page, t.display + '_1', 1000);
+    if (suffixed) { log('    !! it arrived as "' + t.display + '_1" (the name was taken). Remove it and find the clash before saving.'); failed++; continue; }
+    if (ok) { log('    in the Data pane'); added++; } else { log('    !! not in the Data pane after Add data'); await capture(page, 'add-data-missing'); failed++; }
+  }
+  await capture(page, 'add-data-done');
+  await browser.close();
+  // Not saving here does not keep the change out of the app: Studio's autosave (on by default) saved an
+  // added table within minutes of a trial that never clicked Save (measured). `remove-data` undoes one.
+  if (failed) { log('\n  ' + failed + ' table(s) not added - not saving. Studio may still autosave what was added: undo with `remove-data`.'); process.exitCode = 4; return; }
+  if (!added) { log('\n  Nothing to add; nothing saved.'); return; }
+  log('\n  Saving ...');
+  await cmdSave();
+  if (process.exitCode) { log('  The save is unproven (above) - not publishing.'); return; }
+  if (!has('no-verify-sources')) {
+    // The "added" toast proves Studio's memory, not the saved app (a measured build lost its tables on
+    // save): reopen the saved app from the server and read its Data pane.
+    log('  Reopening the saved app to prove the sources stayed ...');
+    const text = await reopenSavedPaneText();
+    const gone = text === null ? null : missingSources(want, text);
+    if (gone === null) { log('  !! could not read the reopened app\'s Data pane - the sources are UNPROVEN'); process.exitCode = 4; return; }
+    if (gone.length) { log('  !! NOT in the saved app: ' + gone.map((t) => t.display + ' (' + t.logical + ')').join(', ') + '. Run add-data again.'); process.exitCode = 4; return; }
+    log('  all ' + want.length + ' source(s) present in the saved app');
+  }
+  if (has('publish')) { if (!argv.includes('--again')) argv.push('--again'); await cmdPublish(); }
+  else log('  Saved. Publish (`publish --again`) when the app should see the new source in the player.');
+}
+
+// Leave the held editor (after a save), reopen the SAVED app from the server, and return its Data
+// pane's text; null when the pane could not be read.
+async function reopenSavedPaneText() {
+  const again = await attach();
+  try {
+    const { page } = await editingTab(again.ctx);
+    await leaveEditor(page).catch(() => {});
+    await page.goto(tpl('portal.studioUrl', { environmentId: APP.environmentId, appId: APP.appId }), { waitUntil: 'domcontentloaded' });
+    if (!(await waitForEditing(page, 'reopening to check the data sources')) || !(await ensureDataPane(page))) return null;
+    // Entries only, so a status line naming a removed source is not read as the source.
+    for (const f of page.frames()) {
+      if (!rx('studio.authoringFrameUrl').test(f.url())) continue;
+      const names = await f.evaluate((pre) => [...document.querySelectorAll('button[aria-label^="' + pre + '"]')].map((b) => b.getAttribute('aria-label').slice(pre.length)),
+        tpl('studio.dataSourceMore', { display: '' })).catch(() => []);
+      if (names.length) return names.join('\n');
+    }
+    return null;
+  } finally { await again.browser.close().catch(() => {}); }
+}
+
+// --- remove-data: take data sources out of an existing app (undoes add-data) -----------------
+// A source the formulas still use comes back at once, or the app stops compiling; this refuses to
+// save when an entry is still there after Remove. Args as add-data, or plain display names.
+async function cmdRemoveData() {
+  const want = parseSourceArgs(positionals(argv.slice(1)));
+  if (!want.length) { log('usage: remove-data "<Display name>" [...] [--publish] [--no-verify-sources]'); process.exitCode = 1; return; }
+  const { browser, ctx } = await attach();
+  const { page, scan } = await editingTab(ctx);
+  await page.bringToFront();
+  if (rx('studio.titleReadOnly').test(await page.title())) { log('  READ-ONLY - nothing can be removed from here.'); await browser.close(); process.exitCode = 3; return; }
+  if (scan && scan.disconnected) { log('  !! Studio shows "There\'s been a disconnect". Not removing anything.'); log(DISCONNECT_NOTE); await browser.close(); process.exitCode = 3; return; }
+  for (const f of page.frames()) await dismissBubbles(f).catch(() => 0);
+  if (!(await ensureDataPane(page))) { log('  !! the Data pane could not be opened from the left rail'); await capture(page, 'remove-data-no-pane'); await browser.close(); process.exitCode = 4; return; }
+  let failed = 0; let removed = 0;
+  for (const t of want) {
+    log('  ' + t.display);
+    const more = await dataSourceMenu(page, t.display, 5000);
+    if (!more) { log('    not in the app - nothing to remove'); continue; }
+    await more.ctl.click();
+    const rm = await inEditor(page, 'studio.dataSourceRemove', { wait: 10000, visible: true });
+    if (!rm) { log('    !! no Remove in its menu'); await page.keyboard.press('Escape').catch(() => {}); failed++; continue; }
+    await rm.ctl.click();
+    let done = false;
+    for (let i = 0; i < 30 && !done; i++) { await page.waitForTimeout(1000); done = rx('studio.dataSourceRemoved').test(await framesText(page)); }
+    await ensureDataPane(page);
+    await page.waitForTimeout(3000);
+    if (await dataSourceMenu(page, t.display, 2000)) { log('    !! still in the Data pane (Studio re-adds a source the formulas use). Remove those formulas first.'); failed++; continue; }
+    log(done ? '    removed' : '    gone from the Data pane (no status line seen)'); removed++;
+  }
+  await capture(page, 'remove-data-done');
+  await browser.close();
+  if (failed) { log('\n  ' + failed + ' source(s) not removed - not saving.'); process.exitCode = 4; return; }
+  if (!removed) { log('\n  Nothing to remove; nothing saved.'); return; }
+  log('\n  Saving ...');
+  await cmdSave();
+  if (process.exitCode) { log('  The save is unproven (above) - not publishing.'); return; }
+  if (!has('no-verify-sources')) {
+    log('  Reopening the saved app to prove the sources are gone ...');
+    const text = await reopenSavedPaneText();
+    if (text === null) { log('  !! could not read the reopened app\'s Data pane - the removal is UNPROVEN'); process.exitCode = 4; return; }
+    const still = want.filter((t) => text.split('\n').some((n) => n.toLowerCase() === t.display.toLowerCase()));
+    if (still.length) { log('  !! still in the saved app: ' + still.map((t) => t.display).join(', ')); process.exitCode = 4; return; }
+    log('  none of the ' + want.length + ' source(s) in the saved app');
+  }
+  if (has('publish')) { if (!argv.includes('--again')) argv.push('--again'); await cmdPublish(); }
+}
+
 // --- doctor: are the UI anchors still where the driver expects them? ---------------------------
 // Opens the maker portal, the published player and Studio with the saved profile and checks every
 // entry of the selector table that a normal session can show. Never passes without a live,
@@ -3608,7 +3786,7 @@ async function autoTidy() {
 const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, connection: cmdConnection, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
   keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot,
   tabs: cmdTabs, tidy: cmdTidy, 'second-tab': cmdSecondTab, 'studio-has': cmdStudioHas, dirty: cmdDirty, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm,
-  'refresh-source': cmdRefreshSource };
+  'refresh-source': cmdRefreshSource, 'add-data': cmdAddData, 'remove-data': cmdRemoveData };
 
 if (argv.includes('--selftest')) selftest();
 else if (!commands[cmd]) {
@@ -3620,6 +3798,8 @@ else if (!commands[cmd]) {
   log('  studio [--reload] | keys [combo] | save | publish [--reload-first] | close-studio [--keep-browser] | shot <url> <name>');
   log('  tabs | tidy [--all] [--studio] [--dry-run] | second-tab [--expect a,b] | studio-has <name...> | dirty [--toggle <formula>]');
   log('  refresh-source "<Display name>"[=<logical>] [...] [--publish]   new columns: remove, re-add, save (and publish) a source');
+  log('  add-data "<Display name>=<logical>" | <logical> [...] [--external] [--publish]   add tables to an existing app');
+  log('  remove-data "<Display name>" [...] [--publish]   take data sources out (undoes add-data)');
   log('  doctor [--player-only|--studio-only] [--record]   are the UI anchors in assets/selectors.json still valid?\n');
   log('  config:  ' + (CONFIG_PATH || '(none found - pass --config or create scripts/canvas-app.json)'));
   if (APP.appId) log('  app:     ' + (APP.appName || '') + '  ' + APP.appId);

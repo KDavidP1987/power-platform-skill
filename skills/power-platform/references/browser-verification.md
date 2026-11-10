@@ -568,16 +568,25 @@ negative. Use it for "is my code right?" and the player for "what do users get?"
 Same kind of drive: Data pane, Add data, search the table, confirm the **logical name** in the
 selector (section 5), then save and publish. What goes wrong:
 
-Both are scriptable, including for an app that is not in a solution (where a solution import cannot
-add the table). Add: Add data, type in the search box, pick the list item whose description names
+Both are driver commands now: `canvas-browser.mjs add-data "<Display>=<logical>"` (or the logical
+name alone) and `refresh-source "<Display>=<logical>"`, with `remove-data "<Display>"` to undo an
+add; each saves, then reopens the saved app and reads its Data pane (proved live in 0.43.0). They work
+for an app that is not in a solution too (where a solution import cannot add the table). Add: Add data, type in the search box, pick the list item whose description names
 `Table <logical name>`, wait for "successfully added", Save. Refresh after new columns: in the Data
 pane, hover the list item reading `<Name> Microsoft Dataverse`, open its last button, choose the
 `Refresh` menu item; the next compile binds the new columns. Keep such helpers in the repo (a
 `scripts/studio/` folder), never in a session scratchpad, where a restart loses them.
 
+- **Not clicking Save does not keep a change out.** Studio's autosave (on by default) saved a table
+  added in a trial that never clicked Save, within minutes (measured). Leaving without saving is not
+  an undo: take the source out with `remove-data`, which saves and proves it gone.
+- **Back with unsaved work asks "Unsaved changes: Save / Don't save"** (Studio 2026-11, an
+  `alertdialog`, not the older Leave prompt). `close-studio` stops there and says so; `close-studio
+  --discard` answers Don't save.
 - **Picking another team's table by label.** An app acquired a sibling app's table, probably by
   accident in Add data. In a shared environment, check every bound source against the app's own
-  prefix plus the declared shared layer.
+  prefix plus the declared shared layer. `add-data` refuses a table outside the app's prefix and the
+  config's `"externalTables"` (for example `["core_*"]`) unless `--external` is given.
 - **The `_1` suffix.** When the name is taken, Studio appends `_1`, so a re-added source can silently
   get a new name and break every screen bound to the old one. Read the name back before pushing.
 - **The authoring session does not see it yet.** A new source still reads "isn't recognized" in an

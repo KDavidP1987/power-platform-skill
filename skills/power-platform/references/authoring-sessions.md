@@ -33,7 +33,9 @@ What strands the lock:
   Ctrl+S; "Saving to Power Apps" covered the canvas for about two minutes, then Publish (real click,
   "Publish this version") moved `lastpublishtime`.
 - **Or do not save the push at all.** The compile is the formula check; the session only has to
-  exist for schemas to resolve. Compile in a throwaway session, leave Studio without saving, and ship
+  exist for schemas to resolve. Compile in a throwaway session, leave Studio without saving
+  (`close-studio --discard`; Studio's autosave may still have saved the push, which the import then
+  overwrites - `browser-verification.md` section 12), and ship
   the same commit with `ship-canvas.py --import`. The player showed the new build stamp after the
   "old version - Refresh" banner was clicked. This sidesteps every save failure above.
 - **Your own authoring-server processes.** `connect` opens a co-authoring session **under the
