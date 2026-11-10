@@ -11,6 +11,15 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-11-10
+
+### Proved
+
+- The trial approvals from 0.45.0 arrived as a Teams Approvals card and an Outlook actionable message,
+  confirmed by the recipient. `power-automate.md` 19 marks delivery measured for a user assignee; the
+  README table moves it out of "not yet tested". Group and guest approvers and the custom and
+  everyone-must-approve types remain untested.
+
 ## [0.45.0] - 2026-11-10
 
 Approvals in Teams and Outlook (ROADMAP 10, now done), proved live with the approvals assigned to the
