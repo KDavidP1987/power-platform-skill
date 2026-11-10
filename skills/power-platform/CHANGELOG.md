@@ -11,6 +11,36 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-10
+
+Data lineage documents for Fabric medallions (ROADMAP 16, done), and the next documentation types on
+the roadmap (17 to 22).
+
+### Added
+
+- `scripts/lineage.py`: a lineage document for one medallion output, from the Fabric Git-format
+  dataflow and pipeline definitions, written as HTML (inline SVG diagram, light and dark, print),
+  Markdown (Mermaid) and JSON. It covers the chain from Dataverse, SharePoint and SQL sources through
+  bronze, silver and gold to consumers outside Fabric, the refresh order, how each output is built
+  (filters, joins, computed columns, the M comments), and every column of the focus table traced to
+  its source columns, with sensitive columns flagged. `--workspace` reads the live workspace
+  (read-only): lakehouse names, drift against the deployed definitions, runs, schedules, and the
+  producers of input tables made outside the repo. `--notes` adds a curated section. Exit 1 lists
+  gaps. 20 self-test checks.
+- `references/data-lineage-docs.md`: when to make one, the command, what is traced and what is not,
+  the curated notes, done-means and sharing. Routed from SKILL.md and `fabric-workspace-audit.md`.
+- ROADMAP 17 to 22: semantic model documentation, a data dictionary, an operations runbook and
+  dependency map, a security and access matrix with a sensitive-data register, solution inventory and
+  release notes, and a report catalogue.
+
+### Proved
+
+- On a production timesheet chain (two Dataverse and six SharePoint bronze dataflows, silver, gold
+  and a Gen1 consumer): 33 tables in scope, 50 of 50 output columns traced to a source, no drift
+  between the repo and the deployed definitions. The first live run traced 32 of 50: SharePoint
+  bronze dataflows that read lists by GUID and pass them through generic helper functions; both are
+  now handled and have self-test cases.
+
 ## [0.45.1] - 2026-11-10
 
 ### Proved

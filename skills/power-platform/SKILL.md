@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.45.1"
+  version: "0.46.0"
 ---
 
 # Power Platform development
@@ -196,6 +196,7 @@ Read only the reference the task needs; each topic has one home.
 | Which rules a hook enforces, the surface each applies to, when an instruction becomes a hook | `references/rules-and-scope.md` |
 | Writing or trusting an audit; stale inputs; vacuous passes | `references/audits.md` |
 | An existing Power BI / Fabric workspace: lineage from M and TMDL, Excel consumers, usage, refresh health, dead items, staged retirement | `references/fabric-workspace-audit.md` |
+| Documenting a medallion chain: column lineage from the dataflow M to Dataverse and SharePoint sources, sensitive columns, refresh, drift, curated notes | `references/data-lineage-docs.md` |
 | Rebuilding a reporting chain as a medallion: bronze from SharePoint lists and Excel workbooks, verifying against the files, parity with the old model, Python notebooks, reading Delta from Python | `references/fabric-rebuild-and-parity.md` |
 | The skill misled you or lacked an answer: offering feedback, what it may and may not contain | `references/feedback.md` |
 | Starting from nothing: the machine, pac, tokens, a browser that signs in by itself, identities signed in once, the smoke test | `references/first-run.md` |
