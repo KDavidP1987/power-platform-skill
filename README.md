@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.43.0](https://img.shields.io/badge/plugin-0.43.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.44.0](https://img.shields.io/badge/plugin-0.44.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.43.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.44.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -64,7 +64,7 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 | 11 | Two independent real builds in different tenants | A 1.0 criterion; every build so far ran in one tenant | Open: needs a second tenant |
 | 12 | Driver commands `add-data` and `refresh-source` for an existing app | Both were done by hand-written browser helpers in two projects; the recipe is in `browser-verification.md` section 12 | Done in 0.43: `refresh-source` (proved 0.41), `add-data` and its undo `remove-data`, each proved live with a save and a reopen of the saved app |
 | 13 | SKILL.md against Anthropic's current skill guidance: body under 5,000 tokens with the must-hold rules first (Claude Code keeps only the first 5,000 tokens of a skill after compaction), and a measured check that the newest models do not need the prescriptive passages | The body is about 10,500 tokens; after compaction everything from the tool table down is lost | Done in 0.31: about 4,100 tokens, 141 of 148 graded checks as before, 9% cheaper; CI fails a body over 20,000 characters |
-| 14 | Driver command `insert-gallery --screen S --name N` for the measured new-gallery workaround (Insert > Blank vertical gallery, rename, save) | Studio tears down on a push that adds a gallery to an existing screen; the workaround is measured twice but its Studio steps are still hand-driven | Open: port and prove against a live Studio session before release |
+| 14 | Driver command `insert-gallery --screen S --name N` for the measured new-gallery workaround (Insert > Blank vertical gallery, rename, save) | Studio tears down on a push that adds a gallery to an existing screen; the workaround is measured twice but its Studio steps were hand-driven | Done in 0.44: `insert-gallery` and its undo `delete-control`, proved live (insert, rename, save, reopen; then delete, save, reopen) |
 | 15 | A pre-import check that refuses a package whose flow StateCode differs from the repo | A client-side import timeout left active flows in Draft, and a package rebuilt from the live export would have carried the drift into the next import; only the post-import state diff exists today | Done in 0.42: `flow-state-check.py` (package against live and repo, exit 4; proved on a real 17-flow package) |
 <!-- backlog:end -->
 
@@ -85,7 +85,7 @@ written from Microsoft's documentation and marked so in the reference (`[Unteste
 | Feature | State | Proved so far | Not yet tested | Next step |
 |---|---|---|---|---|
 | `canvas-browser.mjs add-data` / `remove-data` (tables in an existing app) | Proved | Both, live in 0.43: add by logical name, save, reopen the saved app; the undo the same way | Several tables in one call | Next real use |
-| `canvas-browser.mjs insert-gallery` (the new-gallery workaround) | Not built | The workaround, measured twice by hand | Everything | ROADMAP 14: port it, prove it against a live Studio |
+| `canvas-browser.mjs insert-gallery` / `delete-control` (the new-gallery workaround) | Proved | Both, live in 0.44: insert, rename, save, reopen the saved app; the undo the same way | The full workaround (steps 1-4) end to end on a real ship | Next ship that adds a gallery |
 | `second-tab`, `studio-has`, `dirty`, and the `pick` / `radio` walk steps | Self-test only | Taken from a measured build's own helpers | Their bundled form, live | Use them in the next real build and record it |
 | Studio "disconnected" dialog anchor | Self-test only | Pattern from a session report | Never seen live by `doctor` | Record it the next time Studio drops the session |
 | Browser anchors in general | Partly proved | `doctor` and `refresh-source` re-checked Studio live in 0.41 (two anchors had moved) | Microsoft changes Studio and the player often | The monthly upkeep workflow, then `doctor` in a real tenant |
@@ -370,6 +370,7 @@ proves it goes red on a known-bad input, and CI runs them on every push.
 | `walk <scenario.json> [--fresh] [--trace]` | Perform a task and assert the result |
 | `studio` / `keys` | Open Studio in edit mode and hold it / reattach and send keys |
 | `add-data` / `remove-data` / `refresh-source` | Data sources in an existing app, each by logical name; saved, then proved by reopening the saved app |
+| `insert-gallery` / `delete-control` | The new-gallery workaround's Studio step (blank vertical gallery, renamed) and its undo; saved, then proved by reopening the saved app |
 | `save` / `publish [--reload-first]` / `close-studio [--discard]` | Save with proof, publish, and leave through Back to free the lock (with unsaved work it stops unless `--discard`) |
 | `shot <url> <name>` | Screenshot plus accessibility dump of any page |
 | `doctor [--record]` | Check every UI anchor in `assets/selectors.json` against a live session: `0` all resolve, `9` stale, `2` cannot verify |

@@ -507,7 +507,9 @@ save, and diff a fresh sync before trusting the clean push; a re-push of the fix
   against eight crashing cycles before it: push the change without the new gallery and save; in
   Studio, Insert > Blank vertical gallery on the target screen, rename it to the source's name, and
   save; then push the full source (the gallery and its children), save and publish, and re-ship from
-  git. The Studio steps are by hand for now (a driver command for them is on the roadmap). Push a
+  git. `scripts/canvas-browser.mjs insert-gallery --screen <screen> --name <gallery>` does the Studio
+  step against the held session (insert, rename, save, then reopen the saved app to prove the gallery
+  is on that screen); `delete-control --name <gallery> --screen <screen>` undoes it. Push a
   new screen alone and save before linking to it; push one screen per cycle while
   galleries are being added and save after each push that survives; keep each cycle's diff so the
   bisect can be repeated, and capture the console stack for a support case.

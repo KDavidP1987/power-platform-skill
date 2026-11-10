@@ -67,6 +67,10 @@
 //   node canvas-browser.mjs remove-data "<Display name>" [...] [--publish]
 //                                                  take data sources out (undoes add-data); refuses to save when Studio
 //                                                  re-adds one the formulas use; reopens to prove they are gone
+//   node canvas-browser.mjs insert-gallery --screen S --name N [--publish]
+//                                                  the new-gallery workaround's Studio step: Insert > Blank vertical
+//                                                  gallery on screen S, rename it N, save, prove it in the saved app
+//   node canvas-browser.mjs delete-control --name N [--screen S]   its undo (never a screen)
 //   save / publish / dirty act on the Studio tab whose authoring frame holds a Save button, not the newest
 //   node canvas-browser.mjs shot <url> <name>      navigate anywhere, screenshot + aria dump
 //   node canvas-browser.mjs lint <scenario.json>   check a scenario's verbs without a browser
@@ -269,6 +273,14 @@ const SELECTOR_DEFAULTS = {
   'studio.editUrl':           { surface: 'studio', kind: 'regex', pattern: '[?&]action=edit', flags: '', check: 'conditional' },
   'studio.formulaBar':        { surface: 'studio', kind: 'role', role: 'textbox', name: 'formula', flags: 'i', check: 'conditional' },
   'studio.formulaEditor':     { surface: 'studio', kind: 'css', value: '.monaco-editor .view-lines', check: 'conditional' },
+  'studio.treeViewButton': { surface: 'studio', kind: 'css', value: 'button[role="menuitem"][aria-label="Tree view" i]', check: 'conditional' },
+  'studio.treePane': { surface: 'studio', kind: 'css', value: '[role="tree"][aria-label="Tree view" i]', check: 'conditional' },
+  'studio.insertButton': { surface: 'studio', kind: 'css', value: '#commandBar_insert', check: 'conditional' },
+  'studio.insertSearch': { surface: 'studio', kind: 'css', value: 'input[placeholder="Search"]', check: 'conditional' },
+  'studio.insertBlankGallery': { surface: 'studio', kind: 'css', value: '[role="treeitem"][aria-label="Blank vertical gallery" i]', check: 'conditional' },
+  'studio.treeItemMore': { surface: 'studio', kind: 'css', value: 'button[aria-label="More options"]', check: 'conditional' },
+  'studio.menuRename': { surface: 'studio', kind: 'css', value: '[role="menu"] [role="menuitem"]:has-text("Rename")', check: 'conditional' },
+  'studio.menuDelete': { surface: 'studio', kind: 'css', value: '[role="menu"] [role="menuitem"]:has-text("Delete")', check: 'conditional' },
   'browser.blankUrl':         { surface: 'portal', kind: 'regex', pattern: '^(about:blank|chrome://new-tab-page|chrome://newtab|edge://newtab|chrome-error://|chrome://crash|edge://crash)', flags: 'i', check: 'conditional' },
   'player.dropdownOption':    { surface: 'player', kind: 'role', role: 'option', name: '', flags: '', check: 'conditional' },
   'consent.confirmUrl':       { surface: 'portal', kind: 'regex', pattern: 'consent\\.azure-apim\\.net/confirm\\?[^#]*[?&]code=', flags: 'i', check: 'conditional' },
@@ -1730,6 +1742,7 @@ function selftest() {
     ['refresh-source: removed status is recognised', rx('studio.dataSourceRemoved').test('Orders successfully removed from app')],
     ['add-data: a bare logical name, a pair and a display name', JSON.stringify(addDataTargets(['app_order', 'Vendor Sites=app_vendorsite', 'Orders', 'account'])) === JSON.stringify([{ display: null, logical: 'app_order' }, { display: 'Vendor Sites', logical: 'app_vendorsite' }, { display: 'Orders', logical: null }, { display: null, logical: 'account' }])],
     ['add-data: own prefix and declared externals are allowed', tableAllowed('app_order', 'app_orders_1a2b3', []) && tableAllowed('core_person', 'app_orders_1a2b3', ['core_*']) && tableAllowed('account', 'app_x', ['account'])],
+    ['insert-gallery: control names', validControlName('galOrders') && validControlName('_x1') && !validControlName('1gal') && !validControlName('gal Orders') && !validControlName('')],
     ['add-data: another team\'s table is refused', !tableAllowed('team2_order', 'app_orders_1a2b3', ['core_*']) && !tableAllowed('account', 'app_x', [])],
   ].filter(([, okc]) => !okc).map(([k]) => 'publish/tabs: ' + k);
   tabs.push(...P);
@@ -3464,6 +3477,173 @@ async function cmdRemoveData() {
   if (has('publish')) { if (!argv.includes('--again')) argv.push('--again'); await cmdPublish(); }
 }
 
+// --- insert-gallery / delete-control: the measured new-gallery workaround, driven -----------
+// A gallery created from .pa.yaml source tore Studio down and broke the published app (October 2026),
+// while a gallery inserted through Studio's Insert menu and then filled from source did not (measured
+// twice, against eight crashing cycles). insert-gallery does the Studio step: on the target screen,
+// Insert > Blank vertical gallery, rename it to the source's name, save, and prove it in the saved
+// app. delete-control is its undo: Studio autosaves, so leaving without saving is not one.
+export function validControlName(n) { return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(String(n || '')); }
+
+async function editorFrame(page) {
+  for (const f of page.frames()) {
+    if (!rx('studio.authoringFrameUrl').test(f.url())) continue;
+    try { if (await f.locator(css('studio.backButton')).count()) return f; } catch { /* detached */ }
+  }
+  return null;
+}
+// The Tree view pane, opened if it is closed (its rail button toggles it).
+async function treePane(page, fr) {
+  const pane = fr.locator(css('studio.treePane')).first();
+  const shown = async () => (await pane.count()) > 0 && await pane.isVisible().catch(() => false);
+  // A freshly opened Studio shows the Tree view a few seconds after "Editing"; clicking the toggle
+  // before then closes it (measured). Wait for it first, then toggle, and once more if that closed it.
+  for (let i = 0; i < 10; i++) { if (await shown()) return pane; await page.waitForTimeout(600); }
+  for (let t = 0; t < 2; t++) {
+    await fr.locator(css('studio.treeViewButton')).first().click().catch(() => {});
+    for (let i = 0; i < 8; i++) { await page.waitForTimeout(700); if (await shown()) return pane; }
+  }
+  return null;
+}
+const treeItem = (pane, name, level) => pane.locator('[role="treeitem"][aria-label="' + String(name).replace(/"/g, '\\"') + '"]' + (level ? '[aria-level="' + level + '"]' : '')).first();
+// Names under a screen in the tree, the screen expanded first (ArrowRight on a collapsed treeitem).
+async function screenChildren(page, pane, screen) {
+  const s = treeItem(pane, screen, 1);
+  if (!(await s.count())) return null;
+  if (await s.getAttribute('aria-expanded') === 'false') { await s.click(); await page.keyboard.press('ArrowRight'); await page.waitForTimeout(800); }
+  return pane.evaluate((t, scr) => {
+    const items = [...t.querySelectorAll('[role="treeitem"]')];
+    const i = items.findIndex((e) => e.getAttribute('aria-level') === '1' && e.getAttribute('aria-label') === scr);
+    const out = [];
+    for (let k = i + 1; k < items.length && items[k].getAttribute('aria-level') !== '1'; k++) out.push(items[k].getAttribute('aria-label'));
+    return out;
+  }, screen);
+}
+async function itemMenu(page, fr, pane, name, which) {
+  const it = treeItem(pane, name);
+  await it.scrollIntoViewIfNeeded().catch(() => {});
+  await it.click(); await page.waitForTimeout(600);
+  const more = it.locator(css('studio.treeItemMore')).first();
+  if (!(await more.count())) return false;
+  await more.click(); await page.waitForTimeout(800);
+  const mi = fr.locator(css(which)).first();
+  if (!(await mi.count())) { await page.keyboard.press('Escape').catch(() => {}); return false; }
+  await mi.click(); return true;
+}
+
+async function cmdInsertGallery() {
+  const screen = flag('screen', ''); const name = flag('name', '');
+  if (!screen || !validControlName(name)) {
+    log('usage: insert-gallery --screen <screen name> --name <gallery name> [--publish] [--no-verify]');
+    log('  The Studio step of the new-gallery workaround (check-new-galleries.py): Insert > Blank vertical gallery');
+    log('  on the screen, rename it, save, and prove it in the saved app. Then push the full source.');
+    process.exitCode = 1; return;
+  }
+  const { browser, ctx } = await attach();
+  const { page, scan } = await editingTab(ctx);
+  await page.bringToFront();
+  if (rx('studio.titleReadOnly').test(await page.title())) { log('  READ-ONLY - nothing can be inserted from here.'); await browser.close(); process.exitCode = 3; return; }
+  if (scan && scan.disconnected) { log('  !! Studio shows "There\'s been a disconnect". Not inserting.'); log(DISCONNECT_NOTE); await browser.close(); process.exitCode = 3; return; }
+  for (const f of page.frames()) await dismissBubbles(f).catch(() => 0);
+  const fail = async (msg, tag) => { log('  !! ' + msg); await capture(page, 'insert-gallery-' + tag); await browser.close(); process.exitCode = 4; };
+  const fr = await editorFrame(page);
+  const pane = fr && await treePane(page, fr);
+  if (!pane) return fail('the Tree view could not be opened', 'no-tree');
+  const before = await screenChildren(page, pane, screen);
+  if (before === null) return fail('no screen named "' + screen + '" in the Tree view', 'no-screen');
+  if (await treeItem(pane, name).count()) {
+    log('  ' + name + ' already exists' + (before.includes(name) ? ' on ' + screen : ' (on another screen or nested)') + ' - nothing inserted.');
+    await browser.close(); if (!before.includes(name)) process.exitCode = 4; return;
+  }
+  // Select the screen itself, so the gallery lands at its top level (not inside a selected container).
+  await treeItem(pane, screen, 1).click(); await page.waitForTimeout(800);
+  const vis = async () => { const out = []; const all = fr.locator(css('studio.insertSearch')); for (let i = 0; i < await all.count(); i++) if (await all.nth(i).isVisible().catch(() => false)) out.push(i); return out; };
+  const had = await vis();
+  await fr.locator(css('studio.insertButton')).first().click();
+  let box = -1;
+  for (let i = 0; i < 10 && box < 0; i++) { await page.waitForTimeout(500); box = (await vis()).find((k) => !had.includes(k)) ?? -1; }
+  if (box < 0) return fail('the Insert menu\'s search box did not appear', 'no-insert-search');
+  await fr.locator(css('studio.insertSearch')).nth(box).fill('Blank vertical gallery');
+  const pick = fr.locator(css('studio.insertBlankGallery')).first();
+  for (let i = 0; i < 10 && !(await pick.count()); i++) await page.waitForTimeout(500);
+  if (!(await pick.count())) return fail('no "Blank vertical gallery" in the Insert menu', 'no-gallery-item');
+  await pick.click();
+  await page.waitForTimeout(3000);
+  await page.keyboard.press('Escape').catch(() => {});
+  const after = (await screenChildren(page, await treePane(page, fr), screen)) || [];
+  const fresh = after.filter((n) => !before.includes(n));
+  if (fresh.length !== 1) return fail('expected one new control on ' + screen + ', found ' + (fresh.join(', ') || 'none'), 'not-inserted');
+  log('  inserted ' + fresh[0] + ' on ' + screen);
+  const p2 = await treePane(page, fr);
+  if (!(await itemMenu(page, fr, p2, fresh[0], 'studio.menuRename'))) return fail('Rename not found in the menu of ' + fresh[0] + ' (undo with delete-control --name ' + fresh[0] + ')', 'no-rename');
+  await page.waitForTimeout(600);
+  await page.keyboard.press('Control+A'); await page.keyboard.type(name); await page.keyboard.press('Enter');
+  await page.waitForTimeout(1500);
+  if (!(await treeItem(p2, name).count())) return fail('the rename to ' + name + ' did not take (Studio refuses a name in use). Undo with delete-control --name ' + fresh[0], 'rename-failed');
+  log('  renamed to ' + name);
+  await capture(page, 'insert-gallery-done');
+  await browser.close();
+  log('\n  Saving ...');
+  await cmdSave();
+  if (process.exitCode) { log('  The save is unproven (above). Studio may still autosave: undo with delete-control if needed.'); return; }
+  if (!has('no-verify')) {
+    log('  Reopening the saved app to prove the gallery is there ...');
+    const ok = await reopenAndFind(screen, name);
+    if (ok === null) { log('  !! could not read the reopened app\'s Tree view - UNPROVEN'); process.exitCode = 4; return; }
+    if (!ok) { log('  !! ' + name + ' is NOT on ' + screen + ' in the saved app'); process.exitCode = 4; return; }
+    log('  ' + name + ' is on ' + screen + ' in the saved app');
+  }
+  log('  Next: push the full source (the gallery and its children), save and publish, then re-ship from git.');
+  if (has('publish')) { if (!argv.includes('--again')) argv.push('--again'); await cmdPublish(); }
+}
+
+// Reopen the saved app and report whether a control is (or is not) a direct child of a screen; null if unreadable.
+async function reopenAndFind(screen, name, wantPresent = true) {
+  const again = await attach();
+  try {
+    const { page } = await editingTab(again.ctx);
+    await leaveEditor(page).catch(() => {});
+    await page.goto(tpl('portal.studioUrl', { environmentId: APP.environmentId, appId: APP.appId }), { waitUntil: 'domcontentloaded' });
+    if (!(await waitForEditing(page, 'reopening to check the tree'))) return null;
+    const fr = await editorFrame(page);
+    const pane = fr && await treePane(page, fr);
+    if (!pane) return null;
+    const kids = await screenChildren(page, pane, screen);
+    if (kids === null) return null;
+    return wantPresent ? kids.includes(name) : !kids.includes(name);
+  } finally { await again.browser.close().catch(() => {}); }
+}
+
+async function cmdDeleteControl() {
+  const name = flag('name', ''); const screen = flag('screen', '');
+  if (!validControlName(name)) { log('usage: delete-control --name <control> [--screen <screen>] [--no-verify]   (undoes insert-gallery)'); process.exitCode = 1; return; }
+  const { browser, ctx } = await attach();
+  const { page } = await editingTab(ctx);
+  await page.bringToFront();
+  if (rx('studio.titleReadOnly').test(await page.title())) { log('  READ-ONLY.'); await browser.close(); process.exitCode = 3; return; }
+  const fr = await editorFrame(page);
+  const pane = fr && await treePane(page, fr);
+  if (!pane) { log('  !! the Tree view could not be opened'); await browser.close(); process.exitCode = 4; return; }
+  if (screen) await screenChildren(page, pane, screen);
+  if (await treeItem(pane, name, 1).count()) { log('  !! ' + name + ' is a screen - not deleting it'); await browser.close(); process.exitCode = 4; return; }
+  if (!(await treeItem(pane, name).count())) { log('  ' + name + ' is not in the Tree view' + (screen ? ' under ' + screen : ' (give --screen if it is on a collapsed screen)') + ' - nothing deleted.'); await browser.close(); return; }
+  if (await treeItem(pane, name).getAttribute('aria-expanded') !== null) log('  note: ' + name + ' has children; they go with it.');
+  if (!(await itemMenu(page, fr, pane, name, 'studio.menuDelete'))) { log('  !! Delete not found in its menu'); await capture(page, 'delete-control-no-delete'); await browser.close(); process.exitCode = 4; return; }
+  await page.waitForTimeout(2000);
+  if (await treeItem(pane, name).count()) { log('  !! ' + name + ' is still in the Tree view'); await capture(page, 'delete-control-still'); await browser.close(); process.exitCode = 4; return; }
+  log('  deleted ' + name);
+  await browser.close();
+  log('\n  Saving ...');
+  await cmdSave();
+  if (process.exitCode) return;
+  if (screen && !has('no-verify')) {
+    const gone = await reopenAndFind(screen, name, false);
+    if (gone === null) { log('  !! could not read the reopened app\'s Tree view - UNPROVEN'); process.exitCode = 4; return; }
+    if (!gone) { log('  !! ' + name + ' is still on ' + screen + ' in the saved app'); process.exitCode = 4; return; }
+    log('  ' + name + ' is gone from ' + screen + ' in the saved app');
+  }
+}
+
 // --- doctor: are the UI anchors still where the driver expects them? ---------------------------
 // Opens the maker portal, the published player and Studio with the saved profile and checks every
 // entry of the selector table that a normal session can show. Never passes without a live,
@@ -3786,7 +3966,7 @@ async function autoTidy() {
 const commands = { login: cmdLogin, check: cmdCheck, create: cmdCreate, connection: cmdConnection, play: cmdPlay, walk: cmdWalk, studio: cmdStudio,
   keys: cmdKeys, save: cmdSave, publish: cmdPublish, 'close-studio': cmdCloseStudio, shot: cmdShot,
   tabs: cmdTabs, tidy: cmdTidy, 'second-tab': cmdSecondTab, 'studio-has': cmdStudioHas, dirty: cmdDirty, lint: async () => cmdLint(), doctor: cmdDoctor, confirm: cmdConfirm,
-  'refresh-source': cmdRefreshSource, 'add-data': cmdAddData, 'remove-data': cmdRemoveData };
+  'refresh-source': cmdRefreshSource, 'add-data': cmdAddData, 'remove-data': cmdRemoveData, 'insert-gallery': cmdInsertGallery, 'delete-control': cmdDeleteControl };
 
 if (argv.includes('--selftest')) selftest();
 else if (!commands[cmd]) {
@@ -3800,6 +3980,7 @@ else if (!commands[cmd]) {
   log('  refresh-source "<Display name>"[=<logical>] [...] [--publish]   new columns: remove, re-add, save (and publish) a source');
   log('  add-data "<Display name>=<logical>" | <logical> [...] [--external] [--publish]   add tables to an existing app');
   log('  remove-data "<Display name>" [...] [--publish]   take data sources out (undoes add-data)');
+  log('  insert-gallery --screen S --name N [--publish]   the new-gallery workaround\'s Studio step; delete-control --name N [--screen S] undoes it');
   log('  doctor [--player-only|--studio-only] [--record]   are the UI anchors in assets/selectors.json still valid?\n');
   log('  config:  ' + (CONFIG_PATH || '(none found - pass --config or create scripts/canvas-app.json)'));
   if (APP.appId) log('  app:     ' + (APP.appName || '') + '  ' + APP.appId);

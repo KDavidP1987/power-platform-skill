@@ -15,7 +15,8 @@ The workaround, measured twice with no teardown (against eight crashing cycles b
   2. Studio: Insert > Blank vertical gallery on the target screen, rename it to the source's name, save.
   3. Push the full source (the gallery and its children); the Tree view must stay up. Save and Publish.
   4. Re-ship from git, then open the published app and check that its first screen renders signed-in data.
-A driver command for the Studio steps is on the roadmap; today they are done by hand in Studio.
+Step 2 is a driver command: `canvas-browser.mjs insert-gallery --screen <screen> --name <gallery>` (it
+reopens the saved app to prove the gallery is there); `delete-control --name <gallery>` undoes it.
 
 What it compares: gallery names in the repo's Src against the galleries the live app already knows -
 the named controls in the live package's compiled half (msapp/Controls/*.json; a Studio publish writes a
