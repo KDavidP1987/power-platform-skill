@@ -33,6 +33,11 @@ statement carries one of these tags:
 11. Where the skill's tools fit as gates
 12. A minimal GitHub workflow
 13. What a green pipeline does not prove
+14. Solution layers: which version of a component wins
+15. Managed Environments
+16. Pipelines in Power Platform (in-product)
+17. Dataverse git integration
+18. Choosing a path
 
 ## 1. The shape of a pipeline
 
@@ -231,7 +236,15 @@ So in a pipeline:
    owned by a person are the usual blocker. [Untested here] If activation as the service principal
    fails on connections, activate as a named service account that owns the connections, and record
    that dependency.
-5. **Diff flow state after every import**, and print the fix for each mismatch. [Observed]
+5. **Refuse the package before the import if it would switch a flow.** [Observed] `scripts/flow-state-check.py
+   --package <zip> --repo solution/src` reads each cloud flow's StateCode from the package
+   (`customizations.xml`, or the unpacked `Workflows/*.json.data.xml`), compares it with the live
+   flow (GET only) and with the repo, and exits 4 for any flow the import would turn on or off, or
+   whose package state differs from git. Name an intended switch with `--allow`. Proved on a real
+   17-flow package: clean against live and repo (exit 0); with one running flow set to Draft in a
+   copy, refused as a switch-off live and as drift offline.
+6. **Diff flow state after every import**, and print the fix for each mismatch. [Observed]
+   `scripts/import-watch.py` does it from the server.
 
 Activation through the Web API [Documented]:
 
@@ -310,6 +323,7 @@ upkeep workflow runs monthly. Run them in this order, cheapest first:
 | Canvas source | `check-pa-yaml.mjs`, run per file (below) | exit 2: a fault that fails the whole-app compile | nothing |
 | Artifact | `python scripts/inspect-artifact.py out/solution_managed.zip --expect <markers> --min-datasources <live count>` | exit 1: missing components or markers, security roles present, fewer data sources than live | the built zip |
 | Drift | `python scripts/check-drift.py out/solution_managed.zip --offline metadata-dump.json` (or live, read-only, with a token) | the app's cached Dataverse metadata disagrees with the target in a way a formula depends on | a metadata dump, or a read token for the target |
+| Flow state | `python scripts/flow-state-check.py --package out/solution_managed.zip --repo solution/src` (add `--org` for the target, read-only) | exit 4: the import would switch a flow on or off, or the package's flow state differs from the repo (a package rebuilt from a live export) | the built zip; a read token for the live comparison |
 | Checker | `pac solution check` | your severity policy (section 5) | service principal |
 
 The `.pa.yaml` hook reads a Claude Code hook payload on stdin. In CI, feed it one file at a time:
@@ -402,6 +416,19 @@ jobs:
           pac org who
       - name: Solution Checker
         run: pac solution check --path out/solution_managed.zip --outputDirectory out/checker
+      - name: Refuse a package that would switch a flow (read-only)
+        shell: bash
+        env:
+          PP_APP_ID: ${{ vars.PP_APP_ID }}
+          PP_TENANT_ID: ${{ vars.PP_TENANT_ID }}
+          PP_ENV_URL: ${{ vars.PP_ENV_URL }}
+          PP_CLIENT_SECRET: ${{ secrets.PP_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          export DATAVERSE_TOKEN=$(curl -s -X POST "https://login.microsoftonline.com/$PP_TENANT_ID/oauth2/v2.0/token" \
+            -d "client_id=$PP_APP_ID&client_secret=$PP_CLIENT_SECRET&grant_type=client_credentials&scope=$PP_ENV_URL/.default" | jq -r .access_token)
+          python skills/power-platform/scripts/flow-state-check.py --package out/solution_managed.zip \
+            --repo solution/src --org "$PP_ENV_URL"
       - name: Import with this environment's settings
         run: pac solution import --path out/solution_managed.zip --settings-file deploy/test.settings.json
       # Next, by name and with a dry run first: activate flows, then diff every flow's state
@@ -425,3 +452,102 @@ with `--packagetype Both` (section 3). A team that ships unmanaged replaces `Man
 - **That nothing loops.** [Observed] The lint catches self-writes on one flow and cycles across
   flows, but a filtered trigger can register to nothing, and a bookkeeping write can fire every
   update flow. Read run history in the hour after the first real use.
+
+## 14. Solution layers: which version of a component wins
+
+[Documented] Every component has a stack of layers: `System` at the bottom, one layer per managed
+solution that carries it (in import order), and the **unmanaged layer** (`Active`) on top. The top
+layer is what runs. A managed import updates its own layer only, so **an unmanaged change in the
+target hides every later managed update** until that unmanaged layer is removed ("Remove active
+customizations" on the component's layers page). That is the usual cause of "the release imported
+fine and nothing changed".
+
+Read the stack before blaming the import. It is a virtual table, readable with a GET [Observed]:
+
+```
+GET <org>/api/data/v9.2/msdyn_componentlayers?$select=msdyn_solutionname,msdyn_publishername,msdyn_order,msdyn_overwritetime
+    &$filter=msdyn_componentid eq '<component id>' and msdyn_solutioncomponentname eq 'Workflow'
+```
+
+- `msdyn_order` ascending is bottom to top; the highest is the layer that runs. The component name
+  is the solution-component type name: `Entity` (use the table's `MetadataId`), `Attribute`,
+  `Workflow`, `CanvasApp`, `SystemForm`, `SavedQuery`, `WebResource`, ...
+- Measured in an environment that only ever imported unmanaged: a cloud flow had exactly one layer,
+  `Active`; a standard table had `System` with a managed Microsoft layer above it. A component whose
+  top layer is `Active` in a target that should be managed-only was edited there: find who, then
+  remove the active customizations or bring the change back to dev and ship it.
+- **Never edit in a managed target "just to fix it".** [Documented] The fix becomes an unmanaged
+  layer that silently blocks the next release of that component.
+- Deleting a managed solution removes its layer and, for components no other layer carries, the
+  component and its data. Treat it like the upgrade in section 6.
+
+## 15. Managed Environments
+
+[Documented] A Managed Environment is an environment-level switch (admin center > the
+environment > Enable Managed Environments, or the admin API) that turns on governance features: sharing limits
+for canvas apps and flows, solution checker enforcement on import (none, warn, block), usage
+insights, maker welcome content, IP firewall and cookie binding, data policies views, and more.
+What the projects behind this skill have to know:
+
+- **Licensing.** Every user of a premium resource in a Managed Environment needs a premium licence
+  (Power Apps or Power Automate premium, per app, or pay-as-you-go). Turning it on for an
+  environment whose users run on seeded Microsoft 365 rights can lock them out. Check before
+  enabling; it is the admin's decision, not the agent's.
+- **Solution checker enforcement** makes the checker part of every import into that environment.
+  With "block", a package with critical findings is refused at import, by the platform. Run
+  `pac solution check` in the build (section 5) so the import is never the first place you see it.
+- **Sharing limits** can stop the app's "share with everyone" or a security-group share. Read the
+  environment's settings before planning access around a share (`security-and-access.md`).
+- **It is a prerequisite** for the next two sections: pipeline targets and git integration need it.
+
+## 16. Pipelines in Power Platform (in-product)
+
+[Documented] Microsoft's own deployment feature: a **pipelines host** environment holds the
+configuration; a pipeline names a development environment and ordered **target** stages (test,
+prod). A maker deploys a solution from the Solutions page; the pipeline exports it as **managed**
+from dev, runs pre-deployment checks and optional approvals (gated extensions, which can call a
+flow), and imports it with the stage's connection references and environment variables.
+
+- **Every target must be a Managed Environment.** From 2026-10 the admin deployment page flags
+  deployments to targets that are not, and blocks them after a 30-day grace period (one 30-day
+  extension per environment). Dev and the host need not be managed. Re-read the overview page for
+  current dates before relying on them.
+- **It deploys what is in dev, not what is in git.** The artifact is an export of the dev
+  environment at that moment. That conflicts with this skill's rule that the repo is the source
+  (section 1): live-only edits in dev ship. If you use it, pair it with git integration (next
+  section) or a check that dev matches git before each deployment (export, unpack, diff against
+  the branch; `check-drift.py` covers canvas metadata).
+- **Flows**: the managed import carries each flow's state as in dev, exactly as a manual import does
+  (section 8). Run `flow-state-check.py` against the export and the target first, or use a gated
+  extension that does.
+- **Where it fits.** Small teams with no CI service, or makers who must deploy without pac. Teams
+  that already build from git with GitHub Actions or Azure DevOps gain little. [Untested here: the
+  projects behind this skill had no pipelines host.]
+
+## 17. Dataverse git integration
+
+[Documented] Binds a development environment (whole environment, or solution by solution) to an
+Azure DevOps or GitHub repository folder and branch. Makers commit and pull from the Solutions page
+(Source control); each component is written as source files in Microsoft's own layout. It needs a
+Managed Environment, System Administrator in Dataverse to bind, and repository write access for each
+person who commits. There are `ConnectToGit` / `DisconnectFromGit` APIs for binding by code.
+
+- **Use it in development environments only.** Microsoft's guidance: build artifacts from the repo
+  and deploy them with pipelines; do not bind test or production.
+- **Its layout is not `pac solution unpack`'s, and its canvas format is not this skill's `.pa.yaml`
+  source.** Do not point it at a folder the skill's tools write; give it its own folder or repo, or
+  choose one source of truth per solution. Two writers to one folder is how a repo stops being the
+  source. [Untested here]
+- **It makes the commit, not the review.** A maker's commit from the portal can carry every live
+  edit; protect the branch and review by pull request like any export (section 3).
+- **What it fixes:** "dev has edits nobody put in git", which is the gap the in-product pipelines
+  leave. **What it does not:** packing, the skill's gates, activation, or performing the task.
+
+## 18. Choosing a path
+
+| Situation | Path |
+|---|---|
+| One maker, one environment, no pipeline rights | The skill's default: build from git, gates, `pac solution import` by hand, `import-watch.py`, verify in the app |
+| A team with GitHub or Azure DevOps and a service principal | Sections 1 to 13: managed build from git, gates (with `flow-state-check.py`), import to test, a person performs the task, then prod |
+| Makers who deploy from the portal, admins who want approvals | In-product pipelines with Managed Environment targets, plus git integration in dev so the repo still sees every change |
+| Mixed: some solutions in each | Decide per solution and per environment, write it down, and never import the same solution managed and unmanaged into one environment (section 6) |

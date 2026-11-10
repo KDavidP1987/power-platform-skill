@@ -11,6 +11,31 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-10
+
+ALM depth: the pre-import flow-state check (ROADMAP 15) as a tool, and solution layers, Managed
+Environments, in-product pipelines and Dataverse git integration in `alm-pipelines.md`.
+
+### Added
+
+- `scripts/flow-state-check.py --package <zip|folder> [--repo solution/src] [--offline] [--allow a,b]`:
+  before an import, reads each cloud flow's StateCode from the package (`customizations.xml`, or the
+  unpacked `Workflows/*.json.data.xml`), compares it with the live flow (GET only) and with the repo,
+  and refuses (exit 4) a package that would switch a flow on or off, or whose state differs from git
+  (a package rebuilt from a live export). Proved read-only on a real 17-flow package: clean against
+  live and repo; a copy with one running flow set to Draft was refused live as a switch-off and
+  offline as drift. A gate in `alm-pipelines.md` section 11 and its sample workflow;
+  `power-automate.md` no longer calls the pre-import comparison a manual step; `setup-harness`
+  installs it.
+- `alm-pipelines.md` sections 14 to 18: solution layers and how to read a component's stack
+  (`msdyn_componentlayers`, a GET, proved live: an unmanaged-only flow has one `Active` layer);
+  Managed Environments (premium licensing for every user, checker enforcement on import, sharing
+  limits); pipelines in Power Platform (every target must be a Managed Environment, enforced from
+  2026-10 after a grace period; it deploys dev, not git); Dataverse git integration (dev
+  environments only, its own layout, not the skill's `.pa.yaml` folder); and a table for choosing a
+  path. Sections 15 to 17 restate Microsoft's documentation (tagged [Documented]); the projects
+  behind this skill have not run a pipelines host or git integration.
+
 ## [0.41.0] - 2026-11-10
 
 `refresh-source` proved against a live Studio, the Studio anchors that moved in 2026-11 re-pinned, and
