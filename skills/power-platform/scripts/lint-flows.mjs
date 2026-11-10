@@ -715,6 +715,57 @@ function checkShapeNotes(flow, add) {
     `"what starts this flow" becomes ambiguous for every later tool; chain them.`);
 }
 
+// Approvals (power-automate.md section 19). A wait without a timeout ends with the run at 30 days and
+// fails it, while the request stays open in the approval centre; a timeout nobody handles fails the
+// same way, only sooner. In test mode a reassignable approval can be handed on to someone outside the
+// allowlist by the approver, so --require-safe-recipients also requires enableReassignment false.
+const APPROVAL_WAIT = /^(StartAndWaitForAnApproval|WaitForAnApproval|StartAndWaitForATextSuggestionApproval)$/i;
+const APPROVAL_CREATE = /^(StartAndWaitForAnApproval|CreateAnApproval|StartAndWaitForATextSuggestionApproval)$/i;
+function checkApprovals(flow, add, safeRecipients) {
+  const timedOutHandled = new Set();
+  walk(flow.def.actions, (n, a) => {
+    for (const [dep, states] of Object.entries(a.runAfter || {})) if ((states || []).some((x) => /^TimedOut$/i.test(x))) timedOutHandled.add(dep);
+  });
+  walk(flow.def.actions, (n, a) => {
+    const h = (a.inputs && a.inputs.host) || {};
+    const conn = String(h.connectionName || h.apiId || '').split('/').pop();
+    if (!/^shared_approvals/i.test(conn)) return;
+    const op = h.operationId || '';
+    if (APPROVAL_WAIT.test(op)) {
+      const to = a.limit && a.limit.timeout;
+      if (!to) add('warn', 'approval-no-timeout', `'${n}' (${op}) waits with no timeout. A run ends at 30 days: the flow fails and ` +
+        `the request stays open in the approval centre with nothing waiting for it. Set Settings > Timeout (limit.timeout, e.g. P7D) ` +
+        `and run an escalation or reminder after it on TimedOut.`);
+      else if (!timedOutHandled.has(n)) add('warn', 'approval-timeout-unhandled', `'${n}' times out after ${to}, but no action runs ` +
+        `after it on TimedOut, so the run just fails. Add a branch with runAfter {'${n}': ['TimedOut']}.`);
+    }
+    if (safeRecipients && APPROVAL_CREATE.test(op)) {
+      const p = (a.inputs && a.inputs.parameters) || {};
+      const key = Object.keys(p).find((k) => /(^|\/)enableReassignment$/i.test(k));
+      if (!key || p[key] !== false) add('error', 'approval-reassignable', `'${n}' lets the approver reassign the request ` +
+        `(${key ? key + ' = ' + JSON.stringify(p[key]) : 'enableReassignment not set; the default allows it'}), which can hand it to ` +
+        `someone outside the allowlist. Under --require-safe-recipients set enableReassignment to false.`);
+    }
+  });
+}
+
+// Activation refuses a Recurrence whose startTime is more than 49 years ahead (measured:
+// InvalidWorkflowTriggerRecurrence). A far-future start is the usual way to make a scheduled flow
+// run only on demand, so the date that looks safest is the one that fails.
+export function recurrenceTooFar(startTime, now = new Date()) {
+  const t = Date.parse(startTime || '');
+  if (Number.isNaN(t)) return false;
+  const limit = new Date(now); limit.setUTCFullYear(limit.getUTCFullYear() + 49);
+  return t > limit.getTime();
+}
+function checkRecurrence(flow, add) {
+  for (const [n, t] of Object.entries(flow.def.triggers || {})) {
+    const st = t && t.type === 'Recurrence' && t.recurrence && t.recurrence.startTime;
+    if (st && recurrenceTooFar(st)) add('error', 'recurrence-start-too-far', `trigger '${n}' starts at ${st}, more than 49 years ahead; ` +
+      `activation refuses it (InvalidWorkflowTriggerRecurrence). For an on-demand-only flow use a start within 49 years, e.g. 2070-01-01.`);
+  }
+}
+
 function checkEntitySets(flow, sets, add) {
   if (!sets) return;
   walk(flow.def.actions, (n, a) => {
@@ -874,7 +925,7 @@ function checkCreateInState(t, add) {
 // channel), and no HTTP action exists (it can reach anything). "In test, only the allowlist is
 // ever addressed" becomes a property of the source, not of reviewer attention.
 const MESSAGING = /^shared_(office365|office365users|outlook|teams|sendmail|smtp|sendgrid|twilio|approvals|outlookgroups)/i;
-const RECIPIENT_KEY = /(^|\/)(to|cc|bcc|replyto|recipient|recipients|assignedto|groupid|channelid|emailaddress|mailto|phonenumber)$/i;
+const RECIPIENT_KEY = /(^|\/)(to|cc|bcc|replyto|recipient|recipients|assignedto|requestor|groupid|channelid|emailaddress|mailto|phonenumber)$/i;
 const isOutputs = (n, name) => n && n.t === 'call' && n.name.toLowerCase() === 'outputs' && n.args.length === 1 && n.args[0].t === 'lit' && n.args[0].v === name;
 // Every value the test branch can produce is the allowlist or ''; nested if() is followed into both arms.
 function testOnly(n) {
@@ -925,6 +976,8 @@ export function lint(flows, { entitySets = null, dateOnly = null, safeRecipients
     checkCreateInState(t, add);
     checkSelfWrite(flow, t, add);
     if (safeRecipients) checkSafeRecipients(flow, add);
+    checkApprovals(flow, add, safeRecipients);
+    checkRecurrence(flow, add);
     checkApostrophes(flow, add);
     checkExpressionBalance(flow, add);
     scopeErrors(flow.def.actions || {}, new Set(), add);
@@ -1080,6 +1133,34 @@ const RECIPIENT_CASES = [
   ['test-branch-leaks', recipientFlow("@outputs('Safe_to_owner')", "@if(outputs('Is_live'), 'owner@example.invalid', if(equals(1, 0), 'owner@example.invalid', outputs('Allowlist')))"), 1],
 ];
 
+// Approval shapes: [name, fixture, safe mode, the one code expected (null = none of the approval/unsafe codes)].
+function approvalFlow({ to = "@outputs('Safe_to_approver')", requestor, reassign = false, timeout = 'PT2H', handled = true } = {}) {
+  const host = (op) => ({ connectionName: 'shared_approvals', operationId: op, apiId: '/providers/Microsoft.PowerApps/apis/shared_approvals' });
+  const params = { approvalType: 'Basic', 'ApprovalCreationInput/title': 'x', 'ApprovalCreationInput/assignedTo': to };
+  if (requestor) params['ApprovalCreationInput/requestor'] = requestor;
+  if (reassign !== 'unset') params['ApprovalCreationInput/enableReassignment'] = reassign;
+  const actions = {
+    Is_live: { type: 'Compose', runAfter: {}, inputs: '@false' },
+    Allowlist: { type: 'Compose', runAfter: { Is_live: ['Succeeded'] }, inputs: 'owner@example.invalid' },
+    Safe_to_approver: { type: 'Compose', runAfter: { Allowlist: ['Succeeded'] }, inputs: "@if(outputs('Is_live'), '', outputs('Allowlist'))" },
+    Create_an_approval: { type: 'OpenApiConnection', runAfter: { Safe_to_approver: ['Succeeded'] }, inputs: { host: host('CreateAnApproval'), parameters: params } },
+    Wait_for_an_approval: { type: 'OpenApiConnectionWebhook', runAfter: { Create_an_approval: ['Succeeded'] },
+      inputs: { host: host('WaitForAnApproval'), parameters: { approvalName: "@body('Create_an_approval')?['name']" } } },
+  };
+  if (timeout) actions.Wait_for_an_approval.limit = { timeout };
+  if (handled) actions.Timed_out = { type: 'Compose', runAfter: { Wait_for_an_approval: ['TimedOut'] }, inputs: 'escalate' };
+  return { file: 'a.json', name: 'a', refs: {}, def: { triggers: { Every_day: { type: 'Recurrence', recurrence: { frequency: 'Day', interval: 1 } } }, actions } };
+}
+const APPROVAL_CASES = [
+  ['approval: owner only, no reassignment, timeout handled', approvalFlow(), true, null],
+  ['approval: no timeout', approvalFlow({ timeout: null, handled: false }), false, 'approval-no-timeout'],
+  ['approval: timeout nobody handles', approvalFlow({ handled: false }), false, 'approval-timeout-unhandled'],
+  ['approval: reassignable in test mode', approvalFlow({ reassign: true }), true, 'approval-reassignable'],
+  ['approval: reassignment left at its default', approvalFlow({ reassign: 'unset' }), true, 'approval-reassignable'],
+  ['approval: assigned to an address directly', approvalFlow({ to: 'someone@example.invalid' }), true, 'unsafe-recipient'],
+  ['approval: requestor set directly', approvalFlow({ requestor: 'someone@example.invalid' }), true, 'unsafe-recipient'],
+];
+
 function selftest() {
   const dateOnly = new Set(['app_approvedon']);
   const bad = lint([fixture(true)], { dateOnly }).results[0].items.filter((i) => i.level !== 'info').map((i) => i.code);
@@ -1095,6 +1176,16 @@ function selftest() {
   for (const [name, flow, expect] of RECIPIENT_CASES) {
     const n = lint([flow], { safeRecipients: true }).results[0].items.filter((i) => /^unsafe-/.test(i.code)).length;
     if ((n > 0) !== (expect > 0)) graphFails.push(`recipients ${name}: expected ${expect ? 'a finding' : 'none'}, got ${n}`);
+  }
+  for (const [name, flow, safe, expect] of APPROVAL_CASES) {
+    const codes = lint([flow], { safeRecipients: safe }).results[0].items.filter((i) => /^(approval-|unsafe-)/.test(i.code)).map((i) => i.code);
+    const okCase = expect === null ? codes.length === 0 : codes.length === 1 && codes[0] === expect;
+    if (!okCase) graphFails.push(`${name}: expected ${expect || 'none'}, got ${codes.join(', ') || 'none'}`);
+  }
+  {
+    const now = new Date('2026-11-10T00:00:00Z');
+    if (!recurrenceTooFar('2099-01-01T00:00:00Z', now) || recurrenceTooFar('2070-01-01T00:00:00Z', now) || recurrenceTooFar('', now))
+      graphFails.push('recurrence-start-too-far: 2099 must fail, 2070 and blank must pass');
   }
   const missing = want.filter((w) => !bad.includes(w));
   const guardFails = [];
@@ -1142,7 +1233,7 @@ function selftest() {
   const ok = missing.length === 0 && good.length === 0 && guardFails.length === 0 && parsed.length === 0 && graphFails.length === 0;
   console.log(ok ? `selftest ok: bad fixture -> ${bad.length} findings (${[...new Set(bad)].join(', ')}), good fixture -> 0, ` +
                    `${GUARD_CASES.length} guard shapes and 2 filteringattributes cases decided as expected, ${GRAPH_CASES.length} loop-graph ` +
-                   `shapes, ${RECIPIENT_CASES.length} recipient shapes and the unfiltered-trigger rule as expected, parser cases ok, run record ok`
+                   `shapes, ${RECIPIENT_CASES.length} recipient shapes, ${APPROVAL_CASES.length} approval shapes and the unfiltered-trigger rule as expected, parser cases ok, run record ok`
                  : `selftest FAILED: missing [${missing.join(', ')}]; good fixture produced: ${good.map((g) => g.code + ': ' + g.msg).join(' | ')}; ` +
                    `guard shapes: [${guardFails.join(' | ')}]; loop graph / recipients: [${graphFails.join(' | ')}]; parser: [${parsed.join(' | ')}]`);
   process.exit(ok ? 0 : 1);

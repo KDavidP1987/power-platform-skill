@@ -11,6 +11,31 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-10
+
+Approvals in Teams and Outlook (ROADMAP 10, now done), proved live with the approvals assigned to the
+owner only.
+
+### Added
+
+- `power-automate.md` section 19, Approvals: the one connection per person (made with one API call; it
+  has no sign-in), `CreateAnApproval` + `WaitForAnApproval` and their fields, the outcome fields a run
+  reads, where requests arrive (approval centre, Teams card, Outlook actionable message) and the guest
+  and group limits, the 30-day run limit against an approval that never expires, the Approvals tables in
+  Dataverse, and testing with the recipient pin. A checklist line in section 15.
+- `lint-flows.mjs`: `approval-no-timeout` and `approval-timeout-unhandled` (warn) on any Approvals
+  wait; under `--require-safe-recipients`, `approval-reassignable` (error) unless `enableReassignment`
+  is false, and `requestor` counts as a recipient; `recurrence-start-too-far` (error) for a Recurrence
+  `startTime` more than 49 years ahead, which activation refuses. Seven approval self-test shapes.
+
+### Proved
+
+- A trial flow (lint clean under `--require-safe-recipients`) was deployed with `deploy-flows.py`,
+  activated, and run twice with `run-flow.py --send-ok`. Each approval had one request, owned by the
+  owner; reassignment was off. One was approved and one rejected in the approval centre; both runs
+  succeeded and read the outcome, responder, comment and completion date. The trial flow and its
+  connection reference were then removed.
+
 ## [0.44.0] - 2026-11-10
 
 `insert-gallery` (ROADMAP 14, now done) and its undo `delete-control`: the Studio step of the
