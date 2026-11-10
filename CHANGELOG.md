@@ -11,6 +11,32 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-11-10
+
+`insert-gallery` (ROADMAP 14, now done) and its undo `delete-control`: the Studio step of the
+new-gallery workaround is a driver command.
+
+### Added
+
+- `canvas-browser.mjs insert-gallery --screen S --name N [--publish] [--no-verify]`: in the held Studio,
+  selects screen S in the Tree view, inserts Insert > Blank vertical gallery, renames it N, saves, then
+  reopens the saved app and finds N under S (exit 4 when it is not there). Refuses a name that is not a
+  valid control name or is already used. Proved live: inserted, renamed, saved, present after the reopen.
+- `canvas-browser.mjs delete-control --name N [--screen S] [--no-verify]`: the undo. Refuses a screen;
+  deletes through the item's More options menu, saves, reopens, proves it gone. Proved live.
+- Eight `studio.*` selectors: the Tree view button and pane, the Insert menu, its search box and the
+  Blank vertical gallery result, a tree item's More options, and the Rename and Delete menu items.
+
+### Fixed
+
+- On a freshly opened Studio the Tree view pane can arrive a few seconds after the editor; toggling it
+  at once closed it. The driver now waits up to 6 s for the pane before it toggles.
+
+### Changed
+
+- `canvas-shipping.md` and `check-new-galleries.py` name the command instead of "by hand"; README,
+  ROADMAP, `tools.md` and `interfaces.md` updated.
+
 ## [0.43.0] - 2026-11-10
 
 `add-data` (ROADMAP 12, now done), its undo `remove-data`, and two Studio behaviours found proving them.
