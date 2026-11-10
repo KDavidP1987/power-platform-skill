@@ -20,6 +20,7 @@
 16. Every message is logged, can be resent, and shows when it was last sent
 17. Documents and templates
 18. Diagnosing a failed run: where the error really is, and resubmitting safely
+19. Approvals: Teams, Outlook and the approval centre
 
 Lint definitions with `scripts/lint-flows.mjs <solution/src/Workflows>` - it checks most of what
 follows statically. Add `--entity-sets sets.json` to verify every entity set name,
@@ -851,6 +852,8 @@ with an Az token for `https://service.flow.microsoft.com/` and `api-version=2016
       --run` (sends approved by the person, channels off or recipients narrowed), a trigger flow by the
       app's own write on a test row; every send and write counted; settings restored and read back
       (section 11).
+- [ ] Approvals: the person's one Approvals connection bound; every wait has a timeout and a
+      `TimedOut` branch; reassignment off while testing; outcomes read back (section 19).
 - [ ] Before any bulk write or purge to a watched table: messages and log rows counted, true figure
       worked out, watchers parked by name and restored to their recorded state.
 
@@ -1050,3 +1053,76 @@ and re-run in one tool. Two cautions under this method: an edit made there to a 
 drift against the repo (section 8) - make the change in the repo and ship it; and its run and
 resubmit tools send real messages, so the recipient rules above apply to them too. It authenticates
 through the Azure CLI; `flow-runs.py` also works with Az PowerShell alone and cannot change anything.
+
+---
+
+## 19. Approvals: Teams, Outlook and the approval centre
+
+Marked **measured** where a run in a real environment showed it, **documented** where it comes from
+Microsoft's documentation and has not been exercised by this skill yet.
+
+**One connection per person per environment** (measured). The Standard approvals connector has no
+sign-in: a connection is created with one call to the Power Apps API (`PUT
+.../apis/shared_approvals/connections/<new id>` with the environment in the body; it comes back
+Connected, named "Standard approvals"), and a second one for the same person is refused. Bind this
+build's own connection reference to the person's existing connection
+(`orchestration.md`, "Approvals is the exception"); never swap the action for an Outlook options
+email to avoid that, because nothing reaches the approval centre then. The connection shows no
+runtime URL, so the connector's dynamic schema (approval types and their fields) cannot be read
+through it the way other connectors' can; the shapes below follow the connector's operations
+(read from its API description) and were proved by activation and two runs (measured).
+
+**The actions** (measured for `CreateAnApproval` + `WaitForAnApproval` with `Basic`). `StartAndWaitForAnApproval` (one webhook action: create and wait) or the pair
+`CreateAnApproval` then `WaitForAnApproval` (`approvalName` = the created approval's `name`). Use
+the pair: the approval id exists before the wait, so it can be written to the row and the request can
+be found, reminded about or cancelled while the run waits. Parameters, prefixed
+`ApprovalCreationInput/` on Create and `WebhookApprovalCreationInput/` on Start and wait:
+`approvalType` (`Basic` Approve/Reject first to respond, `BasicAwaitAll` everyone must approve,
+`Custom` and `CustomAwaitAll` custom responses), `title`, `assignedTo` (semicolon-separated
+addresses), `details` (Markdown), `itemLink`, `itemLinkDescription`, `requestor`,
+`enableNotifications`, `enableReassignment`. The wait returns `outcome` (the response, or for
+custom types the chosen option), `responses` (responder, comments, date per person) and
+`completionDate`. A measured run read `outcome` ("Approve" / "Reject"),
+`first(responses)?['responder']?['email']`, `first(responses)?['comments']` and `completionDate`.
+The flow's wait timeout is not the approval's: the approval row's due date stayed open (year 9999)
+under a two-hour wait, so a timed-out wait leaves the request answerable in the centre.
+
+**Where it arrives** (documented). The approval centre in Power Automate (Approvals, Received) always;
+an Outlook actionable message and a Teams Approvals card while `enableNotifications` is true. The
+Teams card does not update when the person answers elsewhere, so it can show Pending after the flow
+has moved on. Actionable messages must be enabled for the tenant in Exchange Online, Outlook and OWA
+show only the first five custom responses, and guests never get an actionable email: they answer in
+the portal, need a Power Automate licence and must have accepted the invitation (a guest who has not
+is dropped from the approvers, and an approval whose approvers are all such guests fails to create).
+Assigning to a group: only mail-enabled Microsoft 365 or security groups, one member's answer counts
+for the group, and no Teams card is sent.
+
+**A run ends at 30 days; the approval does not** (documented: the run limit counts pending approval
+steps, and the known-issues page puts the practical wait at about 28 days). The run fails and the
+request stays open in the approval centre with nothing waiting for it; an answer then changes nothing.
+Every wait gets a timeout (`limit.timeout`, e.g. `P7D`) and a branch that runs after it on
+`TimedOut` to remind, escalate or close the request. Where a decision can take longer than the run,
+record the approval in Dataverse and let a second flow act on the response.
+
+**Approvals data lives in Dataverse** (measured: the tables exist wherever the Approvals solution,
+`msdyn_FlowApprovals`, is installed; a run's approval, its one request and its one response were read
+back, each request owned by the assignee's `systemuser`, `msdyn_flow_approval_allowreassign` false). `msdyn_flow_approvals` (one row per approval, with
+`msdyn_flow_approval_title` and `msdyn_flow_approval_result`), `msdyn_flow_approvalrequests` (one per
+assignee) and `msdyn_flow_approvalresponses` (one per answer). Read them to prove who an approval
+went to and what came back, alongside the run history.
+
+**Testing without reaching anyone else.** Approvals are messages: `assignedTo` and `requestor` are
+recipients under `lint-flows.mjs --require-safe-recipients` (section 10), so they must be
+`@outputs('Safe_to_<x>')` with a test branch that can only be the allowlist. In the same mode the
+linter also requires `enableReassignment` false, because an approver can otherwise hand the request
+to anyone. It warns on any wait without a timeout (`approval-no-timeout`) and on a timeout with no
+`TimedOut` branch (`approval-timeout-unhandled`). Approvals raised by the build's own test rows and
+assigned to the owner are answered by the agent in the signed-in browser, one approve and one
+reject, and both outcomes confirmed in the run history and the tables above
+(`orchestration.md`). Measured: in Power Automate > Approvals > Received, the title opens a response
+panel (a dropdown of the responses, an optional comment, Confirm); its outer dialog element reads as
+hidden to Playwright while its contents are on screen, so wait for the dropdown, not the dialog.
+
+**A schedule that never comes due** (measured). The usual way to make a Recurrence flow run only on
+demand is a far-future `startTime`, but activation refuses one more than 49 years ahead
+(`InvalidWorkflowTriggerRecurrence`); `lint-flows.mjs` flags it (`recurrence-start-too-far`).

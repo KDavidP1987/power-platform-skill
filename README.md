@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.44.0](https://img.shields.io/badge/plugin-0.44.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.45.0](https://img.shields.io/badge/plugin-0.45.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.44.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.45.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -60,7 +60,7 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 | 7 | Publish the 0.7.x results and the measured builds on the evaluation page | The page still shows the 0.5.1 run | Open |
 | 8 | A model-driven app with a responsive canvas companion, built and verified in a tenant | Clears most of the snippets still marked "confirm in your tenant" | Open |
 | 9 | SharePoint as a data source: delegation, the 5,000-item threshold, staying on a standard licence | Common in real tenants; written down nowhere yet | Partly done in 0.38 and 0.39: `references/sharepoint-lists-and-forms.md` (lists, views and site pages by REST; customised list forms; required columns, deletes and throttled walks). Open: delegation, the 5,000-item threshold, licence limits |
-| 10 | Approvals in Teams and Outlook, and the one-Approvals-connection-per-person limit | Every approval flow meets it | Open |
+| 10 | Approvals in Teams and Outlook, and the one-Approvals-connection-per-person limit | Every approval flow meets it | Done in 0.45: `power-automate.md` 19 and four lint rules; proved live (create, wait, one approve and one reject, read back in run history and the Approvals tables, assigned to the owner only) |
 | 11 | Two independent real builds in different tenants | A 1.0 criterion; every build so far ran in one tenant | Open: needs a second tenant |
 | 12 | Driver commands `add-data` and `refresh-source` for an existing app | Both were done by hand-written browser helpers in two projects; the recipe is in `browser-verification.md` section 12 | Done in 0.43: `refresh-source` (proved 0.41), `add-data` and its undo `remove-data`, each proved live with a save and a reopen of the saved app |
 | 13 | SKILL.md against Anthropic's current skill guidance: body under 5,000 tokens with the must-hold rules first (Claude Code keeps only the first 5,000 tokens of a skill after compaction), and a measured check that the newest models do not need the prescriptive passages | The body is about 10,500 tokens; after compaction everything from the tool table down is lost | Done in 0.31: about 4,100 tokens, 141 of 148 graded checks as before, 9% cheaper; CI fails a body over 20,000 characters |
@@ -98,7 +98,7 @@ written from Microsoft's documentation and marked so in the reference (`[Unteste
 |---|---|---|---|---|
 | `seed-data.py`, `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `pbi-theme.py` | Self-test only | Generalised from scripts a measured build ran in a tenant | A live run of the bundled versions | The next full build |
 | `run-flow.py --run` (run a scheduled flow once) | Self-test only | Its refusals, by self-test | A run against an environment (one aimed at production was refused, correctly) | A test environment |
-| Approvals in Teams and Outlook | Not written | The one-Approvals-connection-per-person limit, observed | The rest | ROADMAP 10 |
+| Approvals in Teams and Outlook | Proved | Live in 0.45: connection made by API, create and wait, approve and reject in the approval centre, outcome fields and the Approvals tables read back | The Teams card and the Outlook actionable message seen by a person; group and guest approvers; custom and everyone-must-approve types | Next real approval flow |
 | SharePoint as a data source: delegation, the 5,000-item threshold, licence limits | Not written | Lists, views, pages and list forms (0.38, 0.39) | These three topics | ROADMAP 9 |
 | Model-driven apps checked in the browser | Documentation only | Forms edited by script | A model-driven app built and walked | ROADMAP 8 |
 

@@ -88,6 +88,7 @@ that call them:
 
 | Version | Change | What to do |
 |---|---|---|
+| 0.45.0 | `lint-flows.mjs` new codes `approval-no-timeout`, `approval-timeout-unhandled` (warn), `approval-reassignable`, `recurrence-start-too-far` (error); `requestor` is a recipient under `--require-safe-recipients` |
 | 0.44.0 | New `canvas-browser.mjs insert-gallery` and `delete-control`; eight new `studio.*` selectors (Tree view, Insert menu, item menu) |
 | 0.43.0 | New `canvas-browser.mjs add-data` and `remove-data`; `close-studio` no longer leaves an app with unsaved changes unless `--discard` is given (it reports Studio's "Unsaved changes" prompt and stays) | Pass `--discard` to `close-studio` when unsaved work should be thrown away; `save` first otherwise |
 | 0.42.0 | New `flow-state-check.py` (pre-import flow-state gate, exit 4) | Run it on the built package before every import; `--allow` names an intended switch |
