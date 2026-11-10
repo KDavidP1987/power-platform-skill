@@ -11,6 +11,38 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-10
+
+`refresh-source` proved against a live Studio, the Studio anchors that moved in 2026-11 re-pinned, and
+the monthly upkeep workflow fixed so its browser self-test can run.
+
+### Fixed
+
+- `canvas-browser.mjs` anchors, re-checked live with Playwright 1.64.1: the Save flyout chevron is now
+  a "More options" button inside the Save menu item (`studio.saveFlyout`, new first shape; the save
+  stamp read "Saved: ..." through it), and the left-rail Data control is a menu-item button
+  (`studio.dataPane`, new shape).
+- Add data with the Data pane open: the pane's own filter is also a searchbox named "Search", and the
+  driver typed the table name into it. It now takes the search box that appears after Add data is
+  clicked.
+- Add data's result match: each result names its table in a tooltip found through
+  `aria-describedby`, and the Data pane's entries reuse the same ids, so the first result was read as
+  the pane's first source. The driver now resolves each id from the result's nearest ancestor.
+- `refresh-source`: Studio does **not** always re-add a source the formulas use (a settings table read
+  in `App.OnStart` stayed removed, twice). Any source not back is added again by its logical name, and
+  the Data pane is reopened after Add data closes it. Proved live: remove, add back, save, all 14
+  sources present. `manifest-caches.md` section 6, `canvas-shipping.md` and `rules-and-scope.md` now
+  say to give `"Display=logical"` every time.
+- Upkeep workflow: installs Playwright and Chromium before the self-tests and runs the site walker's
+  browser half with `--channel chromium` (it failed on the runner: Playwright was not installed). GitHub Actions
+  moved to their current majors (checkout, setup-node, setup-python v7; github-script v9) in both
+  workflows.
+
+### Changed
+
+- `assets/tested-versions.json`: checked with 0.41.0 on 2026-11-10; Playwright 1.65.0 (self-tests),
+  live Studio checks on 1.64.1 (`liveChecks`). `@playwright/mcp` stays at the last version checked.
+
 ## [0.40.0] - 2026-11-09
 
 Feedback about the skill, from a person who uses it to the skill's issues, with technical details and

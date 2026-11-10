@@ -219,7 +219,7 @@ pac solution import --path import-me.zip --publish-changes
 **The live baseline is the PUBLISHED app.** The manifest the build starts from - including each
 data source's cached column list - is the published version's, not the last save. After a schema
 change, refresh the changed data sources in Studio, save **and publish**, then build
-(`canvas-browser.mjs refresh-source "<Display name>" --publish` does all three; never hand it to the
+(`canvas-browser.mjs refresh-source "<Display name>=<logical name>" --publish` does all three; never hand it to the
 person - `manifest-caches.md` section 6). Measured on
 one build: four tables refreshed and saved but not published; the build refused with eleven
 "column exists live but not in the app's cached column list" findings; after a publish of the same
