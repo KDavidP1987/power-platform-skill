@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.42.1](https://img.shields.io/badge/plugin-0.42.1-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.42.2](https://img.shields.io/badge/plugin-0.42.2-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.42.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.42.2 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -68,10 +68,73 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 | 15 | A pre-import check that refuses a package whose flow StateCode differs from the repo | A client-side import timeout left active flows in Draft, and a package rebuilt from the live export would have carried the drift into the next import; only the post-import state diff exists today | Done in 0.42: `flow-state-check.py` (package against live and repo, exit 4; proved on a real 17-flow package) |
 <!-- backlog:end -->
 
+## Not yet fully tested
+
+What we are still working on, feature by feature. Every bundled script passes its self-test in CI;
+"not yet fully tested" here means the feature has not been run against a real tenant in its bundled
+form, or only part of it has. The [Road to 1.0](#road-to-10) table above is the ordered plan; this
+list is the detail behind it, and it changes with every release.
+
+**Legend:** *Partly proved*: part of the feature has run live. *Self-test only*: tested against
+fixtures or a fake API, with no live run of the bundled version recorded. *Documentation only*:
+written from Microsoft's documentation and marked so in the reference (`[Untested here]` or
+"confirm in your tenant"). *Not built* / *Not written*: planned, not in the skill yet.
+
+### Canvas apps and the browser driver
+
+| Feature | State | Proved so far | Not yet tested | Next step |
+|---|---|---|---|---|
+| `canvas-browser.mjs add-data` (add a table to an existing app) | Not built | The add logic runs live inside `create` and `refresh-source` | The command itself | ROADMAP 12 |
+| `canvas-browser.mjs insert-gallery` (the new-gallery workaround) | Not built | The workaround, measured twice by hand | Everything | ROADMAP 14: port it, prove it against a live Studio |
+| `second-tab`, `studio-has`, `dirty`, and the `pick` / `radio` walk steps | Self-test only | Taken from a measured build's own helpers | Their bundled form, live | Use them in the next real build and record it |
+| Studio "disconnected" dialog anchor | Self-test only | Pattern from a session report | Never seen live by `doctor` | Record it the next time Studio drops the session |
+| Browser anchors in general | Partly proved | `doctor` and `refresh-source` re-checked Studio live in 0.41 (two anchors had moved) | Microsoft changes Studio and the player often | The monthly upkeep workflow, then `doctor` in a real tenant |
+| `ship-canvas.py` | Partly proved | Real ships on one app | Other apps and data shapes | More projects |
+| Flexible-height gallery variant, auto-layout containers | Documentation only | Names from Microsoft's documentation | Built and measured in an app | A build that uses them |
+
+### Dataverse, flows and data
+
+| Feature | State | Proved so far | Not yet tested | Next step |
+|---|---|---|---|---|
+| `seed-data.py`, `deploy-flows.py`, `fabric.py`, `reconcile-report.py`, `pbi-theme.py` | Self-test only | Generalised from scripts a measured build ran in a tenant | A live run of the bundled versions | The next full build |
+| `run-flow.py --run` (run a scheduled flow once) | Self-test only | Its refusals, by self-test | A run against an environment (one aimed at production was refused, correctly) | A test environment |
+| Approvals in Teams and Outlook | Not written | The one-Approvals-connection-per-person limit, observed | The rest | ROADMAP 10 |
+| SharePoint as a data source: delegation, the 5,000-item threshold, licence limits | Not written | Lists, views, pages and list forms (0.38, 0.39) | These three topics | ROADMAP 9 |
+| Model-driven apps checked in the browser | Documentation only | Forms edited by script | A model-driven app built and walked | ROADMAP 8 |
+
+### Power Pages
+
+| Feature | State | Proved so far | Not yet tested | Next step |
+|---|---|---|---|---|
+| `site-walk.mjs ship` | Self-test only | Sign-in, walks, refusal and `/_api` probes on three live sites | `ship` on a live site | The next site change |
+| `--accept-site-consent`, the menu-marker check | Self-test only | Fixtures | A live site showing them | When a site shows them |
+| Eight statements marked "confirm in your tenant" in `power-pages.md`: Web API filters, server logic on a table whose Web API is off, column permissions, grant notifications, the API token, site-record teardown, tenant consent, `Server.User` claims | Documentation only | Microsoft's documentation | Each, in a tenant | Prove each on the next site that needs it |
+| File uploads, external identity providers | Not written | | | Not planned yet |
+
+### ALM and deployment
+
+| Feature | State | Proved so far | Not yet tested | Next step |
+|---|---|---|---|---|
+| A service-principal pipeline that imports (`alm-pipelines.md` 2, 8, 12) | Documentation only | Pack on every pull request, and the offline gates | An import by a service principal, end to end | A non-production environment with an application user |
+| Managed upgrade (`--stage-and-upgrade`, holding solutions) | Documentation only | | The upgrade, and what it deletes | A test environment |
+| Managed Environments, pipelines in Power Platform, Dataverse git integration (`alm-pipelines.md` 15 to 17) | Documentation only | Read from Microsoft Learn, 2026-11 | All three | A tenant that uses them |
+| Key Vault secret environment variables | Documentation only | | Everything | When a project needs a secret |
+| `flow-state-check.py`, `import-watch.py` | Proved | Both, read-only, on a real solution | | |
+
+### Feedback, evaluation and reach
+
+| Feature | State | Proved so far | Not yet tested | Next step |
+|---|---|---|---|---|
+| `feedback.mjs file` / `comment`, and the `auto` mode | Partly proved | Drafting and the privacy scrub on real text; the plugin gate's refusals | No issue has been filed through it yet | The first real report |
+| Graded evaluation on the current version | Open | The last graded run was 0.7.1 | Ten or more task types, three runs each | ROADMAP 6 and 7 |
+| Speed and cost against Microsoft's plugins | Open | Quality measured ahead | Time and cost | ROADMAP 2 |
+| A second tenant | Open | Every build so far ran in one tenant | Everything outside it | ROADMAP 11 |
+
 ## Contents
 
 1. [Status: public beta (0.x)](#status-public-beta-0x)
 1. [Road to 1.0](#road-to-10)
+1. [Not yet fully tested](#not-yet-fully-tested)
 1. [Why this skill exists](#why-this-skill-exists)
 2. [What you get](#what-you-get)
 3. [Install](#install)
@@ -634,44 +697,23 @@ inputs and harness are in [`evals/`](evals/).
 
 ## Limits of this version
 
-- **`ship-canvas.py` has run real ships on one app** (export, reconcile, pack, assert, import,
-  publish, build stamp read back in the player). More apps will find more cases; its refusals print
-  the remedy they know.
-- **`lint-flows.mjs` is still a floor.** It evaluates the expressions it understands and treats
-  anything else as unknown, which never counts as a guard. Activation is still the only compile.
-- **`doctor` has not yet been run against Studio in a real tenant.** The portal anchors resolved;
-  the Studio half needs a test app.
-- **The 0.18 build tools are tested offline only.** `seed-data.py`, `deploy-flows.py`, `fabric.py`,
-  `reconcile-report.py` and `pbi-theme.py` generalise scripts a measured build wrote and ran in a
-  tenant; the bundled versions pass self-tests against a fake API and are being measured in a full
-  build next. `second-tab`, `studio-has`, `dirty` and the `pick`/`radio` walk steps came from the
-  same build and have not yet run in their bundled form.
+What is still being proved is listed in [Not yet fully tested](#not-yet-fully-tested). These are the
+limits of the method itself:
+
+- **`lint-flows.mjs` is a floor.** It evaluates the expressions it understands and treats anything
+  else as unknown, which never counts as a guard. Activation is still the only compile.
 - **Browser selectors track today's player and Studio.** Microsoft changes both. The driver fails
-  loudly, with a screenshot and an accessibility snapshot, rather than passing when a selector
-  stops matching.
-- **Power Pages: three sites so far.** The reference was written from one
-  site (submit, list, detail with a conversation, on the enhanced data model) and extended in 0.21
-  from Microsoft Learn: row-level visibility, "my records", Private-site access, the site lifecycle
-  through the Power Platform API, and teardown. Statements not yet tried in a tenant are marked
-  "confirm in your tenant". A measured build used `site-walk.mjs signin` on a live
-  site but wrote its own walk, because the walker could not yet confirm writes in Dataverse; 0.22
-  added that, and the second measured build ran all 65 of its checks through it. The spill and
-  covered-field checks in 0.23 were run against both measured sites (they found the second site's
-  known covered field and nothing on the first); `--accept-site-consent` has run only against
-  fixture text so far. The 0.24 focus and covered-field checks were run against all three measured
-  sites and agree with their blind evaluators; the menu-marker check could not reproduce the third
-  site's wrong marker live (the cached header no longer showed it) and is proven on fixtures;
-  `ship` has run only in its self-test, never against a live site. File uploads and external identity providers are not covered. Claims
-  mapping on the built-in Entra provider did not fill the contact; the reference gives the
-  identity-by-object-id approach instead.
+  loudly, with a screenshot and an accessibility snapshot, rather than passing when a selector stops
+  matching; the monthly upkeep workflow and `doctor` re-check them.
 - **Microsoft's official plugins** (`microsoft/power-platform-skills`) generate apps; this skill is
   the method for shipping and verifying them in a real tenant and drives the same canvas authoring
   server. Code apps, Power Pages code sites, mobile apps, PCF controls and the model-driven app
   builder are theirs and not covered here; the ROADMAP lists the gaps found comparing the two.
-- **Model-driven apps, Copilot Studio and Power BI authoring** are outside the method,
-  apart from model-driven forms edited by script and Power BI as an app's reporting layer
-  (`reporting.md`: a medallion, the model, embedding). Report and DAX authoring in depth is planned
-  as a separate skill (ROADMAP).
+- **Model-driven app building, Copilot Studio, DAX measures and report authoring** are outside the
+  method, apart from model-driven forms edited by script. Power BI and Fabric guidance lives in this
+  skill as an app's reporting layer (`reporting.md` and the Fabric audit and rebuild references).
+- **Claims mapping on the built-in Entra provider** did not fill the Power Pages contact; the
+  reference gives the identity-by-object-id approach instead.
 
 ## Repository layout
 

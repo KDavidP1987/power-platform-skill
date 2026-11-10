@@ -11,6 +11,17 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.42.2] - 2026-11-10
+
+### Changed
+
+- README: a new section, "Not yet fully tested", lists every feature that has not been run against a
+  real tenant in its bundled form, or only in part, with what is proved, what is not, and the next
+  step, grouped by area. "Limits of this version" now keeps only the limits of the method; stale
+  items in it (`doctor` never run against Studio; Power BI as a separate skill) are removed.
+- `manifest-caches.md` section 6 no longer says `refresh-source` has not run against a live Studio
+  (it was proved in 0.41.0).
+
 ## [0.42.1] - 2026-11-10
 
 ### Changed
