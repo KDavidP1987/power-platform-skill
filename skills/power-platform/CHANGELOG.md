@@ -11,6 +11,19 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-11-10
+
+### Changed
+
+- `@playwright/mcp` 0.0.85 checked: it starts over stdio with the same 25 tools as 0.0.83 and drove a
+  signed-in published canvas app (Edge, the saved profile), reading the app and its build stamp from
+  a snapshot. `assets/tested-versions.json` records it.
+
+### Fixed
+
+- `sharepoint-lists-and-forms.md` named the MCP's run-code tool `browser_run_code`; it has been
+  `browser_run_code_unsafe` since at least 0.0.83.
+
 ## [0.42.0] - 2026-11-10
 
 ALM depth: the pre-import flow-state check (ROADMAP 15) as a tool, and solution layers, Managed

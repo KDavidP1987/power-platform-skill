@@ -48,7 +48,7 @@ second, idempotent, never deleting (must-hold: select before apply).
   writes. Reads tolerate 2-3 s (`fabric-workspace-audit.md`); writes need at least the same.
 - **Verify a view by its id.** `AllItems.aspx` without `viewid` reopens the last view used in the
   session, so a check of "the default view" can read another view.
-- **Driver mechanics.** Playwright's `browser_run_code` has no `require()`, and its `filename`
+- **Driver mechanics.** The Playwright MCP's `browser_run_code_unsafe` (named `browser_run_code` in earlier versions) has no `require()`, and its `filename`
   option reads only inside the workspace roots. Run a repo script through a small generated wrapper
   placed in the Playwright output folder, which reads the script and evaluates it in the page.
 - **A multi-select choice column cannot group a view or organise a board.** Group and board on a
