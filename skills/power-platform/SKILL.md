@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.41.0"
+  version: "0.42.0"
 ---
 
 # Power Platform development
@@ -200,7 +200,7 @@ Read only the reference the task needs; each topic has one home.
 | The skill misled you or lacked an answer: offering feedback, what it may and may not contain | `references/feedback.md` |
 | Starting from nothing: the machine, pac, tokens, a browser that signs in by itself, identities signed in once, the smoke test | `references/first-run.md` |
 | Starting a repo or app: the harness, theme intake, layout, hooks, continuity docs, CI, offering GitHub | `references/project-setup.md` |
-| CI/CD: service-principal pac auth, Solution Checker, managed vs unmanaged, deployment settings, the skill's tools as gates | `references/alm-pipelines.md` |
+| ALM and CI/CD: service-principal pac, managed vs unmanaged, layers, Managed Environments, in-product pipelines, git integration, gates | `references/alm-pipelines.md` |
 | Several apps sharing one environment or a shared reference solution | `references/shared-environments.md` |
 | pac, tokens, TDS, MCP servers, Windows/OneDrive/PowerShell failures, production actions to hand to a person | `references/tooling-and-auth.md` |
 | Model-driven apps, model-driven forms by script, SOPs from the running app, licensing, replacing a spreadsheet tool | `references/model-driven-and-docs.md` |

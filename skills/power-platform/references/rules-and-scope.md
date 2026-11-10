@@ -110,6 +110,7 @@ matters.
 | Before a bulk write, ask what watches the table (9) | instruction, plus `lint-flows.mjs --require-safe-recipients` | SKILL.md 9 | |
 | Every lookup's delete behaviour is chosen, and the app's delete dialog says the same; orphans are audited | script check (plan warning), plus instruction | `deploy-tables.py` warns on any lookup with no `"onDelete"`; `dataverse.md` 12; orphan query in `audits.md` 12 | a header-to-lines link left at RemoveLink kept 262 children of 13 deleted parents, still summed by whole-table totals; the delete dialog promised otherwise. The dialog text is a judgement, so no hook |
 | An import's outcome is read from the server, with the flow states after it | script check | `import-watch.py` (importjobs result per component; flows left off, exit 4) | three imports whose client hung or timed out after the server had finished, one at 20+ minutes for a 6.5-minute job |
+| A package that would switch a flow on or off, or carries flow state the repo does not, is not imported | script check | `flow-state-check.py` (exit 4; `--allow` for an intended switch) | an import from a package built on a live export carries live drift; a whole-roster reminder was once switched on in bulk |
 | Model-driven apps | no hook | `model-driven-and-docs.md` | no measured model-driven build; the build gate stays silent for a solution-only folder |
 
 ### Power Automate

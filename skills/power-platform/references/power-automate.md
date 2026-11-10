@@ -462,8 +462,9 @@ running it is a trap:
   meant to be off), and run the state diff above either way.
 - **A package built from a live export copies the live drift.** Before importing, compare every
   flow's `StateCode` in the package with the repo's sidecar and refuse a package that would switch
-  one. That pre-import comparison is still a manual step (a check for it is on the roadmap); the
-  post-import state diff above already exists. Keep the two straight.
+  one: `scripts/flow-state-check.py --package <zip> --repo solution/src` (with `--org`, also against
+  the live flows, read-only) exits 4 for a flow the import would switch or whose package state is
+  not the repo's. Run it before every import; the post-import state diff above is the other half.
 - **Activation scripts select by name, and refuse to run bare.** An activation script whose default
   filter matched every app flow would, run bare, have switched on the deliberately-off scheduled
   reminders to the whole roster. Require an explicit name (or make the default match nothing),

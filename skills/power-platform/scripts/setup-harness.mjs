@@ -54,6 +54,7 @@ export const MANIFEST = [
   ['scripts/flow-runs.py', 'scripts/flow-runs.py', 'tools', 'why did a flow run fail (read only)'],
   ['scripts/run-flow.py', 'scripts/run-flow.py', 'tools', 'run a scheduled flow once after a deploy; sends need --send-ok'],
   ['scripts/import-watch.py', 'scripts/import-watch.py', 'tools', 'an import\'s outcome from the server, and the flows it left off (read only)'],
+  ['scripts/flow-state-check.py', 'scripts/flow-state-check.py', 'tools', 'before an import, refuse a package that would switch a flow (read only)'],
   ['scripts/audit-pages-permissions.py', 'scripts/audit-pages-permissions.py', 'tools', 'Power Pages permissions, allow-lists and headers'],
   ['scripts/dv-token.ps1', 'scripts/dv-token.ps1', 'tools', 'one-sign-in Dataverse token'],
   // Config read by the hooks and tools; examples copied once, then the project owns them.
