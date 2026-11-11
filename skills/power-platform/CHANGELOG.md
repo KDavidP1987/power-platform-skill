@@ -11,6 +11,42 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-10
+
+A data dictionary for Dataverse apps, built from the solution in the repo and checked against the
+live environment (ROADMAP 18, the Dataverse half).
+
+### Added
+
+- `datadict.py doc --solution DIR --out PATH`: HTML with a filter box (light and dark, phone width),
+  Markdown, CSV (one row per column) and JSON. Per table: purpose, entity set, ownership, primary
+  name, alternate keys, audit, the tables that point at it; per column: type with length or
+  precision, required level, meaning and where it came from, choices by label and value (status
+  reasons with their state, the default), lookups with their target and what deleting the target
+  does, flags (alternate key, primary name, sensitive, column security, formula, base-currency
+  copy). Standard columns are listed once. `--env` compares each table's live columns with the repo
+  both ways and reads row counts; `--dataflows` names the Fabric dataflows that read each table.
+- `datadict.py notes`: a curated notes skeleton, one section per table with every column's display
+  name and type; run again after a schema change, it keeps every meaning already written. Meanings
+  by logical or display name, wildcards for numbered series, an optional Sensitive column to
+  override the pattern.
+- `datadict.py evaluate`: tables described, column meaning coverage (FAIL below `--min-coverage`),
+  choices labelled, lookups resolved, freshness against the solution, age, drift, curated notes,
+  sensitive columns covered by the notes, and a warning when the meanings live only in the
+  dictionary and not in Dataverse. 38 self-test checks.
+- `data-dictionary.md`: when to make one, the build step by step, what it reads and cannot, the
+  curated notes, the evaluation, a rubric for dictionaries the tool did not make, sharing.
+- `documentation-set.md`: the developer guide's tables chapter points at the dictionary.
+- README: the lineage and dictionary references in the reference table.
+
+### Proved
+
+- A 58-table production app: 996 of 996 columns described (822 curated meanings drafted from the
+  design documents, scripts and app formulas), every lookup resolved, live columns matching the repo,
+  36 tables matched to the medallion dataflows that read them. `evaluate` caught an uncovered
+  sensitive-pattern hit on the first full run, then passed 9 of 10; the warning stands (no meaning is
+  stored in Dataverse yet).
+
 ## [0.47.0] - 2026-11-10
 
 How to build and how to judge a lineage document, and the next documentation artifacts across app

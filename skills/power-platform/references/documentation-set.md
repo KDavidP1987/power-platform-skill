@@ -68,7 +68,8 @@ history and resend; routine tasks; known limitations; glossary.
 2. The environment and the solution (name, type, URL, solution, publisher, prefix, neighbours)
 3. Architecture (app, tables, flows, connectors, external systems, a diagram)
 4. Dataverse tables (purpose, key columns, choices with their values, relationships, delete
-   behaviour, expected growth)
+   behaviour, expected growth): generate it with `scripts/datadict.py` and link the dictionary
+   (`data-dictionary.md`) rather than retyping the schema
 5. Security roles and data access (each role's privilege matrix, how it is applied outside the
    solution, how it was proved by impersonation)
 6. Giving someone access (licence, role, app share, team membership, in order)
