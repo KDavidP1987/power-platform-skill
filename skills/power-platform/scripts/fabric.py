@@ -13,6 +13,9 @@ Usage:
     python fabric.py probe   --manifest fabric.json NAME [--query Q ...] [--mashup FILE]
                              read-only: evaluate each loaded query of a deployed Dataflow and print
                              its M error (a refresh that "failed without detail error" names nothing)
+    python fabric.py schedules --workspace WS [--folder NAME] [--type TYPE]
+                             read-only: each item's schedules (one line per schedule id, whatever
+                             job type lists it) and its last run, in UTC
     python fabric.py teardown-plan --workspace WS --folder NAME
                              read-only: the folder's items in the order the owner deletes them
                              (reports and models first, Dataflows BEFORE lakehouses, SQL endpoints
@@ -106,7 +109,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _ppapi import ApiError, Client, FakeTransport, PlanRefused, RESOURCES, get_token  # noqa: E402
+from _ppapi import ApiError, Client, FakeTransport, NotFound, PlanRefused, RESOURCES, get_token  # noqa: E402
 
 BASE = "https://api.fabric.microsoft.com/v1/"
 JOB_TYPES = {"Notebook": "RunNotebook", "DataPipeline": "Pipeline", "Dataflow": "Execute"}
@@ -695,6 +698,76 @@ def teardown_order(items):
     return keep, skipped
 
 
+# Schedules and last runs, read-only. Two measured traps: a Dataflow Gen2 lists the SAME schedule (same
+# id) under both the Execute and the Refresh job type, so a script that unions job types counts and
+# disables every schedule twice; and job instance times (startTimeUtc) come without a 'Z', so a
+# parser that assumes local time moves them by the UTC offset and a quiet-period guard compares the
+# wrong instant. Gen1 dataflows (Power BI) are not Fabric items at all: the items API does not list
+# them, so neither does this (references/fabric-workspace-audit.md).
+SCHEDULE_JOB_TYPES = {"Dataflow": ["Execute", "Refresh"], "DataPipeline": ["Pipeline"], "Notebook": ["RunNotebook"],
+                      "SparkJobDefinition": ["sparkjob"]}
+
+
+def parse_utc(s):
+    """A Fabric timestamp as an aware UTC datetime; a value with no offset IS UTC (never local)."""
+    import datetime as _dt
+    if not s:
+        return None
+    t = str(s).strip().replace("Z", "+00:00")
+    m = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?([+-]\d{2}:\d{2})?$", t)
+    if not m:
+        return None
+    base = _dt.datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S")
+    if m.group(2):
+        base = base.replace(microsecond=int((m.group(2)[1:] + "000000")[:6]))
+    off = m.group(3) or "+00:00"
+    sign = 1 if off[0] == "+" else -1
+    delta = _dt.timedelta(hours=int(off[1:3]), minutes=int(off[4:6]))
+    return (base - sign * delta).replace(tzinfo=_dt.timezone.utc)
+
+
+def item_schedules(fab, it):
+    """(job type, schedules) from the first job type that lists any, deduplicated by schedule id."""
+    for jt in SCHEDULE_JOB_TYPES.get(it.get("type"), []):
+        try:
+            rows = fab.c.get_all("workspaces/%s/items/%s/jobs/%s/schedules" % (fab.ws, it["id"], jt))
+        except (NotFound, ApiError):
+            continue
+        if rows:
+            seen, out = set(), []
+            for r in rows:
+                if r.get("id") not in seen:
+                    seen.add(r.get("id"))
+                    out.append(r)
+            return jt, out
+    return None, []
+
+
+def cmd_schedules(fab, kind):
+    rows = [i for i in fab.items() if (not kind or i.get("type") == kind) and i.get("type") in SCHEDULE_JOB_TYPES]
+    if fab.folder_name:
+        rows = [i for i in rows if fab.folder_id and i.get("folderId") == fab.folder_id]
+    on = 0
+    for it in sorted(rows, key=lambda r: (r.get("type", ""), r.get("displayName", ""))):
+        jt, sch = item_schedules(fab, it)
+        try:
+            runs = (fab.c.get("workspaces/%s/items/%s/jobs/instances" % (fab.ws, it["id"])) or {}).get("value") or []
+        except (NotFound, ApiError):
+            runs = []
+        last = max(runs, key=lambda r: parse_utc(r.get("startTimeUtc")) or parse_utc("1900-01-01T00:00:00"), default=None)
+        when = parse_utc(last.get("startTimeUtc")) if last else None
+        lr = ("%s UTC %s" % (when.strftime("%Y-%m-%d %H:%M"), last.get("status"))) if when else "no run in history"
+        desc = "; ".join("%s %s%s" % ("ON" if s.get("enabled") else "off", (s.get("configuration") or {}).get("type", "?"),
+                                       (" every %s min" % s["configuration"]["interval"]) if (s.get("configuration") or {}).get("interval") else "")
+                         for s in sch) or "no schedule"
+        on += sum(1 for s in sch if s.get("enabled"))
+        print("%-14s %-40s %-28s last run %s%s" % (it.get("type"), (it.get("displayName") or "")[:40], desc[:28], lr,
+                                                   ("  [%s]" % jt) if jt else ""))
+    print("%d item(s), %d schedule(s) on. Gen1 dataflows are not listed by the Fabric items API: read them with the "
+          "Power BI dataflows API (fabric-workspace-audit.md)." % (len(rows), on))
+    return 0
+
+
 def cmd_teardown_plan(fab):
     """Read-only: the order in which the owner's cleanup (a script or the portal) deletes this folder."""
     if not fab.folder_name:
@@ -719,7 +792,7 @@ def cmd_teardown_plan(fab):
 def run(argv, transport=None, sleep=None):
     ap = argparse.ArgumentParser(prog="fabric.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
-    ap.add_argument("command", nargs="?", choices=["items", "deploy", "run", "prove-refresh", "teardown-plan", "probe"])
+    ap.add_argument("command", nargs="?", choices=["items", "deploy", "run", "prove-refresh", "teardown-plan", "probe", "schedules"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--manifest")
     ap.add_argument("--workspace")
@@ -777,6 +850,8 @@ def run(argv, transport=None, sleep=None):
             return cmd_items(fab, a.type)
         if a.command == "teardown-plan":
             return cmd_teardown_plan(fab)
+        if a.command == "schedules":
+            return cmd_schedules(fab, a.type)
         if a.command == "probe":
             if len(a.args) != 1:
                 print("probe takes NAME (the Dataflow)")
@@ -1084,6 +1159,26 @@ def selftest():
               and out.index("APP Report") < out.index("APP_Bronze") and len(t.writes()) == w0 and "deletes nothing" in out)
         rc, out = go(t, "teardown-plan", "--workspace", "Team Workspace")
         check("teardown-plan refuses without a folder", rc == 2 and "never plans a whole workspace" in out)
+
+        # schedules: one schedule listed under two job types counts once; a time with no 'Z' is UTC.
+        u = parse_utc("2026-01-10T23:00:04.85")
+        check("parse_utc: a timestamp with no offset is UTC, not local", u is not None and u.hour == 23 and u.utcoffset().total_seconds() == 0)
+        check("parse_utc: an offset is applied", parse_utc("2026-01-10T23:00:00-05:00").hour == 4)
+        df = next((i for i in state["items"] if i.get("type") == "Dataflow"), None)
+        if df:
+            sch = {"value": [{"id": "s-1", "enabled": True, "configuration": {"type": "Cron", "interval": 60}}]}
+            t.on("GET", "/items/%s/jobs/Execute/schedules" % df["id"], lambda u_, b: sch)
+            t.on("GET", "/items/%s/jobs/Refresh/schedules" % df["id"], lambda u_, b: sch)
+            t.on("GET", "/items/%s/jobs/instances" % df["id"], lambda u_, b: {"value": [
+                {"status": "Completed", "startTimeUtc": "2026-01-10T23:00:04.85"}, {"status": "Failed", "startTimeUtc": "2026-01-09T23:00:00"}]})
+            w0 = len(t.writes())
+            rc, out = go(t, "schedules", "--workspace", "Team Workspace", "--folder", "Equipment Lane")
+            line = [l for l in out.splitlines() if l.startswith("Dataflow")]
+            check("schedules: the same schedule under Execute and Refresh is listed once", rc == 0 and line and line[0].count("ON Cron") == 1
+                  and "1 schedule(s) on" in out)
+            check("schedules: last run read as UTC, newest first, reads only", line and "2026-01-10 23:00 UTC Completed" in line[0] and len(t.writes()) == w0)
+        else:
+            check("schedules: a Dataflow exists in the fake workspace", False)
 
         # prove-refresh: a refresh that reaches Dataverse, one that does not, and the prefix guard.
         with open(mpath, "w") as f:

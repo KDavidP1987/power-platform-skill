@@ -44,6 +44,16 @@ run the service reported green.
   (`Table.Column` per column, several passes) re-read the list from SharePoint on every scan.
   `Table.Buffer` on the list items (and before a per-row check) cut a 28-list dataflow from 22.4 to 9.1
   minutes, and cut the calls made against the owner's per-user SharePoint throttling budget.
+- **After production is captured, assess what is not.** Count every list on each site
+  (`/_api/web/lists?$select=Title,ItemCount,Hidden`) and join it to the bronze manifest and the
+  Dataverse table inventory. One pass gave three tiers: lists that duplicate an existing Dataverse
+  table (drift risk, best return on moving), lists whose home is an app not yet approved (key silver
+  on business identifiers so the feed can switch later), and persistent lists nothing captures (each
+  needs an owner). Lake-capture checklist for what stays in SharePoint: a list register; silver
+  history (snapshots, or SCD2 on ID + Modified with deletes detected); dated raw copies of files; a
+  one-time archive load before a list is retired; one shared run identity; Link to Fabric for the
+  Dataverse side; direct reads of the system of record instead of its exports. A `capture-gaps` tool
+  that does the join is on the ROADMAP.
 
 ## 3. Bronze from Excel workbooks
 

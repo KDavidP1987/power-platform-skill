@@ -13,6 +13,8 @@ Usage:
     python flow-runs.py list                       flows in the environment, with state
     python flow-runs.py runs <flow> [--status S]   recent runs (S: Failed, Succeeded, Running, ...)
     python flow-runs.py why <flow> [<run>]         explain <run>, or the latest failed run
+    python flow-runs.py failures <flow> [--since D] every failed run since D (ISO date), grouped by the
+                                                   action that really failed and its error code
 
 <flow> is a flow id (the workflow's resourceid for a solution flow) or its display name (exact,
 then a unique case-insensitive substring).
@@ -20,21 +22,24 @@ then a unique case-insensitive substring).
 Options:
     --env ID            environment id (default: "environmentId" in scripts/canvas-app.json)
     --config PATH       identity config (default: ./scripts/canvas-app.json if present)
-    --top N             runs to list (default 20)
+    --top N             runs to list (default 20; failures reads at most N failed runs)
+    --since DATE        failures: only runs that started on or after DATE (2026-11-01 or 2026-11-01T08:00)
     --max-chars N       trim each inputs/outputs body to N characters (default 800; 0 = omit them)
     --token-cmd CMD     command that prints a token for https://service.flow.microsoft.com/ ("{resource}" replaced)
     --token-env NAME    environment variable holding that token (default: FLOW_TOKEN)
     --selftest          run the built-in tests against recorded, anonymised responses and exit
 
-Token, in order: --token-env variable, --token-cmd, `az account get-access-token --resource
+Token, in order: --token-env variable, --token-cmd, "flowTokenCommand" in the config (the most
+autonomous route: the bundled dv-token.ps1 with -Resource {resource} reuses the Dataverse sign-in's
+cached refresh token, so no second prompt), `az account get-access-token --resource
 https://service.flow.microsoft.com/`, then Az PowerShell `Get-AzAccessToken`. The token is never
 printed. Inputs and outputs links are pre-signed URLs and are fetched WITHOUT the token.
 
 It never resubmits, cancels, turns on or off, or edits a flow. Resubmitting is a deliberate step
 for a person, after reading the side-effects list this prints.
 
-Exit codes: 0 nothing failed (list, runs, or why with no failed run in range); 1 a failed run was
-explained (a finding); 2 cannot run (no token, no environment, flow not found, API error).
+Exit codes: 0 nothing failed (list, runs, or why/failures with no failed run in range); 1 a failed run was
+explained or failures were tallied (a finding); 2 cannot run (no token, no environment, flow not found, API error).
 """
 import argparse
 import json
@@ -209,6 +214,26 @@ def link_body(props, key, max_chars):
     return text if len(text) <= max_chars else text[:max_chars] + " ... (%d chars)" % len(text)
 
 
+def error_from_outputs(props):
+    """The error a connector returned, read from the action's pre-signed outputs link (no token):
+    body.error {code, message}, with the HTTP status as the code when the body has none."""
+    link = (props.get("outputsLink") or {}).get("uri")
+    if not link:
+        return None
+    try:
+        out = FETCH(link, None)
+    except CannotRun:
+        return None
+    body = out.get("body") if isinstance(out, dict) else None
+    err = body.get("error") if isinstance(body, dict) else None
+    if isinstance(err, dict) and (err.get("message") or err.get("code")):
+        return {"code": ("%s %s" % (props.get("code") or out.get("statusCode") or "", err.get("code") or "")).strip(),
+                "message": err.get("message") or ""}
+    if isinstance(body, dict) and body.get("message"):
+        return {"code": str(props.get("code") or out.get("statusCode") or ""), "message": body["message"]}
+    return None
+
+
 def seconds(p):
     from datetime import datetime
     try:
@@ -246,6 +271,55 @@ def cmd_runs(fx, a):
     return 0
 
 
+def root_causes(fx, fid, amap, run_name):
+    """(roots, generic_fail, skipped, acts) for one run: the specific errors, deepest first."""
+    acts = fx.paged("/flows/%s/runs/%s/actions" % (fid, run_name))
+    roots, generic_fail, skipped = [], [], 0
+    for act in acts:
+        p = act["properties"]
+        st = p.get("status")
+        if st == "Skipped":
+            skipped += 1
+            continue
+        if st not in ("Failed", "TimedOut", "Cancelled"):
+            continue
+        if not is_generic(p.get("error")) and p.get("error"):
+            roots.append({"name": act["name"], "props": p, "where": []})
+            continue
+        # A connector action that failed on its own call has a status code (BadRequest, Forbidden, ...)
+        # and NO error object: the error is only in its outputs body. Measured on Dataverse GrantAccess.
+        if not p.get("error") and (p.get("code") or "") not in ("", "ActionFailed", "NotSpecified"):
+            q = dict(p)
+            q["error"] = error_from_outputs(p) or {"code": p.get("code"), "message": "(no error object; outputs body unreadable)"}
+            roots.append({"name": act["name"], "props": q, "where": []})
+            continue
+        # No specific error at this level: a container that failed because of a child, or an
+        # action inside a loop whose error is only on its iterations.
+        reps = []
+        if (amap.get(act["name"]) or {}).get("loop"):
+            reps = fx.paged("/flows/%s/runs/%s/actions/%s/repetitions" % (fid, run_name, act["name"]))
+        found = False
+        for rep in reps:
+            q = rep["properties"]
+            if q.get("status") in ("Failed", "TimedOut", "Cancelled") and not q.get("error") \
+                    and (q.get("code") or "") not in ("", "ActionFailed", "NotSpecified"):
+                q = dict(q)
+                q["error"] = error_from_outputs(q) or {"code": q.get("code"), "message": "(no error object; outputs body unreadable)"}
+            if q.get("status") in ("Failed", "TimedOut", "Cancelled") and not is_generic(q.get("error")):
+                where = ["%s[%s]" % (i.get("scopeName"), i.get("itemIndex"))
+                         for i in q.get("repetitionIndexes") or []]
+                roots.append({"name": act["name"], "props": q, "where": where})
+                found = True
+                break   # the first failing iteration; more are counted below
+        if not found:
+            generic_fail.append(act["name"])
+
+    def depth(r):
+        return (len(r["where"]), amap.get(r["name"], {}).get("parent") is not None)
+    roots.sort(key=depth, reverse=True)
+    return roots, generic_fail, skipped, acts
+
+
 def cmd_why(fx, a):
     flow = fx.resolve(a.flow)
     fid = flow["name"]
@@ -274,39 +348,7 @@ def cmd_why(fx, a):
               "where one should have run: read the conditions, not the status.")
         return 0
 
-    acts = fx.paged("/flows/%s/runs/%s/actions" % (fid, run["name"]))
-    roots, generic_fail, skipped = [], [], 0
-    for act in acts:
-        p = act["properties"]
-        st = p.get("status")
-        if st == "Skipped":
-            skipped += 1
-            continue
-        if st not in ("Failed", "TimedOut", "Cancelled"):
-            continue
-        if not is_generic(p.get("error")) and p.get("error"):
-            roots.append({"name": act["name"], "props": p, "where": []})
-            continue
-        # No specific error at this level: a container that failed because of a child, or an
-        # action inside a loop whose error is only on its iterations.
-        reps = []
-        if (amap.get(act["name"]) or {}).get("loop"):
-            reps = fx.paged("/flows/%s/runs/%s/actions/%s/repetitions" % (fid, run["name"], act["name"]))
-        found = False
-        for rep in reps:
-            q = rep["properties"]
-            if q.get("status") in ("Failed", "TimedOut", "Cancelled") and not is_generic(q.get("error")):
-                where = ["%s[%s]" % (i.get("scopeName"), i.get("itemIndex"))
-                         for i in q.get("repetitionIndexes") or []]
-                roots.append({"name": act["name"], "props": q, "where": where})
-                found = True
-                break   # the first failing iteration; more are counted below
-        if not found:
-            generic_fail.append(act["name"])
-
-    def depth(r):
-        return (len(r["where"]), amap.get(r["name"], {}).get("parent") is not None)
-    roots.sort(key=depth, reverse=True)
+    roots, generic_fail, skipped, acts = root_causes(fx, fid, amap, run["name"])
 
     if not roots:
         print("\nNo action carries a specific error. Failed containers: %s." % ", ".join(generic_fail))
@@ -349,6 +391,47 @@ def cmd_why(fx, a):
         print("  none found among the actions that succeeded")
     print("\nResubmit only after the fix is deployed and only when repeating every line above is "
           "harmless; otherwise fix the data and let the next trigger run, or run a guarded catch-up.")
+    return 1
+
+
+def cmd_failures(fx, a):
+    """Every failed run since a date, grouped by the action that really failed and its error code."""
+    flow = fx.resolve(a.flow)
+    fid, fp = flow["name"], flow["properties"]
+    amap = action_map(fp.get("definition"))
+    since = (a.since or "")[:19]
+    runs = fx.paged("/flows/%s/runs" % fid, "$filter=" + urllib.parse.quote("status eq 'Failed'"), limit=a.top)
+    runs = [r for r in runs if not since or (r["properties"].get("startTime") or "")[:19] >= since]
+    print("flow  %s (%s), state %s" % (fp.get("displayName"), fid, fp.get("state")))
+    print("%d failed run(s)%s (newest first, at most --top %d read)" % (len(runs), (" since " + since) if since else "", a.top))
+    if not runs:
+        return 0
+    tally = {}
+    for r in runs:
+        roots, generic_fail, _, _ = root_causes(fx, fid, amap, r["name"])
+        if roots:
+            p = roots[0]["props"]
+            err = p.get("error") or {}
+            key = (roots[0]["name"], err.get("code") or p.get("code") or "?")
+            msg = fmt_err(err)
+        else:
+            key, msg = ("(no action carries a specific error)", "-"), "containers: " + ", ".join(generic_fail[:4])
+        code = re.search(r"0x[0-9a-fA-F]{8}", msg)
+        if code and code.group(0) not in key[1]:
+            key = (key[0], key[1] + " " + code.group(0))
+        t = tally.setdefault(key, {"n": 0, "first": None, "last": None, "msg": msg, "run": r["name"]})
+        st = (r["properties"].get("startTime") or "")[:19]
+        t["n"] += 1
+        t["first"] = min(filter(None, [t["first"], st])) if st else t["first"]
+        t["last"] = max(filter(None, [t["last"], st])) if st else t["last"]
+    print()
+    print("%5s  %-40s %-24s %s" % ("runs", "failing action", "code", "first .. last"))
+    for (name, code), t in sorted(tally.items(), key=lambda kv: -kv[1]["n"]):
+        print("%5d  %-40s %-24s %s .. %s" % (t["n"], name[:40], code[:24], t["first"] or "?", t["last"] or "?"))
+        print("       e.g. run %s: %s" % (t["run"], t["msg"][:300]))
+    print()
+    print("Next: `why %s <run>` for one run's inputs, outputs and side effects. Before fixing anything, check the "
+          "OUTCOME in the data (did the row, share or message land?): a run can fail after its effect landed." % a.flow)
     return 1
 
 
@@ -406,6 +489,9 @@ def selftest():
         state["calls"].append((url, token))
         if url.startswith("https://signed.example/"):
             assert token is None, "pre-signed link fetched with a bearer token"
+            if "grant" in url:
+                return {"statusCode": 400, "body": {"error": {"code": "0x80048105", "message":
+                        "More than one concurrent Share requests detected for an Entity"}}}
             return {"statusCode": 200, "body": {"value": [{"mode": "test"}]}}
         assert token == "fixture-token", "API call without the token"
         path = url[len(base):].split("?")[0]
@@ -458,6 +544,24 @@ def selftest():
         check("repetitions are read only for actions inside a loop",
               not any("Read_the_mode/repetitions" in u for u, _ in state["calls"]))
         check("the token is never printed", "fixture-token" not in out)
+        state["fail_runs"] = [run_rec("Failed", gen), run_rec("Failed", gen)]
+        rc, out = run_main(["failures", "Daily Guide", "--since", "2026-01-01"])
+        check("failures tallies every failed run by the action that really failed",
+              rc == 1 and "2 failed run(s) since 2026-01-01" in out and "Record_sent" in out and "InvalidTemplate" in out
+              and "    2  Record_sent" in out)
+        rc, out = run_main(["failures", "Daily Guide", "--since", "2026-02-01"])
+        check("failures before --since are left out (exit 0)", rc == 0 and "0 failed run(s)" in out)
+        # A connector action that failed on its own call: a status code, no error object, the error
+        # only in the outputs body (measured on GrantAccess). It is the root, with that body's error.
+        saved = list(acts)
+        acts[:] = [{"name": "Grant_access", "properties": {"status": "Failed", "code": "BadRequest",
+                                                          "outputsLink": {"uri": "https://signed.example/grant"}}},
+                   {"name": "Share_it", "properties": {"status": "Failed", "code": "ActionFailed", "error": gen}}]
+        rc, out = run_main(["why", fid, run])
+        check("a connector failure with no error object is the root, read from its outputs",
+              rc == 1 and "ROOT CAUSE  Grant_access" in out and "0x80048105" in out and "concurrent Share" in out)
+        acts[:] = saved
+        state["fail_runs"] = [run_rec("Failed", gen)]
         rc, out = run_main(["why", fid, run, "--max-chars", "40"])
         check("an explicit run id is explained the same way", rc == 1 and "ROOT CAUSE  Record_sent" in out)
         state["fail_runs"] = []
@@ -490,6 +594,17 @@ def selftest():
 
 
 # --------------------------------------------------------------------------- main
+def config_value(a, key):
+    paths = [a.config] if a.config else [os.path.join("scripts", "canvas-app.json"), "canvas-app.json"]
+    for p in paths:
+        if p and os.path.exists(p):
+            with open(p, encoding="utf-8-sig") as fh:
+                v = (json.load(fh) or {}).get(key)
+            if v and "<" not in v:
+                return v
+    return None
+
+
 def load_env(a):
     if a.env:
         return a.env
@@ -506,12 +621,13 @@ def load_env(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="flow-runs.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
-    ap.add_argument("command", nargs="?", choices=["list", "runs", "why"])
+    ap.add_argument("command", nargs="?", choices=["list", "runs", "why", "failures"])
     ap.add_argument("flow", nargs="?")
     ap.add_argument("run", nargs="?")
     ap.add_argument("--env")
     ap.add_argument("--config")
     ap.add_argument("--status")
+    ap.add_argument("--since")
     ap.add_argument("--top", type=int, default=20)
     ap.add_argument("--max-chars", type=int, default=800)
     ap.add_argument("--token-cmd")
@@ -523,14 +639,14 @@ def main(argv=None):
     if not a.command:
         ap.print_help()
         return 2
-    if a.command in ("runs", "why") and not a.flow:
+    if a.command in ("runs", "why", "failures") and not a.flow:
         print("%s needs a flow id or name" % a.command)
         return 2
     try:
         env = load_env(a)
-        token, how = get_token(a.token_cmd, a.token_env)
+        token, how = get_token(a.token_cmd or config_value(a, "flowTokenCommand"), a.token_env)
         fx = Flows(env, token)
-        return {"list": cmd_list, "runs": cmd_runs, "why": cmd_why}[a.command](fx, a)
+        return {"list": cmd_list, "runs": cmd_runs, "why": cmd_why, "failures": cmd_failures}[a.command](fx, a)
     except CannotRun as e:
         print("cannot run: %s" % e)
         return 2

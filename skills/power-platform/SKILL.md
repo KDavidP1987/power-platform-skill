@@ -15,7 +15,7 @@ description: >-
 license: MIT
 metadata:
   author: SkillEra
-  version: "0.48.0"
+  version: "0.49.0"
 ---
 
 # Power Platform development
@@ -28,10 +28,15 @@ dropping a component, a compile passes against no data sources, an import report
 wrong zip, a published app runs a cached manifest - so at every step ask: **what does this step
 actually prove, and what does it not?**
 
-## The non-negotiables
+This page has two layers, kept apart on purpose. **Ways of working** are yours to apply: judgement
+nothing can run for you. **What runs automatically** is the plugin's hooks and the bundled tools'
+refusals: they hold whether or not you remember them, and cost the person nothing. Each block names
+the command that satisfies it; you run it. `references/rules-and-scope.md` lists every rule in one
+layer or the other, with its evidence.
 
-These hold on every task. `references/rules-and-scope.md` says which a hook enforces, which a script
-refuses, which stay instructions, and the surface each applies to.
+## Ways of working
+
+### The non-negotiables
 
 1. **The repo is the source of truth.** Canvas screens are `.pa.yaml` under `canvas/<app>/Src/`; the
    solution is an unpacked tree under `solution/src`. Studio is a validator and a data-source
@@ -42,7 +47,7 @@ refuses, which stay instructions, and the surface each applies to.
    published app is the test harness and Playwright reaches it. An admin session proves nothing
    about a restriction: say a gate is unverified rather than imply it was checked.
 4. **Verify the effect where it lands.** Query the table; the screen that wrote the row is the least
-   independent witness.
+   independent witness. A failed run can have landed its effect; a green one can have done nothing.
 5. **Know which half of the app runs, and which build the browser is on.** Read `LoadFromYaml` and
    the build stamp, and refresh the player before judging anything.
 6. **Schema before screens, and never in one step.** A new column does not exist for a published app
@@ -50,38 +55,29 @@ refuses, which stay instructions, and the surface each applies to.
    canvas app binds them - Dataverse cannot change an attribute's type.
 7. **Security roles stay out of the solution.** An import carrying roles resets live access control.
    Every table the app binds must be granted by some role, proved by impersonation.
-8. **No flow ships that could loop - a hard gate.** Before any import, `scripts/lint-flows.mjs` over
-   ALL the solution's flows exits 0 and no finding is waived: Update triggers without
-   `filteringattributes`, self-writes not stopped by a value they change, cross-flow cycles
-   (including a Create-triggered flow creating its own rows), a write that can land two values that
-   each start a flow. A recovery or sweep job ends in a terminal state a person re-arms. The update
-   trigger delivers the whole row, so any other guard loops, billed per run (one project: 1,203 runs
-   in 45 minutes). The plugin refuses `pac solution import` until a clean lint over every flow is
-   recorded. `references/power-automate.md` sections 3 and 4.
+8. **No flow ships that could loop.** Update triggers without `filteringattributes`, self-writes not
+   stopped by a value they change, cross-flow cycles, a write that lands two values that each start a
+   flow: each runs billed until someone notices (one project: 1,203 runs in 45 minutes). A recovery or
+   sweep job ends in a terminal state a person re-arms. `references/power-automate.md` 3 and 4.
 9. **Before any bulk write, ask what watches the table**, count the messages that would reach real
-   people, and park the sender. While a build must not reach real people, prove it from source
-   (`lint-flows.mjs --require-safe-recipients` over every flow in the set, existing ones included)
-   and run history, and pin the one permitted address in the flow source. A leak found in an
-   existing flow is fixed in its source file in the same change, not only reported.
+   people, and park the sender. While a build must not reach real people, pin the one permitted
+   address in the flow source; a leak found in an existing flow is fixed in its source, not reported.
 10. **Query the source; do not filter a copy of it.** A collection holds at most the data row limit
     (500 by default, 2,000 at most) and answers silently from that prefix. Put a gallery's or
     picker's query in its `Items` as a delegable `Filter`/`Search` on the source, filter a lookup by
-    the record or its id, and say which clauses delegate. `references/power-fx-and-pa-yaml.md`
-    section 6.
+    the record or its id, and say which clauses delegate. `references/power-fx-and-pa-yaml.md` 6.
 11. **An audit that can pass vacuously will.** Give every check a floor ("found at least N write
     paths"), prove it goes red on a known-bad input, and make it say when its inputs are stale.
-12. **Select before you apply - every Dataverse change, schema or data, deletes above all.** First
-    run the read-only selection the change will act on (the same `$filter`, the same code path) and
-    read it: every row or component touched, the exact request bodies, and for a delete or retype
-    what holds data or depends on it. Plan is the default; the apply needs `--apply`, acts only on
-    what the plan showed, and refuses if the live state changed since. `deploy-tables.py` and
-    `seed-data.py` enforce this; the plugin refuses inline Web API writes and write scripts with no
-    plan mode. `references/dataverse-web-api.md` section 16.
+12. **Select before you apply - every Dataverse change, schema or data, deletes above all.** Run the
+    read-only selection the change will act on (same `$filter`, same code path) and read it: every
+    row or component touched, the exact request bodies, and for a delete or retype what holds data or
+    depends on it. Plan is the default; the apply acts only on what the plan showed.
+    `references/dataverse-web-api.md` 16.
 
-## How to behave
+### How to behave
 
-- **A hook denial is an instruction.** Do the named step with its tool, then retry; never work
-  around it. The plugin's hooks enforce the build order, the flow lint and the hand-back checks.
+- **A block is an instruction.** Run the step it names with its tool, then retry; never work around
+  it. A tool hint means the bundled tool already does what you were about to hand-roll: use it.
 - **Lead with the mechanism, then the fix.** Name which cache, half or step is lying, why every green
   signal so far answered a different question, and the shortest test that would move the failure.
 - **State what is unproven**: a restriction tested only as an admin, a check on stale inputs, an
@@ -91,30 +87,48 @@ refuses, which stay instructions, and the surface each applies to.
 - **Ask the person for decisions, never for labour.** Collect every decision at the start (theme,
   names, recipients, sample-data volume); do Studio steps through the driver, create this build's
   own connections, sign in once. With no person present, take your own recommendations, record them
-  in `docs/decisions.md`, and never end a turn on a question. `references/orchestration.md` section 5.
+  in `docs/decisions.md`, and never end a turn on a question. `references/orchestration.md` 5.
 - **A refusal covers one action, not the task.** Try every later step yourself (Studio steps too, by
   the driver). Hand back only a step that is itself refused, as one `!`-prefixed line with why: done
   offline first, absolute quoted paths, what to expect; then verify. `references/orchestration.md` 5.
 - **Read the first diagnostic, not the loudest.** One broken `ClearCollect` in `App.OnStart` produces
-  hundreds of errors on screens nobody touched.
+  hundreds of errors on screens nobody touched; one failed share reads "ActionFailed" on every
+  container above it.
 - **Never reload Studio or import while a co-authoring push is held, and close Studio through its
   Back button.** Each silently discards work or strands a lock.
 - **Treat measured behaviour as measured.** Microsoft changes Studio, the player and connectors;
   confirm anything marked "observed once" in your environment before building on it.
 - **Leave the machine as you found it**: close the tabs you opened, release every Studio session,
   run `canvas-browser.mjs tidy` before the hand-back.
-- **Write lessons where the next person will look** - the shared standards, not only one project's
-  notes. When the skill itself misled you or had no answer, give feedback as a GitHub issue through
-  `scripts/feedback.mjs` (it adds technical details and refuses project data): offer it, or file it
-  yourself when the person chose `mode auto`. `references/feedback.md`.
-- **Keep the skill current.** The plugin checks for a newer release weekly at session start; relay
-  its notice once and update only on a yes. Without the plugin's hooks, run
-  `node scripts/hooks/update-check.mjs --print` once per session. What changed: `CHANGELOG.md` here.
+- **Turn a lesson into a check where you can.** Write lessons where the next person will look; when
+  one can be decided from files or an API answer, propose it as a check or tool rather than a
+  sentence. When the skill misled you or had no answer, give feedback through `scripts/feedback.mjs`
+  (it adds technical details and refuses project data): offer it, or file it when the person chose
+  `mode auto`. `references/feedback.md`.
 
-## A new app or a multi-part build, in this order
+## What runs automatically
 
-Copy this checklist into your notes and tick it off. These are actions, not advice: a measured build
-that skipped the design and planning steps lost its design score.
+The plugin's hooks are silent outside Power Platform projects and name the surface they fire for.
+
+| When | Blocks (denied or refused until done) | Notes and tools (never block) |
+|---|---|---|
+| Session start | - | a newer skill release, once a week (relay once; update on a yes) |
+| Before a tool call | screen `.pa.yaml` of a new app before `DESIGN.md` and `design/prototype.html`; a table deploy before the plan; `pac solution import` before a clean `lint-flows.mjs` over every flow (8); an inline Dataverse write, or a write script or heredoc with no plan mode (12); a raw issue on the skill's repository | - |
+| After a write or shell call | - | `.pa.yaml` compile-killers; shell-call count and elapsed time; the tool to use when a command or script hand-rolls flow-run history or import-job polling |
+| At the stop | a build's design record, critique and review; background shell work still running; a question with no person present; test writes not proven back; an access token written to storage | - |
+| In the bundled tools | `deploy-tables.py` and `seed-data.py` apply only a recorded plan (12); `deploy-flows.py` lints first; `lint-flows.mjs --require-safe-recipients` fails a send past the pinned address (9); `canvas-browser.mjs` refuses a third publish without the critique and review; `flow-state-check.py` refuses an import that switches a flow; `check-new-galleries.py` refuses a gallery Studio would tear down | `lint-flows.mjs` and `check-canvas-format.mjs` warnings; `flow-runs.py why` / `failures`; `import-watch.py`; `fabric.py schedules`; `datadict.py --env` |
+
+Without the plugin's hooks, run them by hand: `node scripts/check-all.mjs` after every change,
+`scripts/hooks/check-pa-yaml.mjs` over every folder you wrote to, `lint-flows.mjs` before every
+import, and `node scripts/hooks/update-check.mjs --print` once per session. What changed: `CHANGELOG.md`.
+
+## Procedures
+
+### A new app or a multi-part build, in this order
+
+Copy this checklist into your notes and tick it off. A measured build that skipped the design and
+planning steps lost its design score; the hooks above now refuse the screens and the deploy until
+they exist.
 
 ```
 - [ ] 1. Plan: acceptance contract from the brief (assets/templates/acceptance-contract.md) - every
@@ -131,14 +145,11 @@ that skipped the design and planning steps lost its design score.
 - [ ] 6. One fix batch, one publish, one walk call; seed restored and checked; hand back
 ```
 
-If the critique, the reviewer or a walk finds a defect, go back to step 4 for that lane inside the
-single fix batch. The plugin refuses screen `.pa.yaml` before `DESIGN.md` and the prototype exist, a
-table deploy before the plan exists, and a hand-back without the critique and the review; the driver
-refuses a third publish until both are written. Budget: about an hour of agent time for a five-screen
-app with two flows and a medallion. Details: `references/orchestration.md` and
-`references/project-setup.md` section 3 (theme intake, impeccable, tokens).
+A defect from the critique, the reviewer or a walk goes back to step 4 for that lane inside the single
+fix batch. Budget: about an hour of agent time for a five-screen app with two flows and a medallion.
+Details: `references/orchestration.md` and `references/project-setup.md` section 3.
 
-## The working loop, for every non-trivial change
+### The working loop, for every non-trivial change
 
 ```
 - [ ] 1. Pre-flight: right branch, clean tree, `pac org who` names the right environment, read
@@ -159,17 +170,13 @@ app with two flows and a medallion. Details: `references/orchestration.md` and
 - [ ] 9. Document in the same change (changelog, dependencies, decisions, state); refresh audit inputs
 ```
 
-A failure at step 4 or 5 goes back to step 3. A missing marker at step 7 or a failed walk at step 8
-goes back to step 3 as well - never forward to the next change. Read `references/canvas-shipping.md`
-before the first ship in a session; it holds what each step proves and the two ship paths. Once an
-app works end to end, offer the documentation set (`references/documentation-set.md`).
-
-At step 3 the hooks catch the compile-killers at write time; where they are not wired, run
-`scripts/hooks/check-pa-yaml.mjs`, `check-canvas-format.mjs` and `check-canvas-overlap.mjs` over
-every folder you wrote to. A `#` line or an unquoted `": "` inside a formula fails the whole app's
-compile. Every data-bound label must fit its longest value or clamp with an ellipsis and a tooltip;
-text must fit vertically too. No control may sit over another that can be visible at the same time.
-Screens use the theme's tokens, never literal colours (`references/canvas-layout.md`).
+A failure at step 4 or 5 goes back to step 3, and so does a missing marker at step 7 or a failed walk
+at step 8 - never forward to the next change. Read `references/canvas-shipping.md` before the first
+ship in a session. Once an app works end to end, offer the documentation set
+(`references/documentation-set.md`). In source: a `#` line or an unquoted `": "` inside a formula
+fails the whole compile; every data-bound label fits its longest value or clamps with an ellipsis and
+a tooltip, vertically too; no control sits over another that can be visible at the same time; screens
+use the theme's tokens, never literal colours (`references/canvas-layout.md`).
 
 ## Where to look
 
@@ -182,29 +189,29 @@ Read only the reference the task needs; each topic has one home.
 | Studio read-only, `connect` 422, thousands of "isn't recognized", "locked by user", the authoring MCP misleading | `references/authoring-sessions.md` |
 | "Works in Studio, fails in the published app"; a new column, choice or table the app cannot see; option-set members, entity set names, the Data pane | `references/manifest-caches.md` |
 | Power Fx and `.pa.yaml`: silent no-op buttons, `App.OnStart`, collections, types, lookups, delegation and the row limit, large-table reads, identity, compile output | `references/power-fx-and-pa-yaml.md` |
-| Screen controls and patterns: input quirks, OnChange on render, Default/Reset, pickers with All/None, edit screens, permission gates, overlays, list filters, communication history, template guides | `references/canvas-controls-and-patterns.md` |
+| Screen controls and patterns: input quirks, OnChange on render, Default/Reset, checkbox state, pickers with All/None and codes, edit screens, permission gates, overlays, list filters, communication history, template guides | `references/canvas-controls-and-patterns.md` |
 | Layout: responsive screens, text width and clipping, the fit rule, gallery rows, scrollbars, z-order, unclickable controls, theme tokens | `references/canvas-layout.md` |
 | Driving Studio or the published app with Playwright: scenarios, iframes, input, dropdowns, stale cache, Add data and Refresh, sweeps, OData trace, the acceptance contract | `references/browser-verification.md` |
 | Power Pages: choosing the app type, a site in git, table permissions and the Web API, sign-in, Liquid, the cache, per-person visibility, refusals with `site-walk.mjs`, security review, the organisation's brand, site lifecycle | `references/power-pages.md` |
-| SharePoint lists and customised list forms: creating a list and its views by REST, a canvas app on a site page, the form app (cards hold the rules, column defaults, the fixed hosted size, pages, actions, publishing), required columns and deletes from an app | `references/sharepoint-lists-and-forms.md` |
+| SharePoint lists and customised list forms: creating a list and its views by REST, a canvas app on a site page, the form app, required columns and deletes from an app | `references/sharepoint-lists-and-forms.md` |
 | Dataverse solutions and schema: pack/unpack, imports that never remove, what cannot change, shared tables, column types, delete behaviour, effective dating | `references/dataverse.md` |
 | Scripting the Web API: idempotent provisioning, retries, metadata, choices, alternate keys, paging, `systemuser`, PowerShell 5.1 traps | `references/dataverse-web-api.md` |
 | Who can read or write: roles out of solutions, depth and sharing, Append/AppendTo, impersonation, column security, SharePoint virtual tables, onboarding users | `references/security-and-access.md` |
 | Writing live data: migrations, backfills, spreadsheet loads, purges, rollup rebuilds, cutover | `references/data-migration.md` |
-| Cloud flows: definitions, triggers, loops and sentinels, activation-only defects, dates and nulls, run-as identity, notifications and caps, bulk writes, FetchXML, run history and failed runs, documents | `references/power-automate.md` |
+| Cloud flows: definitions, triggers, loops and sentinels, activation-only defects, dates and nulls, run-as identity, sharing rows, notifications and caps, bulk writes, FetchXML, run history and failed runs, documents | `references/power-automate.md` |
 | Reporting: the history table, in-app charts, metric definitions, Power BI over a Fabric medallion, embedding, viewer licensing | `references/reporting.md` |
-| Which rules a hook enforces, the surface each applies to, when an instruction becomes a hook | `references/rules-and-scope.md` |
-| Writing or trusting an audit; stale inputs; vacuous passes | `references/audits.md` |
-| An existing Power BI / Fabric workspace: lineage from M and TMDL, Excel consumers, usage, refresh health, dead items, staged retirement | `references/fabric-workspace-audit.md` |
+| Which layer a rule is in (enforced or a way of working), the surface it applies to, when a way of working becomes a check | `references/rules-and-scope.md` |
+| Writing or trusting an audit; stale inputs; vacuous passes; auditing switched off | `references/audits.md` |
+| An existing Power BI / Fabric workspace: lineage from M and TMDL, Excel consumers, usage, refresh health and schedules, dead items, retiring and reorganising items | `references/fabric-workspace-audit.md` |
 | A data dictionary for a Dataverse app, or judging one: every table and column with meaning, choices by label, lookups, keys, sensitive columns, live drift, the Fabric dataflows that read each table | `references/data-dictionary.md` |
 | Documenting a medallion chain or judging a lineage document: column lineage from the dataflow M to Dataverse and SharePoint sources, sensitive columns, refresh, drift, curated notes, evaluation | `references/data-lineage-docs.md` |
-| Rebuilding a reporting chain as a medallion: bronze from SharePoint lists and Excel workbooks, verifying against the files, parity with the old model, Python notebooks, reading Delta from Python | `references/fabric-rebuild-and-parity.md` |
+| Rebuilding a reporting chain as a medallion: bronze from SharePoint lists and Excel workbooks, what nothing captures yet, verifying against the files, parity with the old model, Python notebooks, reading Delta from Python | `references/fabric-rebuild-and-parity.md` |
 | The skill misled you or lacked an answer: offering feedback, what it may and may not contain | `references/feedback.md` |
 | Starting from nothing: the machine, pac, tokens, a browser that signs in by itself, identities signed in once, the smoke test | `references/first-run.md` |
 | Starting a repo or app: the harness, theme intake, layout, hooks, continuity docs, CI, offering GitHub | `references/project-setup.md` |
 | ALM and CI/CD: service-principal pac, managed vs unmanaged, layers, Managed Environments, in-product pipelines, git integration, gates | `references/alm-pipelines.md` |
 | Several apps sharing one environment or a shared reference solution | `references/shared-environments.md` |
-| pac, tokens, TDS, MCP servers, Windows/OneDrive/PowerShell failures, production actions to hand to a person | `references/tooling-and-auth.md` |
+| pac, tokens for every audience from one sign-in, TDS, MCP servers, Windows/OneDrive/PowerShell failures, production actions to hand to a person | `references/tooling-and-auth.md` |
 | Model-driven apps, model-driven forms by script, SOPs from the running app, licensing, replacing a spreadsheet tool | `references/model-driven-and-docs.md` |
 | The documentation set for a finished app: role guides, screenshots per role, the doc kit | `references/documentation-set.md` |
 | Every bundled script and what it is for, Playwright two ways, working without Playwright, Microsoft's official plugins alongside this one | `references/tools.md` |
@@ -221,8 +228,7 @@ perform in the published app and the Web API query that would confirm the effect
 The scripts used most: `canvas-browser.mjs` (Studio and the player: `create`, `save`, `publish`,
 `walk`, `tidy`), `check-all.mjs` (the routine checks in one call), `ship-canvas.py` (solution-import
 ship with artifact asserts), `deploy-tables.py` (schema from a manifest, plan first), `lint-flows.mjs`
-(the loop gate), `inspect-artifact.py`, `check-drift.py`, `check-new-galleries.py`, `seed-data.py`,
-`deploy-flows.py`, `canvas-mcp.py`, `site-walk.mjs` (Power Pages) and `setup-harness.mjs`. What each
-does and when: `references/tools.md`. Microsoft's own Power Platform plugins generate apps and stop at
-a clean compile; use them where they have a generator and this skill for the schema, the ship, the
-proof in the published app and the guards.
+(the loop gate), `flow-runs.py` (why a flow failed), `inspect-artifact.py`, `check-drift.py`,
+`seed-data.py`, `deploy-flows.py`, `canvas-mcp.py`, `site-walk.mjs` (Power Pages) and
+`setup-harness.mjs`. What each does and when: `references/tools.md`. Microsoft's own plugins generate apps
+and stop at a clean compile; use them for generation and this skill for the ship, proof and guards.

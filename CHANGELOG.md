@@ -11,6 +11,65 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-20
+
+The skill now keeps its two layers apart: **ways of working** (judgement an agent applies) and **what
+runs automatically** (hooks, tool refusals and tools that hold whether or not anyone remembers them,
+at no cost to the person). Fifteen logged lessons were decided; most became checks or tools rather
+than sentences.
+
+### Changed
+
+- `SKILL.md`: "Ways of working" (the non-negotiables, stripped of enforcement detail, and how to
+  behave) is separate from a new "What runs automatically" table (when each hook fires, what it
+  blocks, what it only notes, and what the bundled tools refuse), followed by the two procedures.
+  "Turn a lesson into a check where you can" replaces the old lessons bullet.
+- `references/rules-and-scope.md`: section 1 defines the two kinds of rule and the three strengths
+  of enforcement (block, note, tool); the matrix is split into "Enforced automatically" (44 rows)
+  and "Ways of working: instructions only" (16 rows), each row saying why it is in its layer. A
+  note or a tool needs less evidence than a block, because it never stops anyone.
+- The plugin's select-before-apply gate (rule D) judges a script inside a heredoc by its plan mode,
+  as it judges a written file; a plan-by-default script created in a heredoc was refused as an
+  inline write. The inline refusal now says why a GET already run does not count and what to do.
+- The design-overdue note fires only for a DESIGN.md under 12 hours old; it fired in a repo whose
+  DESIGN.md was a month old.
+- `flow-runs.py why` names a connector action that failed on its own call (a status code such as
+  BadRequest and no error object) as the root cause, with the error from its outputs body; it was
+  reported as a cascade. Measured on Dataverse GrantAccess (0x80048105).
+- `power-automate.md` 14: never `$orderby` on `flowruns` (an elastic table; an unfiltered sorted
+  query ran over eight minutes), always `$select` and a `starttime ge` filter; the table is for
+  counts, not causes; prove a failed run's outcome from the data.
+
+### Added
+
+- Plugin tool hints (PostToolUse, also on script writes): a command or script that reads the Flow
+  API's runs or the `flowruns` table by hand is told about `flow-runs.py` once a session; one that
+  polls `importjobs`, about `import-watch.py`. Never blocks.
+- `lint-flows.mjs` warnings `grantaccess-parallel` (two shares of one record with no runAfter path
+  between them, or one record shared in a parallel loop) and `grantaccess-duplicate-runs` (a share in
+  an Update-triggered flow with no limit on concurrent runs and nothing after it on Failed). Measured:
+  57 failed runs in a month across two flows, every share landed. `power-automate.md` 9.
+- `check-canvas-format.mjs` warning `checkbox-mirror-reset`: a formula sets a variable a checkbox
+  mirrors without `Reset()` of the box (context variables matched on their own screen).
+  `canvas-controls-and-patterns.md` 4.
+- `flow-runs.py failures <flow> --since DATE`: every failed run grouped by the action that really
+  failed and its error code, with count, first and last time and an example. Proved live: 57 runs of
+  two flows in three groups. Reads `"flowTokenCommand"` from `scripts/canvas-app.json`.
+- `dv-token.ps1 -Resource <audience>`: the Dataverse sign-in's cached refresh token issues a Flow or
+  Fabric token with no second prompt (proved live for both). `tooling-and-auth.md` 2.
+- `fabric.py schedules`: each item's schedules once per schedule id (a Dataflow Gen2 lists one under
+  both Execute and Refresh) and its last run read as UTC (job times carry no `Z`). Read-only; proved
+  live on a 30-item workspace.
+- `datadict.py --env`: an `audit` evaluation line (environment auditing off, or tables unaudited) and
+  a gap per unaudited table. `audits.md` 12.
+- `fabric-workspace-audit.md` 6 and 7: Gen1 dataflows the items API cannot see, their schedule state
+  from transactions, the measured retirement procedure (backup, readers scan, guards in the script,
+  consumer moved with a fingerprint, ordered deletes) and reorganising from a layout manifest.
+- `fabric-rebuild-and-parity.md` 2: assessing what a medallion does not capture yet (three tiers and a
+  lake-capture checklist).
+- `canvas-controls-and-patterns.md` 5: a picker over rows people know by a code searches the code.
+- ROADMAP 31 (`fabric.py retire` and `organize`) and 32 (`capture-gaps`).
+
 ## [0.48.0] - 2026-11-10
 
 A data dictionary for Dataverse apps, built from the solution in the repo and checked against the

@@ -551,17 +551,46 @@ export function designOverdue(root, now = Date.now()) {
   if (!d || fs.existsSync(path.join(root, 'design/prototype.html'))) return 0;
   let since = 0;
   try { since = Math.floor((now - fs.statSync(d).mtimeMs) / 60000); } catch { return 0; }
-  return since > DESIGN_BUDGET_MIN ? since : 0;
+  // A DESIGN.md from an earlier day belongs to a finished or paused build, not to this session's design
+  // lane: measured, the note fired in a reporting repo whose DESIGN.md was a month old (41,887 minutes).
+  return since > DESIGN_BUDGET_MIN && since <= DESIGN_STALE_MIN ? since : 0;
 }
+const DESIGN_STALE_MIN = 12 * 60;
+// Tool hints: a hand-rolled call that a bundled tool already does better. Measured: an agent diagnosing
+// failed flow runs wrote its own scripts against the Flow API (four calls once it knew the route, after
+// an eight-minute stalled query) while flow-runs.py does the walk, the loop repetitions and the error
+// bodies; another polled importjobs by hand before import-watch.py existed. Each hint is said once a session.
+const TOOL_HINTS = [
+  { id: 'flow-runs', rx: /api\.flow\.microsoft\.com[^\s'"]*\/runs\b|\/api\/data\/v\d[^\s'"]*\/flowruns\b/i,
+    note: 'Tool hint: this reads flow run history by hand. scripts/flow-runs.py does it in one call: `why <flow>` finds the real failing action ' +
+      '(inside loops too) with its error body and the side effects a resubmit repeats; `failures <flow> --since <date>` tallies every failed run ' +
+      'by action and error code. For the Dataverse flowruns table, always $select and a starttime ge filter, never $orderby (references/power-automate.md sections 14 and 18).' },
+  { id: 'import-watch', rx: /\/api\/data\/v\d[^\s'"]*\/importjobs\b/i,
+    note: 'Tool hint: this polls importjobs by hand. scripts/import-watch.py reads the server-side result per component and the flow states after it.' },
+];
+export function toolHint(text, said = []) {
+  const s = String(text || '');
+  for (const h of TOOL_HINTS) if (!said.includes(h.id) && h.rx.test(s)) return h;
+  return null;
+}
+
 export function decidePost(root, input = {}, stateDir = os.tmpdir(), now = Date.now()) {
-  if (!/^(Bash|PowerShell)$/.test(input.tool_name || '')) return null;
+  const tool = input.tool_name || '';
+  if (!/^(Bash|PowerShell|Write)$/.test(tool)) return null;
   if (loadConfig(root).pluginGate === false || appConfig(root).pluginGate === false) return null;
   if (!isBuildFolder(root)) return null;
   const sid = String(input.session_id || '').replace(/[^\w-]/g, '') || 'nosession';
   const f = path.join(stateDir, `pp-plugin-budget-${sid}.json`);
   const state = readJson(f) || { start: now, shell: 0, nextNudge: SHELL_NUDGE_EVERY, marks: [] };
+  const ti = input.tool_input || {};
+  const hint = toolHint(tool === 'Write' ? ti.content : ti.command, state.hints || []);
+  if (hint) state.hints = [...(state.hints || []), hint.id];
+  if (tool === 'Write') {
+    if (hint) { try { fs.writeFileSync(f, JSON.stringify(state)); } catch { /* unwritable temp */ } }
+    return hint ? hint.note : null;
+  }
   state.shell++;
-  let note = budgetNote(state, now);
+  let note = [budgetNote(state, now), hint && hint.note].filter(Boolean).join('\n') || null;
   const late = state.designNoted ? 0 : designOverdue(root, now);
   if (late) {
     state.designNoted = true;
@@ -663,11 +692,20 @@ export function evaluatePre(root, input = {}, env = process.env) {
   // D. select before apply (SKILL.md must-hold 12): a Dataverse write is never sent inline from the shell,
   //    and a script that sends one plans by default. One loader's plan took another path than its apply and
   //    failed part-way; another wrote hundreds of wrong rows; an old reconcile script wrote with no plan at all.
-  if (isShell && inlineDataverseWrite(cmd)) {
+  // A heredoc body is a script (written to a file or fed to an interpreter), so it is judged as a script
+  // is: refused only without a plan mode. Measured: a plan-by-default script created in a heredoc was
+  // refused as an inline write, twice, and passed once it was saved with the Write tool.
+  if (isShell && inlineDataverseWrite(withoutHeredocs(cmd))) {
     return 'Power Platform order gate (power-platform plugin) [Dataverse]: select before apply. This command sends a Dataverse write ' +
-      'inline, so nothing has shown which rows or components it touches. Run the same URL and $filter as a GET first and read the rows; ' +
-      'then put the write in a script that plans by default (prints every row and the exact request body) and writes only with --apply ' +
+      'inline. An inline write is refused even when its GET already ran, because the plan must come from the same code path as the write. ' +
+      'Save the write as a script file (Write tool) that plans by default - selects the rows with the same $filter, prints them and the exact ' +
+      'request bodies - and writes only with --apply (or -Apply). Run it once without the switch, read the plan, then run it with the switch ' +
       '(references/dataverse-web-api.md section 16).';
+  }
+  if (isShell && heredocBodies(cmd).some((b) => writeScriptWithoutPlan(b))) {
+    return 'Power Platform order gate (power-platform plugin) [Dataverse]: select before apply. The script in this heredoc sends Dataverse ' +
+      'writes but has no plan mode. Give it one (plan by default, write only with --apply or -Apply), or save it with the Write tool, ' +
+      'run it without the switch, read the plan, then run it with the switch (references/dataverse-web-api.md section 16).';
   }
   if (tool === 'Write' && /\.(py|ps1|psm1|mjs|js|cjs|ts|sh)$/i.test(String(ti.file_path || '')) && writeScriptWithoutPlan(String(ti.content || ''))) {
     return 'Power Platform order gate (power-platform plugin) [Dataverse]: select before apply. This script sends Dataverse writes ' +
@@ -730,6 +768,18 @@ export function withoutHeredocs(cmd) {
     while (i + 1 < lines.length && lines[i + 1].trim() !== m[2]) i++;
   }
   return out.join('\n');
+}
+export function heredocBodies(cmd) {
+  const lines = String(cmd).split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
+    if (!m) continue;
+    const body = [];
+    while (i + 1 < lines.length && lines[i + 1].trim() !== m[2]) body.push(lines[++i]);
+    out.push(body.join('\n'));
+  }
+  return out;
 }
 export function runsDeployer(cmd) {
   for (const seg of withoutHeredocs(cmd).split(/&&|\|\||[;|&\n]/)) {
@@ -828,7 +878,7 @@ function selftest() {
     check('B: a deploy after a heredoc is still a deploy', pre('Bash', { command: "cat > n.txt <<EOF\nnote\nEOF\npython scripts/deploy-tables.py --manifest t.json" }), denies('plan before schema'));
     check('B: the deployer selftest is not a deploy', pre('Bash', { command: 'cd x && python scripts/deploy-tables.py --selftest' }), silent);
     check('B: a deploy after a cd is still a deploy', pre('Bash', { command: 'cd x && python3 "scripts/deploy-tables.py" --manifest t.json' }), denies('plan before schema'));
-    check('D: an inline curl DELETE to the Web API is denied', pre('Bash', { command: "curl -s -X DELETE -H \"Authorization: Bearer $T\" 'https://org.crm.dynamics.com/api/data/v9.2/app_orders(1f0e)'" }), denies('select before apply', 'GET first'));
+    check('D: an inline curl DELETE to the Web API is denied', pre('Bash', { command: "curl -s -X DELETE -H \"Authorization: Bearer $T\" 'https://org.crm.dynamics.com/api/data/v9.2/app_orders(1f0e)'" }), denies('select before apply', 'same code path'));
     check('D: an inline Invoke-RestMethod PATCH is denied', pre('PowerShell', { command: 'Invoke-RestMethod -Uri "$org/api/data/v9.2/app_orders($id)" -Method Patch -Body $b -Headers $h' }), denies('select before apply'));
     check('D: an inline python requests.delete is denied', pre('Bash', { command: "python -c \"import requests; requests.delete(o + '/api/data/v9.2/app_orders(1)')\"" }), denies('select before apply'));
     check('D: an inline GET (the selection) is allowed', pre('Bash', { command: "curl -s 'https://org.crm.dynamics.com/api/data/v9.2/app_orders?$filter=app_status eq 1&$select=app_name'" }), silent);
@@ -840,6 +890,11 @@ function selftest() {
     check('D: a PowerShell write script with -WhatIf is allowed', pre('Write', { file_path: path.join(tmp, 'scripts/Fix.ps1'), content: '[CmdletBinding(SupportsShouldProcess)]\nInvoke-RestMethod -Uri "$org/api/data/v9.2/x" -Method Delete\n' }), silent);
     check('D: a read-only script is allowed', pre('Write', { file_path: path.join(tmp, 'scripts/read.py'), content: "requests.get('https://org.crm.dynamics.com/api/data/v9.2/app_orders')\n" }), silent);
     check('D: a doc naming a DELETE is not a script', pre('Write', { file_path: path.join(tmp, 'docs/notes.md'), content: '-Method Delete /api/data/v9.2/x' }), silent);
+    const withPlan = noPlan + "if '--apply' not in sys.argv: print('plan only'); sys.exit(0)\n";
+    check('D: a heredoc script with a plan mode is a script, not an inline write', pre('Bash', { command: `cat > scripts/move.py <<'EOF'\n${withPlan}EOF\npython scripts/move.py` }), silent);
+    check('D: a heredoc script fed to python with a plan mode is allowed', pre('Bash', { command: `python - <<'EOF'\n${withPlan}EOF` }), silent);
+    check('D: a heredoc script with no plan mode is denied', pre('Bash', { command: `python - <<'EOF'\n${noPlan}EOF` }), denies('select before apply', 'heredoc', 'no plan mode'));
+    check('D: an inline write after a heredoc is still denied', pre('Bash', { command: `cat > n.txt <<'EOF'\nnote\nEOF\ncurl -X PATCH 'https://org.crm.dynamics.com/api/data/v9.2/app_orders(1)' -d @b.json` }), denies('select before apply', 'even when its GET already ran', 'Write tool'));
     check('B: deploy-tables --plan is allowed', pre('Bash', { command: 'python scripts/deploy-tables.py --plan' }), silent);
     fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });
     fs.copyFileSync(TEMPLATE, path.join(tmp, 'docs', 'acceptance-contract.md'));
@@ -911,6 +966,16 @@ function selftest() {
     const t0 = 1_000_000_000_000;
     const post = (n, at, tool = 'Bash') => { let out = null; for (let i = 0; i < n; i++) out = decidePost(tmp, { tool_name: tool, session_id: 'b1' }, st3, at) || out; return out; };
     check('post: a Read is ignored', decidePost(tmp, { tool_name: 'Read', session_id: 'b0' }, st3, t0), silent);
+    {
+      const st4 = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-hint-'));
+      const hp = (tool, ti) => decidePost(tmp, { tool_name: tool, session_id: 'h1', tool_input: ti }, st4, t0);
+      check('hint: a hand-rolled Flow API runs read names flow-runs.py', hp('Bash', { command: "curl -s \"https://api.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/e/flows/f/runs?api-version=2016-11-01\"" }), (g) => typeof g === 'string' && g.includes('flow-runs.py'));
+      check('hint: said once a session', hp('Bash', { command: 'curl -s https://api.flow.microsoft.com/x/flows/f/runs' }), silent);
+      check('hint: a script written to read flowruns names it too (another session)', decidePost(tmp, { tool_name: 'Write', session_id: 'h2', tool_input: { content: "u = org + '/api/data/v9.2/flowruns?$select=status'" } }, st4, t0), (g) => typeof g === 'string' && g.includes('flow-runs.py'));
+      check('hint: a Write with nothing to hint is silent', decidePost(tmp, { tool_name: 'Write', session_id: 'h3', tool_input: { content: 'print(1)' } }, st4, t0), silent);
+      check('hint: importjobs polling names import-watch.py', hp('PowerShell', { command: 'Invoke-RestMethod "$org/api/data/v9.2/importjobs?$select=progress"' }), (g) => typeof g === 'string' && g.includes('import-watch.py'));
+      fs.rmSync(st4, { recursive: true, force: true });
+    }
     check('post: 39 shell calls say nothing', post(39, t0), silent);
     check('post: the 40th reports the count', post(1, t0), (g) => typeof g === 'string' && g.includes('40 shell calls') && g.includes('walk <folder>'));
     check('post: the next note waits 40 more', post(39, t0), silent);
@@ -924,6 +989,7 @@ function selftest() {
     check('post: design 15 minutes in says nothing', dpost('d1', 15), silent);
     check('post: design past 20 minutes reports once', dpost('d1', 25), (g) => typeof g === 'string' && g.includes('25 minutes ago') && g.includes('design/app-formulas.txt'));
     check('post: the design note is not repeated', dpost('d1', 30), silent);
+    check('post: a DESIGN.md from an earlier day is not the design lane of this session', dpost('d3', 41887), silent);
     put('design/prototype.html', '<!doctype html>');
     check('post: prototype written, no design note', dpost('d2', 40), silent);
     check('post: silent outside a build folder', (put('scripts/canvas-app.json', '{}'), rm('canvas'), decidePost(tmp, { tool_name: 'Bash', session_id: 'b9' }, st3, t0)), silent);

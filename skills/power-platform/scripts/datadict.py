@@ -393,6 +393,14 @@ def live_read(env, token_cmd, tables, transport=None):
         except Exception as e:  # a table missing live is recorded, not fatal
             live["columns"][t["logical"]] = None
             live["errors"].append("%s: %s" % (t["logical"], str(e)[:160]))
+    # Auditing: with it off, a delete (failed or done) leaves no record, so "who deleted it" and
+    # "why did my delete fail" can only be answered by reproducing it. Measured on a live app.
+    try:
+        orgs = c.get("organizations?$select=isauditenabled").get("value") or []
+        live["org_audit"] = bool(orgs[0].get("isauditenabled")) if orgs else None
+    except Exception as e:
+        live["org_audit"] = None
+        live["errors"].append("organization audit setting: %s" % str(e)[:160])
     names = [t["logical"] for t in tables]
     for i in range(0, len(names), 50):
         chunk = names[i:i + 50]
@@ -493,6 +501,8 @@ def build_doc(a, sol, notes_md, sensitive_rx, live=None, readers=None):
                 doc["gaps"].append("%s: live columns %s%s%s" % (t["logical"], lc["state"],
                                    ("; only live: " + ", ".join(lc.get("only_live") or [])) if lc.get("only_live") else "",
                                    ("; only in repo: " + ", ".join(lc.get("only_repo") or [])) if lc.get("only_repo") else ""))
+        if live and live.get("org_audit") is True and not t["audit"]:
+            doc["gaps"].append("%s: auditing is off for this table, so its changes and deletes leave no record" % t["logical"])
         doc["tables"].append({"logical": t["logical"], "schema": t["schema"], "display": t["display"], "plural": t["plural"],
                               "description": t["description"], "notes": tn["text"], "entity_set": t["entity_set"],
                               "ownership": t["ownership"], "audit": t["audit"], "primary_name": t["primary_name"],
@@ -830,6 +840,15 @@ def evaluate(doc, solution_dir=None, min_coverage=0.8, max_age_days=90, today=No
     else:
         diff = [t["logical"] for t in tables if t.get("live_columns") and t["live_columns"]["state"] != "same"]
         out.append(("FAIL" if diff else "PASS", "drift", ("columns differ live: " + ", ".join(diff)) if diff else "every table matches the live environment"))
+        oa = live.get("org_audit")
+        off = [t["logical"] for t in tables if not t.get("audit")]
+        if oa is False:
+            out.append(("WARN", "audit", "auditing is OFF for the environment: no change or delete in any table leaves a record. "
+                        "Turning it on is the owner's decision (storage, retention)"))
+        elif oa is True and off:
+            out.append(("WARN", "audit", "auditing is off for %d table(s): %s" % (len(off), ", ".join(off[:12]) + (" ..." if len(off) > 12 else ""))))
+        elif oa is True:
+            out.append(("PASS", "audit", "auditing is on for the environment and every table"))
     notes = doc.get("notes") or ""
     about = doc.get("about") or ""
     if not notes.strip():
@@ -1109,6 +1128,15 @@ def selftest():
         t3 = {t["logical"]: t for t in doc3["tables"]}
         check("live drift: a column only live", t3["tst_widget"]["live_columns"]["only_live"] == ["tst_extra"], t3["tst_widget"]["live_columns"])
         check("live row counts", t3["tst_widget"]["rows"] == 12 and t3["tst_gadget"]["live_columns"]["state"] == "same")
+        ft.on("GET", "organizations", lambda *x: {"value": [{"isauditenabled": False}]})
+        live_off = live_read("https://example.crm.dynamics.com", None, sol["tables"], ft)
+        ev = evaluate(build_doc(a, sol, FIX_NOTES, DEFAULT_SENSITIVE, live_off))
+        check("audit: an environment with auditing off is a WARN naming the owner's decision",
+              any(r[0] == "WARN" and r[1] == "audit" and "OFF" in r[2] for r in ev), [r for r in ev if r[1] == "audit"])
+        ft.on("GET", "organizations", lambda *x: {"value": [{"isauditenabled": True}]})
+        doc_on = build_doc(a, sol, FIX_NOTES, DEFAULT_SENSITIVE, live_read("https://example.crm.dynamics.com", None, sol["tables"], ft))
+        unaudited = [t["logical"] for t in doc_on["tables"] if not t["audit"]]
+        check("audit: with it on, each unaudited table is a gap", bool(unaudited) and all(any(g.startswith(u + ": auditing is off") for g in doc_on["gaps"]) for u in unaudited))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print("datadict.py selftest: %d passed, %d failed" % (ok, fails))
