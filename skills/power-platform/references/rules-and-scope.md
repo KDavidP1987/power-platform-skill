@@ -178,6 +178,7 @@ Nothing runs these. Each row's evidence says why no check holds it (usually: a j
 | Schema before screens (6); security roles out of the solution (7) | instruction | SKILL.md 6, 7; `dataverse.md`, `security-and-access.md` | a role-carrying import reset live access once; deciding "this import carries roles" from source is possible but has not been missed in a measured build |
 | Before a bulk write, ask what watches the table (9) | instruction, plus `lint-flows.mjs --require-safe-recipients` | SKILL.md 9 | |
 | Model-driven apps | no hook | `model-driven-and-docs.md` | no measured model-driven build; the build gate stays silent for a solution-only folder |
+| A test of an editable model-driven grid types each value in one step and reads it back (the grid saves every cell on exit, a blank too) | instruction | `model-driven-and-docs.md` 8 | a test step cleared a production cell to NULL. Not mechanical: the keystrokes are in a browser session, not a file |
 
 ### Power Automate
 

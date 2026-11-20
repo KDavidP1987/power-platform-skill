@@ -11,6 +11,21 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.49.1] - 2026-11-20
+
+Model-driven lessons captured while 0.49.0 was being released.
+
+### Added
+
+- `model-driven-and-docs.md` 1: an editable subgrid by script (the Power Apps grid as a control
+  description per form factor, `EnableEditing`, and the default-entry trap that fails with
+  `0x8004f036`); per form, so other apps keep their grids.
+- `model-driven-and-docs.md` 8: app roles are assigned last, after `PublishXml` (before it the
+  association path returns 404); print each `ValidateApp` issue's component (seven came back with no
+  message); an editable grid saves each cell on exit, so a test types each value in one step and
+  reads it back; bulk edit per parent is the parent form with an editable child grid, and a
+  reference app's grids are checked for editability before it is copied.
+
 ## [0.49.0] - 2026-11-20
 
 The skill now keeps its two layers apart: **ways of working** (judgement an agent applies) and **what

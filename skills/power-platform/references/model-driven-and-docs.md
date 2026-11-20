@@ -105,6 +105,29 @@ out interleaved.
 </control>
 ```
 
+**An editable subgrid** (rows edited in the grid itself, measured: an edit in the grid read back from
+Dataverse) keeps that classic control in the cell, given a `uniqueid="{U}"`, and adds a control
+description that swaps in the Power Apps grid on every form factor:
+
+```xml
+<controlDescriptions>
+  <controlDescription forControl="{U}">
+    <customControl formFactor="0" name="Microsoft.PowerApps.PowerAppsOneGrid">
+      <parameters>
+        <data-set name="Items"><!-- the same ViewId, RelationshipName, TargetEntityType --></data-set>
+        <EnableEditing static="true" type="Enum">yes</EnableEditing>
+      </parameters>
+    </customControl>
+    <!-- the same customControl again with formFactor="1" and formFactor="2" -->
+  </controlDescription>
+</controlDescriptions>
+```
+
+Read the control name from the `customcontrols` table. Do **not** also list a
+`<customControl id="{E7A81278-...}">` default entry: the form POST fails with `0x8004f036`
+("dependent component CustomControl ... does not exist"). This is per form, so other apps and the
+table's own list grid are unchanged; switching editing on for the table's grid changes every app.
+
 `RelationshipName` is the one-to-many relationship's schema name. Resolve a public view id from
 `savedqueries?$filter=returnedtypecode eq 'app_requestline' and querytype eq 0`, preferring the row
 with `isdefault` true. When cloning entity XML by hand, regenerate form and view GUIDs - they are
@@ -381,6 +404,11 @@ and ship the admin screen so the business finishes the mapping.
 - **Many teams end up with both**: a canvas app for the people doing the work and a model-driven
   app for the people maintaining it. Section 2 applies then - the model-driven app is a second write
   path that bypasses every canvas gate.
+- **Bulk edit per parent is the parent form with an editable child grid** (section 1). Before
+  copying another app's forms "to edit like that one", check whether its grids are editable: in one
+  measured case the reference app's child grids were read-only subgrids and editing was one record
+  per form, so a literal copy would not have given bulk editing. Until the canvas app's rules move
+  server-side, limit such an app to administrator roles.
 
 ### How this skill's rules apply
 
@@ -404,7 +432,13 @@ None of these change because the app is model-driven:
 
 The order that worked: find or create the app module, find or create its sitemap, `AddAppComponents`
 (the sitemap, each table, its forms and its public views), `ValidateApp`, set the header theme, then
-one `PublishXml` naming the web resource, the app module and the sitemap. Four traps:
+one `PublishXml` naming the web resource, the app module and the sitemap, and **last, the app's
+roles**: `POST appmodules(<id>)/appmoduleroles_association/$ref` with
+`{"@odata.id": "<org>/api/data/v9.2/roles(<role id>)"}`. Before the first publish that path returns
+404 ("Entity 'appmodule' ... Does Not Exist") although `RetrieveUnpublishedMultiple` returns the
+module, so assign roles after `PublishXml`; an app given no roles is left on the administrator roles
+only. Print each `ValidateApp` issue's `ComponentId` and `ComponentType` as well as its message:
+measured, seven warnings came back with a null `Message`. Four traps:
 
 - **A form created after the app module exists is not in the app.** Add it with `AddAppComponents`
   (and publish), or the app keeps opening the auto-generated form.
@@ -472,6 +506,11 @@ Dataverse. What differs:
   org's page, then reload) before checking a form, sitemap or theme change.
 - **Subgrids do not render on an unsaved record.** A related-rows section on a new form is empty
   until the parent is saved; that is the platform, not a defect. Check subgrids on a saved record.
+- **An editable grid saves each cell when focus leaves it**, with no Save: measured, a test's
+  select-all, Backspace, a failed type call and Enter wrote NULL to a production cell (restored by
+  typing the value back). Record the original first; press Enter to edit, type the whole new value in
+  one step (typing replaces the selected text), Enter, then read the row back over the Web API. Never
+  clear a cell as a separate step.
 - **No player iframe.** Unlike a canvas app, list and form controls are in the page itself;
   generative pages and embedded canvas or Power BI content are in frames of their own.
 - **Wait for the form, not the page.** The shell renders before the record loads. Wait for a named
