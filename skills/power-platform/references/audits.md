@@ -445,6 +445,13 @@ Details that made several of these worth running:
 
 Some invariants live in data or in the environment, where no source audit can see them.
 
+- **Know whether a delete can be investigated before someone asks.** With environment auditing off
+  (`organizations?$select=isauditenabled`) or a table's `IsAuditEnabled` false, neither a user's
+  failed deletes nor earlier successful ones leave a record; the cause of "delete does not work" had
+  to be found by reproducing the screen. `datadict.py --env` reports both (a WARN `audit` line, and a
+  gap per unaudited table when the environment has it on). Turning auditing on is the owner's
+  decision (storage and retention): report it at project setup for every table the app deletes from.
+
 - **A back-dated change does not reach snapshots already taken.** A rate changed from a past date
   left 124 approved records carrying the old rate, because approval had copied (snapshotted) the rate
   onto each; 64 needed re-saving. A back-dated change must re-resolve every snapshot from its

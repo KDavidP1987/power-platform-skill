@@ -2,17 +2,34 @@
 
 ## Contents
 
-1. Surfaces
-2. When a rule becomes a hook
-3. The matrix
-4. Known gaps
+1. Two kinds of rule
+2. Surfaces
+3. When a way of working becomes a check
+4. Enforced automatically: hooks, refusals and tools
+5. Ways of working: instructions only
+6. Known gaps
 
-Every rule this skill carries, the surfaces it applies to, and how it is enforced: by a **hook** (runs
-whether or not anyone remembers it), by a **script check** (runs when its tool runs, and refuses), or as
-an **instruction** (in SKILL.md or a reference, which an agent can forget as its context fills). Read
-this before adding or changing a rule.
+## 1. Two kinds of rule
 
-## 1. Surfaces
+Every rule this skill carries is one of two kinds, and this page keeps them apart.
+
+- **Ways of working** are what an agent does and decides: judgement, order of work, how to talk to the
+  person. They live in SKILL.md ("Ways of working") and the references. Nothing runs them, and an agent
+  can forget them as its context fills, so they are kept short and few, and each says why no check
+  could hold it (section 5).
+- **Enforcement** holds whether or not anyone remembers it (section 4). It comes in three strengths: a
+  **block** (a hook denies the tool call or the stop, or a script refuses and writes nothing), a
+  **note** (one line of context, once, that never blocks), and a **tool** (a command that performs the
+  procedure, so nobody hand-rolls it and gets it subtly wrong).
+
+Enforcement costs the person nothing. Every block names the one command or file that satisfies it, and
+the agent runs it; no hook asks the person for labour, and the only things handed to a person are
+decisions and an action the platform itself refuses to the agent (one `!` line, with why).
+
+The default for a new lesson is enforcement: if it can be decided from files, the transcript or an API
+answer, it becomes a check or a tool, not a sentence. Only what needs judgement stays a way of working.
+
+## 2. Surfaces
 
 The hooks decide scope from the folder, never from what the agent says it is building
 (`plugin-gate.mjs` `surfaces()`):
@@ -32,9 +49,9 @@ Outside one, every hook is silent: the plugin changes nothing in unrelated proje
 Every blocking message starts with the surfaces it applies to, for example `[Canvas]`, `[Power Pages]`,
 or `[Power Automate]`. The person can then see at once why the rule fired.
 
-## 2. When a rule becomes a hook
+## 3. When a way of working becomes a check
 
-An instruction is promoted to a hook or a script check only when **all four** hold:
+A way of working is promoted to a block (a hook or a script refusal) only when **all four** hold. A note or a tool needs only the first and the fourth, because it never stops anyone:
 
 1. **Evidence.** A measured build forgot it or skipped it. A rule that every build followed stays an
    instruction.
@@ -48,7 +65,9 @@ An instruction is promoted to a hook or a script check only when **all four** ho
 A hook stays narrow on purpose. One that fires on style gets ignored, and is then not there when it
 matters.
 
-## 3. The matrix
+## 4. Enforced automatically: hooks, refusals and tools
+
+Each row runs without anyone remembering it. `Enforcement` says how strongly: hook (blocks), hook note (one line, never blocks), script check (the tool refuses), or tool.
 
 ### Platform-wide (every Power Platform project)
 
@@ -63,10 +82,9 @@ matters.
 | Shell-call count and elapsed time reported | hook (after shell calls), never blocks | `plugin-gate.mjs --post` | one lead made 472 single calls |
 | Session baseline: git state, pac environment, `docs/STATE.md` | hook (SessionStart) | `preflight.mjs` | standard |
 | A shared table changed: record it in the shared registry | hook (reminder) | `shared-guard.mjs` | only when shared prefixes are configured |
-| The repo is the source of truth (1); assert on the artifact (2); perform the task as the role (3); verify where it lands (4) | instruction, plus script checks where a tool exists (`inspect-artifact.py`, walks with Dataverse confirms) | SKILL.md 1 to 4 | judgement per task; no file test decides them |
-| An audit must not pass vacuously (11) | instruction; every bundled check has a floor and a self-test | SKILL.md 11 | a design rule for checks, not a project state |
 | Feedback about the skill carries technical details and never the person's data; filed only as the person chose (ask, auto, off) | hook (before tools, in **every** folder, not switched off by `pluginGate`), plus script check | `plugin-gate.mjs` rule E denies a raw issue or comment on the skill's repository (`gh`, `gh api`, a GitHub MCP tool); `feedback.mjs` scrubs, applies the mode, the daily limit and the duplicate check | owner requirement; a public issue cannot be taken back once cached or indexed, and the scrub is mechanical. Whether a problem is worth filing stays a judgement |
-| A refusal covers one action, not the task: try every later step, hand back only a refused step | instruction | SKILL.md "How to behave"; `orchestration.md` 5 | a measured agent handed six steps to the owner after one refusal; done by the agent on request, none was refused. Not mechanical: no file or transcript test separates a fair hand-back from this one |
+| A hand-rolled call that a bundled tool does better (flow run history, the `flowruns` table, import jobs) gets the tool named once a session | hook note (after a shell call or a script write), never blocks | `plugin-gate.mjs --post` tool hints | an agent wrote its own Flow API scripts, after an eight-minute stalled `flowruns` query, while `flow-runs.py` did the same walk |
+| The design-overdue note fires only for a design lane of this session (a DESIGN.md under 12 hours old) | hook note, never blocks | `plugin-gate.mjs --post` | the note fired in a reporting repo whose DESIGN.md was a month old |
 
 ### Canvas
 
@@ -82,13 +100,11 @@ matters.
 | Text cut at the top and the bottom in the running app | script check (walk step `clipcheck`) | `canvas-browser.mjs` | measured: 14 cut labels the whole-line count missed |
 | The held Studio tab stays open until after publish; a save stamp older than the click, or unreadable, is UNPROVEN | script check | `canvas-browser.mjs second-tab`, `save` | a push lost after the held tab closed; SAVE LANDED printed for a 12-minute-old stamp |
 | Screen-file ceiling | hook (Stop) | `audit-stop.mjs` | a compile refused at 50 files |
-| No critique floor | none, deliberately | | no canvas build has been measured against a floor yet; record the score, add a floor when the evidence exists |
-| Know which build runs (5); delegation (10) | instruction, plus `check-drift.py`, build-stamp read-back in `ship-canvas.py` | SKILL.md 5, 10 | per screen judgement |
 | A gallery the live app does not have is not shipped from source (Studio 3.26094.x regression) | script check | `check-new-galleries.py` | a new gallery broke a published app and tore Studio down while every package check passed |
 | No modern NumberInput for data entry (`number-input-entry`); a classic TextInput with `Format: =TextFormat.Number` instead | hook note (each write), never blocks | `check-canvas-format.mjs` | Save clicked straight after typing wrote the previous value and reported success |
 | A button's AccessibleLabel contains its caption (WCAG 2.5.3) | hook note (each write), never blocks | `check-canvas-format.mjs` `label-not-in-name` | a walk click by caption landed on the container and reported OK |
-| After every publish, the first screen renders signed-in data | instruction | `canvas-shipping.md` 7 | package checks passed on a build where OnStart stopped part-way |
 | After a schema change, the data-source refresh in Studio is the agent's (remove, confirm the re-add or add it back by logical name, save, publish) | tool, plus instruction | `canvas-browser.mjs refresh-source` (refuses to save when a source is not back); `manifest-caches.md` 6 | the round trip ran unattended in about 3 minutes after an agent had handed it to the owner |
+| A checkbox mirrored in a variable is reset with the variable (`checkbox-mirror-reset`) | hook note (each write), never blocks | `check-canvas-format.mjs` | a delete confirmation stayed ticked while its button stayed disabled; a scan of four live apps found 7 more, one a real latent defect |
 
 ### Power Pages
 
@@ -97,8 +113,6 @@ matters.
 | Design record, critique at 30/40 or more (or "Below 30 accepted: reason"), review covering identity, profile, permission scope, Web API, refusals | hook (Stop) | `plugin-gate.mjs` evaluate | three measured site builds (critique 25 to 30) |
 | Global read with the table's Web API not explicitly off | script check (exit 1) | `audit-pages-permissions.py` `GLOBAL-READ-UNGUARDED` | all three measured sites |
 | Refusals, double writes, nav marker, focus indicator, layout at 390 px | script check | `site-walk.mjs walk` | measured defects in the three builds |
-| Settle identity first; record the decisions | instruction (template) | `assets/templates/pages-decisions.md` | every build recorded its decisions unprompted; identity needs an administrator, which no hook can supply |
-| No HTML prototype required | none, deliberately | | not required by the brief; the site is its own prototype |
 
 ### Dataverse and model-driven
 
@@ -106,12 +120,10 @@ matters.
 |---|---|---|---|
 | Plan before a table deploy | hook (before tools) | `plugin-gate.mjs` rule B | a build never ran the planning step the skill called required |
 | Select before apply (12): plan by default, the apply acts only on what the plan showed | script check, plus hook (before tools) | `deploy-tables.py`, `seed-data.py` (an apply refuses unless a recorded plan of the same inputs lists the same changes); `plugin-gate.mjs` rule D (no inline Web API write, no write script without a plan mode) | applies that failed part-way or wrote wrong rows: a plan and an apply on different code paths (HTTP 400 after 46 creates), labels never requested (322 rows written blank), a reconcile script with no plan mode |
-| Schema before screens (6); security roles out of the solution (7) | instruction | SKILL.md 6, 7; `dataverse.md`, `security-and-access.md` | a role-carrying import reset live access once; deciding "this import carries roles" from source is possible but has not been missed in a measured build |
-| Before a bulk write, ask what watches the table (9) | instruction, plus `lint-flows.mjs --require-safe-recipients` | SKILL.md 9 | |
 | Every lookup's delete behaviour is chosen, and the app's delete dialog says the same; orphans are audited | script check (plan warning), plus instruction | `deploy-tables.py` warns on any lookup with no `"onDelete"`; `dataverse.md` 12; orphan query in `audits.md` 12 | a header-to-lines link left at RemoveLink kept 262 children of 13 deleted parents, still summed by whole-table totals; the delete dialog promised otherwise. The dialog text is a judgement, so no hook |
 | An import's outcome is read from the server, with the flow states after it | script check | `import-watch.py` (importjobs result per component; flows left off, exit 4) | three imports whose client hung or timed out after the server had finished, one at 20+ minutes for a 6.5-minute job |
 | A package that would switch a flow on or off, or carries flow state the repo does not, is not imported | script check | `flow-state-check.py` (exit 4; `--allow` for an intended switch) | an import from a package built on a live export carries live drift; a whole-roster reminder was once switched on in bulk |
-| Model-driven apps | no hook | `model-driven-and-docs.md` | no measured model-driven build; the build gate stays silent for a solution-only folder |
+| Auditing state reported for the environment and each table | script check (WARN) | `datadict.py --env` (`audit` line, a gap per unaudited table) | failed deletes could not be investigated: auditing was off. Turning it on stays the owner's decision |
 
 ### Power Automate
 
@@ -119,7 +131,8 @@ matters.
 |---|---|---|---|
 | No flow ships that could loop (8): lint over every flow, no waiver | hook (before `pac solution import`) and script check | `plugin-gate.mjs` rule C reads `.ship-work/flow-lint.json`; `deploy-flows.py` lints and refuses when the lint cannot run; `--skip-lint` is refused on a live run | 1,203 runs in 45 minutes in one project; before 0.25 a plain import skipped the lint |
 | No message to anyone but the permitted address during a build | script check | `lint-flows.mjs --require-safe-recipients` | standard |
-| Whoever a flow notifies about a row is also granted the row | instruction | `security-and-access.md` 7 | delegates were emailed about rows they could not open |
+| Shares of one record never run at once: no two GrantAccess on one target without a runAfter path, no share of one record in a parallel loop, a duplicate Update run handled (`grantaccess-parallel`, `grantaccess-duplicate-runs`) | script check (lint warning, recorded, never blocks the import) | `lint-flows.mjs` | 57 failed runs in a month across two flows, each a share that landed; the maker got the weekly failure email |
+| A failed run is diagnosed at the action that really failed, a connector error read from its outputs body, many runs grouped by cause | tool | `flow-runs.py why`, `failures` (token reused from the Dataverse sign-in, no prompt) | 25 failed runs whose `flowruns` rows all said only "ActionFailed"; the cause was a 400 body on one action |
 
 ### Power BI and Fabric
 
@@ -128,9 +141,59 @@ matters.
 | Design record, critique and review for a report | hook (Stop) | `plugin-gate.mjs` evaluate | as canvas |
 | No token in a lakehouse or file | hook (Stop) | `plugin-gate.mjs` evaluate (also a Fabric-only folder) | measured |
 | Report figures match Dataverse | script check | `reconcile-report.py` | standard |
-| Medallion shape, refresh without a person | instruction | `reporting.md` | per design |
+| Schedules counted once per schedule id; job times read as UTC | tool | `fabric.py schedules` | a retire script disabled every schedule twice; a quiet-period guard shifted by the UTC offset refused a quiet chain |
 
-## 4. Known gaps
+## 5. Ways of working: instructions only
+
+Nothing runs these. Each row's evidence says why no check holds it (usually: a judgement, or no file or transcript test separates right from wrong). A row with `none, deliberately` records a check that was considered and not built.
+
+### Platform-wide (every Power Platform project)
+
+| Rule | Enforcement | Where | Evidence |
+|---|---|---|---|
+| The repo is the source of truth (1); assert on the artifact (2); perform the task as the role (3); verify where it lands (4) | instruction, plus script checks where a tool exists (`inspect-artifact.py`, walks with Dataverse confirms) | SKILL.md 1 to 4 | judgement per task; no file test decides them |
+| An audit must not pass vacuously (11) | instruction; every bundled check has a floor and a self-test | SKILL.md 11 | a design rule for checks, not a project state |
+| A refusal covers one action, not the task: try every later step, hand back only a refused step | instruction | SKILL.md "How to behave"; `orchestration.md` 5 | a measured agent handed six steps to the owner after one refusal; done by the agent on request, none was refused. Not mechanical: no file or transcript test separates a fair hand-back from this one |
+
+### Canvas
+
+| Rule | Enforcement | Where | Evidence |
+|---|---|---|---|
+| No critique floor | none, deliberately | | no canvas build has been measured against a floor yet; record the score, add a floor when the evidence exists |
+| Know which build runs (5); delegation (10) | instruction, plus `check-drift.py`, build-stamp read-back in `ship-canvas.py` | SKILL.md 5, 10 | per screen judgement |
+| After every publish, the first screen renders signed-in data | instruction | `canvas-shipping.md` 7 | package checks passed on a build where OnStart stopped part-way |
+| A picker over rows people know by a code searches and shows the code | instruction | `canvas-controls-and-patterns.md` 5 | a user typed the ID, saw an empty list and reported "delete does not work". Not mechanical: the code a person uses is not in the schema |
+
+### Power Pages
+
+| Rule | Enforcement | Where | Evidence |
+|---|---|---|---|
+| Settle identity first; record the decisions | instruction (template) | `assets/templates/pages-decisions.md` | every build recorded its decisions unprompted; identity needs an administrator, which no hook can supply |
+| No HTML prototype required | none, deliberately | | not required by the brief; the site is its own prototype |
+
+### Dataverse and model-driven
+
+| Rule | Enforcement | Where | Evidence |
+|---|---|---|---|
+| Schema before screens (6); security roles out of the solution (7) | instruction | SKILL.md 6, 7; `dataverse.md`, `security-and-access.md` | a role-carrying import reset live access once; deciding "this import carries roles" from source is possible but has not been missed in a measured build |
+| Before a bulk write, ask what watches the table (9) | instruction, plus `lint-flows.mjs --require-safe-recipients` | SKILL.md 9 | |
+| Model-driven apps | no hook | `model-driven-and-docs.md` | no measured model-driven build; the build gate stays silent for a solution-only folder |
+
+### Power Automate
+
+| Rule | Enforcement | Where | Evidence |
+|---|---|---|---|
+| Whoever a flow notifies about a row is also granted the row | instruction | `security-and-access.md` 7 | delegates were emailed about rows they could not open |
+| Prove a failed run's outcome from the data before fixing it | instruction | `power-automate.md` 14 | 25 "failures" whose shares all existed. A judgement: which row proves the outcome depends on the flow |
+
+### Power BI and Fabric
+
+| Rule | Enforcement | Where | Evidence |
+|---|---|---|---|
+| Medallion shape, refresh without a person | instruction | `reporting.md` | per design |
+| Retire items by the measured procedure: back up definitions, scan for readers, guards in the script, move the live consumer with a fingerprint, delete in order | instruction (procedure), plus `fabric.py teardown-plan` and `schedules` | `fabric-workspace-audit.md` 7 | 84 items retired, consumer unchanged on 1,997 of 1,997 rows. A `retire` command is on the ROADMAP |
+
+## 6. Known gaps
 
 - A project with the harness but **without the plugin** gets the Stop rules (the harness's
   `audit-stop.mjs` calls the same `evaluate`) but not rules A to C, which run only from the plugin's

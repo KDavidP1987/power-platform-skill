@@ -16,6 +16,8 @@
     $token = Get-DvToken
 
   Force a fresh sign-in: add -Reset. Prove it works: -WhoAmI prints your user id.
+  Another audience from the same sign-in, with no second prompt: -Resource https://service.flow.microsoft.com
+  (flow-runs.py uses this when the org's cache exists). The cache stays the org's.
   The device-code prompt cannot be answered inside an agent's shell: the person runs the first call
   in this session with the ! prefix, or in their own terminal, once.
 #>
@@ -27,7 +29,8 @@ param(
   [string]$CachePath,    # default ~/.dv-token-<org>.json; point at an existing cache to keep its sign-in
   [switch]$Reset,
   [switch]$NoPrint,
-  [switch]$WhoAmI
+  [switch]$WhoAmI,
+  [string]$Resource      # another audience for the same sign-in, e.g. https://service.flow.microsoft.com
 )
 if (-not $OrgUrl) { throw "Pass -OrgUrl https://<org>.crm.dynamics.com (or set DV_ORG_URL)." }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -38,6 +41,7 @@ $script:DvScope = "$OrgUrl/.default offline_access"
 $script:DvTokenUri = "https://login.microsoftonline.com/$Tenant/oauth2/v2.0/token"
 $script:DvDeviceUri = "https://login.microsoftonline.com/$Tenant/oauth2/v2.0/devicecode"
 $script:DvClientId = $ClientId
+$script:DvRefreshScope = if ($Resource) { $Resource.TrimEnd('/') + "/.default offline_access" } else { $script:DvScope }
 
 function Save-DvCache([string]$RefreshToken) {
   @{ refresh_token = $RefreshToken; saved = (Get-Date).ToString("o") } | ConvertTo-Json |
@@ -75,13 +79,19 @@ function Get-DvToken {
     try {
       $c = Get-Content $script:DvCache -Raw | ConvertFrom-Json
       $t = Invoke-RestMethod -Method Post -Uri $script:DvTokenUri -ContentType "application/x-www-form-urlencoded" `
-        -Body @{ grant_type = "refresh_token"; client_id = $script:DvClientId; scope = $script:DvScope
+        -Body @{ grant_type = "refresh_token"; client_id = $script:DvClientId; scope = $script:DvRefreshScope
                  refresh_token = $c.refresh_token }
       if ($t.refresh_token) { Save-DvCache $t.refresh_token }   # rotate: the old one may stop working
       return $t.access_token
     } catch { [Console]::Error.WriteLine("(cached sign-in no longer valid; signing in again)") }
   }
-  Invoke-DvDeviceCode
+  $first = Invoke-DvDeviceCode
+  if (-not $Resource) { return $first }
+  $c = Get-Content $script:DvCache -Raw | ConvertFrom-Json      # the sign-in saved it: exchange it for -Resource
+  $t = Invoke-RestMethod -Method Post -Uri $script:DvTokenUri -ContentType "application/x-www-form-urlencoded" `
+    -Body @{ grant_type = "refresh_token"; client_id = $script:DvClientId; scope = $script:DvRefreshScope; refresh_token = $c.refresh_token }
+  if ($t.refresh_token) { Save-DvCache $t.refresh_token }
+  return $t.access_token
 }
 
 if ($Reset -and (Test-Path $script:DvCache)) { Remove-Item $script:DvCache -Force }

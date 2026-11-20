@@ -125,6 +125,20 @@ and median duration. Look for:
 - **Items failing every run while still scheduled**, and schedules disabled by the service after failures.
 - **One identity behind everything** (every Gen1 `configuredBy` and every connection the same person).
 
+**Read schedules and last runs with `fabric.py schedules`** (read-only; `--folder`, `--type`). It
+handles two measured traps: a Dataflow Gen2 lists the **same schedule (same id) under both the
+`Execute` and `Refresh` job types**, so a script that unions job types counts and disables every
+schedule twice; and `jobs/instances` returns `startTimeUtc` **without a `Z`**, so a parser that assumes
+local time moves it by the UTC offset (a quiet-period guard refused a chain that had been quiet).
+Parse every Fabric time as UTC explicitly, and make a time-based guard print the instant it compared.
+
+**Gen1 (Power BI) dataflows are not Fabric items.** `GET /workspaces/{id}/items` omitted 13 Gen1 and 3
+older Gen2 dataflows; read Gen1 through the Power BI dataflows API. Their schedule has no GET: read
+"is it on" from Scheduled entries in `/dataflows/{id}/transactions`. Switching one off by
+`PATCH .../refreshSchedule` returned 400 for two dataflows that notify named contacts (cause not
+isolated); the portal switch worked (Settings > Refresh, the switch's label, Apply) and read back off
+after a reload. Windows PowerShell 5.1 hides the error body of a 400: read it with `HttpClient`.
+
 ## 7. Classify, then retire in stages
 
 | Class | Meaning | Action |
@@ -136,6 +150,32 @@ and median duration. Look for:
 Retire in stages, each a planned apply: schedule off, watch a week (usage, no failing reader), move to a
 retiring folder, delete after a month. Delete in the dependency order in `reporting.md` section 4
 (teardown): reports and models first, dataflows before their lakehouses.
+
+**The retirement procedure that held, measured on 84 items in a shared workspace**, each step a script
+with a plan by default and an apply switch:
+
+1. **Back up every definition** from the audit snapshot first - for a Gen1 dataflow its `model.json`
+   and its section document split into one `.pq` per query, so a single query can be recreated.
+2. **Scan every definition in the workspace for each retiring item's id** (the readers check); a hit
+   stops that item.
+3. **Guards in the script, not in the operator's head**: protected name patterns and folders, "still
+   read by the deployed consumer", and a quiet check from the job history (no run of the item since
+   its schedule stopped: `fabric.py schedules` gives both, in UTC).
+4. **Move the one live consumer first**, proved unchanged: a column-for-column EXCEPT of the old and
+   new source as the consumer reads them, and a per-row hash fingerprint of its output that excludes
+   sensitive columns (identical on 1,997 of 1,997 rows).
+5. **Delete in order** (`fabric.py teardown-plan`): reports, dataflows, models, warehouses,
+   lakehouses, then folders deepest first.
+
+**Reorganise a workspace from a layout manifest, not by hand.** Measured on 57 actions: relocate
+existing folders (`POST /folders/{id}/move` and a rename by `PATCH`) rather than recreate them, so
+folder and item ids survive and every script that finds a folder by id keeps working; plan on a
+virtual copy of the folder tree so later entries see earlier moves; re-read the live tree before each
+action; report a refused item move and carry on; list, never move, the items the layout does not
+name. Items the API cannot see (Gen1 dataflows, above) need a portal pass: list view, hover the row,
+tick its checkbox, toolbar Move, single-click the folder names, "Move here". A `retire` and an
+`organize` command for `fabric.py` are on the ROADMAP; until then, write the procedure as the
+project's own plan-first script.
 
 ## 8. What an audit of a grown workspace typically finds
 

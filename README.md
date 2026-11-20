@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.48.0](https://img.shields.io/badge/plugin-0.48.0-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.49.0](https://img.shields.io/badge/plugin-0.49.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.48.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.49.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -81,6 +81,8 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 | 28 | Power BI: report specification and accessibility review from PBIR: pages, visuals, the measures and columns each visual uses, filters, bookmarks, row-level security, contrast and alt text | Reports are reviewed by screenshot today; a specification makes them reviewable, and it completes lineage from a source column to the visual | Open |
 | 29 | Fabric ETL: a data contract per gold table: grain, keys, columns and types, nullability, freshness target, owners and consumers, checked on each refresh | Consumers depend on gold tables without a written promise; a contract turns silent breaking changes into a failed check | Open |
 | 30 | Fabric ETL: data quality and reconciliation report: row counts and totals per layer against the source, rule results (keys unique, no orphan joins, required values), trend over runs | The verification scripts in each project already compute this; publishing it is the evidence a reviewer and a finance owner ask for | Open |
+| 31 | Fabric workspace commands `fabric.py retire` (backup every definition, readers scan, quiet-since from the job history, ordered deletes, plan then apply) and `fabric.py organize` (a layout manifest: relocate folders by id, virtual-tree plan, a portal list for the items the API cannot see) | Both procedures were proved in one project as its own scripts (84 items retired, 57 moves applied); every workspace clean-up needs them, and a script written fresh each time repeats the measured traps (duplicate schedules, local-time job stamps, Gen1 items the API cannot list) | Open: `fabric.py schedules` (0.49) is the read-only half |
+| 32 | `capture-gaps`: a site's SharePoint lists joined to the bronze manifest and the Dataverse tables, giving the three tiers (duplicates a table, belongs to an unapproved app, captured by nothing) and a list register stub | The question after every medallion's first stage; done by hand once, from list counts and two inventories | Open: the method is in `fabric-rebuild-and-parity.md` 2 (0.49) |
 <!-- backlog:end -->
 
 ## Not yet fully tested

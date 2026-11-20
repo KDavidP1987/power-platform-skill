@@ -1255,6 +1255,59 @@ export function controlTrapFindings(all, cmap = new Map()) {
         `Give each role its own value (canvas-layout.md, section 10, "Restyling").`);
     }
   }
+  out.push(...checkboxMirrorFindings(all));
+  return out;
+}
+
+// checkbox-mirror-reset (warn): a checkbox or toggle copies its state into a variable (OnCheck, OnUncheck,
+// OnChange), and another formula sets that variable without Reset() of the box. The box then shows one
+// state and the variable another: measured, a box stayed ticked after a successful action while the button
+// it gated stayed disabled. Gate on the control's own .Value, or Reset(<box>) wherever the variable is reset.
+const CHECK_CONTROL = /^(Checkbox|CheckBox|ModernCheckbox|Classic\/CheckBox|Classic\/Checkbox|Toggle|ModernToggle|Classic\/Toggle)(@|$)/i;
+function assignedVars(src) {
+  const names = new Set();
+  for (const m of String(src).matchAll(/\bSet\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,/g)) names.add(m[1]);
+  for (const m of String(src).matchAll(/\bUpdateContext\(\s*\{([^}]*)\}/g)) {
+    for (const k of m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*:/g)) names.add(k[1]);
+  }
+  return names;
+}
+// A mirror is a variable set in both OnCheck and OnUncheck, or in an OnChange that reads the box's value.
+// Not a mirror when the box's own Default/Value/Checked reads the variable (the box then follows it).
+// A context variable (UpdateContext) belongs to one screen, so only that screen's formulas count.
+export function checkboxMirrorFindings(all) {
+  const out = [];
+  const boxes = all.filter((c) => CHECK_CONTROL.test(c.control || ''));
+  const screenOf = (c) => (c.control === 'Screen' && !c.parent ? c.name : c.screen?.name);
+  for (const box of boxes) {
+    const pv = (k) => String(box.props[k]?.v ?? '');
+    const on = assignedVars(pv('OnCheck'));
+    const off = assignedVars(pv('OnUncheck'));
+    const mirrored = new Set([...on].filter((v) => off.has(v)));
+    if (/\b(Self|ThisItem|[A-Za-z_][A-Za-z0-9_]*)\.(Value|Checked)\b/.test(pv('OnChange'))) for (const v of assignedVars(pv('OnChange'))) mirrored.add(v);
+    const follows = ['Default', 'Value', 'Checked', 'DefaultValue'].map(pv).join(' ');
+    for (const v of [...mirrored]) if (new RegExp(`\\b${v}\\b`).test(follows)) mirrored.delete(v);
+    if (!mirrored.size) continue;
+    const ctxVars = new Set(['OnCheck', 'OnUncheck', 'OnChange'].flatMap((k) => [...String(pv(k)).matchAll(/\bUpdateContext\(\s*\{([^}]*)\}/g)]
+      .flatMap((m) => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*:/g)].map((x) => x[1]))));
+    const resetRx = new RegExp(`\\bReset\\(\\s*'?${box.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'?\\s*\\)`);
+    const seen = new Set();
+    for (const c of all) {
+      if (c === box) continue;
+      const sameScreen = screenOf(c) === screenOf(box);
+      for (const [k, v] of Object.entries(c.props || {})) {
+        const src = String(v?.v ?? '');
+        if (!/^On/.test(k) || resetRx.test(src)) continue;
+        for (const name of assignedVars(src)) {
+          if (!mirrored.has(name) || seen.has(name + c.name + k) || (ctxVars.has(name) && !sameScreen)) continue;
+          seen.add(name + c.name + k);
+          out.push({ level: 'warn', code: 'checkbox-mirror-reset', file: c.file, line: v?.line || c.line, control: c.name,
+            msg: `${c.name}.${k} sets ${name}, which ${box.name} keeps in step with its tick, but does not Reset(${box.name}): the box can show ticked ` +
+              `while ${name} says unticked. Read ${box.name}.Value where ${name} is read, or add Reset(${box.name}) here (canvas-controls-and-patterns.md, "Checkbox state").` });
+        }
+      }
+    }
+  }
   return out;
 }
 // ---------- end control traps ----------
@@ -1629,7 +1682,18 @@ function selftest() {
     const got = [...new Set(r.findings.filter((f) => TRAP_CODES.has(f.code)).map((f) => f.code))].sort();
     if (JSON.stringify(got) !== JSON.stringify([...want].sort())) fails.push(`trap ${name}: expected [${want.join(', ')}], got [${got.join(', ')}]`);
   };
-  const TRAP_CODES = new Set(['textmode-on-modern-input', 'dropdown-forall-items', 'row-click-lost', 'number-input-entry', 'same-colour-branches']);
+  const TRAP_CODES = new Set(['textmode-on-modern-input', 'dropdown-forall-items', 'row-click-lost', 'number-input-entry', 'same-colour-branches', 'checkbox-mirror-reset']);
+  {
+    const ack = { ...box, Text: '="I understand"', AccessibleLabel: '="I understand"', OnCheck: '=UpdateContext({locAck: true})', OnUncheck: '=UpdateContext({locAck: false})' };
+    const btn = (onSelect) => ({ ...box, Text: '="Delete"', AccessibleLabel: '="Delete"', DisplayMode: '=If(locAck, DisplayMode.Edit, DisplayMode.Disabled)', OnSelect: onSelect });
+    trap('checkbox mirrored, reset without the box', [['chkAck', 'Checkbox', ack], ['btnDel', 'Button', btn('=Remove(Orders, gal.Selected); UpdateContext({locAck: false})')]], ['checkbox-mirror-reset']);
+    trap('checkbox mirrored, reset with the box', [['chkAck', 'Checkbox', ack], ['btnDel', 'Button', btn('=Remove(Orders, gal.Selected); UpdateContext({locAck: false}); Reset(chkAck)')]], []);
+    trap('checkbox read by its own value', [['chkAck', 'Checkbox', { ...box, Text: '="I understand"', AccessibleLabel: '="I understand"' }], ['btnDel', 'Button', { ...btn('=Remove(Orders, gal.Selected); Reset(chkAck)'), DisplayMode: '=If(chkAck.Value, DisplayMode.Edit, DisplayMode.Disabled)' }]], []);
+    const onVisible = (fx) => analyse([{ path: 'App.pa.yaml', text: trapApp }, { path: 't.pa.yaml', text: free([['chkAck', 'Checkbox', ack]], { OnVisible: fx }) }])
+      .findings.some((f) => f.code === 'checkbox-mirror-reset' && f.control === 'scrA');
+    if (!onVisible('=UpdateContext({locAck: false})') || onVisible('=UpdateContext({locAck: false}); Reset(chkAck)'))
+      fails.push('trap checkbox-mirror-reset: red on a screen OnVisible that resets only the variable, green with Reset(chkAck)');
+  }
   trap('modern TextInput with TextMode', [['txtStory', 'TextInput', { ...box, Mode: '=TextMode.MultiLine' }]], ['textmode-on-modern-input']);
   trap('modern TextInput with its own enum', [['txtStory', 'TextInput', { ...box, Mode: "='TextInputCanvas.Mode'.Multiline" }]], []);
   trap('classic TextInput with TextMode', [['txtStory', 'Classic/TextInput', { ...box, Mode: '=TextMode.MultiLine' }]], []);

@@ -511,6 +511,17 @@ privileges are part of the system's security, and their account is part of its a
   switching channels off cannot also remove access, and verify with
   `RetrieveSharedPrincipalsAndAccess` and impersonation rather than by reading the flow. The role
   design and the costs are in `security-and-access.md`.
+- **Serialise every share of one record.** `GrantAccess` is idempotent but not concurrency-safe: two
+  shares of the same record at the same moment fail one with `0x80048105` ("More than one concurrent
+  Share requests detected for an Entity"). Measured causes, 57 failed runs in one month across two
+  flows: two branches sharing the same record with no `runAfter` between them; a loop sharing one
+  record with several people at default concurrency; and two runs of an Update-triggered flow for one
+  row, both past the guard before the flow's own lock write landed. The share existed afterwards
+  every time (mask 23), but each run counts as Failed and the maker gets the weekly failure email.
+  Chain the shares with `runAfter`, set such a loop's concurrency to 1, and for duplicate runs either
+  set the trigger's concurrency to 1 or, after the share on Failed, confirm the share exists and end
+  the run as Succeeded. `lint-flows.mjs` warns on each shape (`grantaccess-parallel`,
+  `grantaccess-duplicate-runs`).
 
 ## 10. Notifications: hidden failures and safety switches
 
@@ -768,9 +779,20 @@ option values in the flows' FetchXML with the app's enums.
 
 ```
 GET /api/data/v9.2/flowruns?$select=name,starttime,status,duration,errorcode,errormessage,_workflow_value
-    &$orderby=starttime desc
+    &$filter=_workflow_value eq <workflowid> and starttime ge 2026-01-01T00:00:00Z
 Prefer: odata.include-annotations="*",odata.maxpagesize=5000
 ```
+
+- **Always `$select` and a `starttime ge` filter; never `$orderby`.** `flowrun` is an elastic table:
+  an unfiltered query with `$orderby=starttime desc` ran for over eight minutes with no output
+  (measured), while the filtered form above answered at once. Sort the rows yourself.
+- **It is right for counts, wrong for causes.** Its `errormessage` is the generic container text on
+  every failed run (25 of 25 measured); the cause is only in the flow API (section 18). Use it to
+  count, and to see what else ran around a failure across all flows (a successful twin beside every
+  failure showed two runs per row).
+- **Prove the outcome from the data, not the run status.** A run can fail after its effect landed:
+  25 "failed" share runs whose shares all existed afterwards (`principalobjectaccessset`) were noise,
+  not lost access. Read the row, share or message the run was for before fixing anything.
 
 - **Read `duration`, not only `status`.** A guarded flow that decides to do nothing and one that
   does the full send both report Succeeded; they are ~200 ms and ~4,700 ms (another project: 552 ms
@@ -952,11 +974,18 @@ both (marked **measured**); what was not exercised is marked **documented**.
 python scripts/flow-runs.py why "<flow name or id>"          # the latest failed run
 python scripts/flow-runs.py why <flow> <run>                  # a given run
 python scripts/flow-runs.py runs <flow> --status Failed      # failed runs, filtered on the server
+python scripts/flow-runs.py failures <flow> --since 2026-01-01   # every failed run, grouped by cause
 ```
 
-It reads only, takes a token for `https://service.flow.microsoft.com/` (Azure CLI, Az PowerShell or
-`--token-cmd`), and exits 1 when it explained a failure. On the measured run it took 11 seconds and
-about eight calls.
+It reads only, takes a token for `https://service.flow.microsoft.com/` and exits 1 when it explained
+a failure. On the measured run it took 11 seconds and about eight calls. `failures` grouped 57 failed
+runs of two flows into three causes, each with its count, first and last time and one example, in one
+command. **Token without a second sign-in:** the Dataverse sign-in's cached refresh token (the bundled
+`dv-token.ps1`) also issues a Flow token - set `"flowTokenCommand"` in `scripts/canvas-app.json` to
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dv-token.ps1 -OrgUrl <org> -Resource {resource}`
+(measured: silent; the same works for `https://api.fabric.microsoft.com`). Without that, Azure CLI,
+Az PowerShell or `--token-cmd`. The plugin names this tool once a session when a command or a script
+reads the Flow API's runs or the `flowruns` table by hand.
 
 **1. Which run.** `runs?$filter=status eq 'Failed'&$top=1` filters on the server and returns the
 newest first (measured). Judge the run against the definition that was live when it started (section
@@ -978,6 +1007,11 @@ loop and item index at every level, for example `For_each_order[0] > Send_each_l
 recorded, its own inputs and outputs links. Ask for the repetitions of the action **inside** the loop:
 the loop container itself returned none (measured). The measured cause was found only this way: an
 `InvalidTemplate` from `substring` with a start index past the end of the string, two loops deep.
+A **connector action that failed on its own call** is the other shape: status `Failed`, a code such
+as `BadRequest`, and **no error object at all**; the error is only in its outputs body
+(`body.error.code` and `message`). Measured on Dataverse `GrantAccess`: `0x80048105`, "More than one
+concurrent Share requests detected for an Entity" (section 9 has the cause). Read the outputs link of
+any failed action whose code is not `ActionFailed`.
 
 **4. Read the status words precisely.**
 

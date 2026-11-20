@@ -749,6 +749,81 @@ function checkApprovals(flow, add, safeRecipients) {
   });
 }
 
+// GrantAccess is idempotent but not concurrency-safe: two shares of one record at the same moment fail
+// one of them with 0x80048105 ("More than one concurrent Share requests detected for an Entity"). Measured
+// twice: two branches of one run sharing the same record with no runAfter between them, and a share in an
+// unthrottled loop. The run then counts as Failed (the share itself landed) and the maker gets the weekly
+// failure email. A third shape, two runs of an Update-triggered flow for one row, is a warning only where
+// nothing handles the share's failure and the trigger is not limited to one run at a time.
+function grantTarget(a) {
+  const p = (a.inputs && a.inputs.parameters) || {};
+  const op = (a.inputs && a.inputs.host && a.inputs.host.operationId) || '';
+  if (p.actionName !== 'GrantAccess' && !/GrantAccess/i.test(op)) return null;
+  const t = p['item/Target'] !== undefined ? JSON.stringify(p['item/Target']) : `${p.entityName || ''}|${p.recordId || ''}`;
+  return t.replace(/\s+/g, '');
+}
+function grantPaths(scope, prefix = [], scopeKey = 'root', out = []) {
+  for (const [n, a] of Object.entries(scope || {})) {
+    const here = [...prefix, { scopeKey, name: n, act: a, scope }];
+    const target = grantTarget(a);
+    if (target !== null) out.push({ name: n, act: a, target, path: here });
+    const subs = [];
+    if (a.actions) subs.push(['actions', a.actions]);
+    if (a.else && a.else.actions) subs.push(['else', a.else.actions]);
+    if (a.cases) for (const [c, v] of Object.entries(a.cases)) if (v.actions) subs.push(['case:' + c, v.actions]);
+    if (a.default && a.default.actions) subs.push(['default', a.default.actions]);
+    for (const [k, s] of subs) grantPaths(s, here, n + '/' + k, out);
+  }
+  return out;
+}
+function runsBefore(scope, from, to) {   // does `to` wait (transitively) for `from` in this scope?
+  const seen = new Set();
+  const stack = [to];
+  while (stack.length) {
+    const x = stack.pop();
+    if (seen.has(x)) continue;
+    seen.add(x);
+    for (const dep of Object.keys((scope[x] && scope[x].runAfter) || {})) { if (dep === from) return true; stack.push(dep); }
+  }
+  return false;
+}
+function checkGrantConcurrency(flow, t, add) {
+  const grants = grantPaths(flow.def.actions);
+  if (!grants.length) return;
+  for (const g of grants) {
+    if (/\bitems?\(/.test(g.target)) continue;                       // each iteration shares a different record
+    const loop = g.path.slice(0, -1).find((p) => p.act.type === 'Foreach' &&
+      !(p.act.runtimeConfiguration && p.act.runtimeConfiguration.concurrency && p.act.runtimeConfiguration.concurrency.repetitions === 1));
+    if (loop) add('warn', 'grantaccess-parallel', `'${g.name}' shares the same record on every iteration of '${loop.name}', which runs its ` +
+      `iterations in parallel: two shares of one record at once fail with 0x80048105 (concurrent Share requests). Set the loop's ` +
+      `concurrency to 1 (runtimeConfiguration.concurrency.repetitions = 1).`);
+  }
+  for (let i = 0; i < grants.length; i++) for (let j = i + 1; j < grants.length; j++) {
+    const a = grants[i], b = grants[j];
+    if (a.target !== b.target) continue;
+    let k = 0;
+    while (k < a.path.length && k < b.path.length && a.path[k].scopeKey === b.path[k].scopeKey && a.path[k].name === b.path[k].name) k++;
+    if (k >= a.path.length || k >= b.path.length || a.path[k].scopeKey !== b.path[k].scopeKey) continue;   // other branch: never both
+    const scope = a.path[k].scope, x = a.path[k].name, y = b.path[k].name;
+    if (runsBefore(scope, x, y) || runsBefore(scope, y, x)) continue;
+    add('warn', 'grantaccess-parallel', `'${a.name}' and '${b.name}' share the same record and can run at the same time ('${x}' and '${y}' ` +
+      `have no runAfter path between them): when both fire, one fails with 0x80048105 (concurrent Share requests) and the run is Failed ` +
+      `although the share landed. Chain them with runAfter.`);
+  }
+  const msg = Number(t.message);
+  const onUpdate = t.isDataverse && [3, 4, 6, 7].includes(msg);
+  const oneRun = t.trig && t.trig.runtimeConfiguration && t.trig.runtimeConfiguration.concurrency && t.trig.runtimeConfiguration.concurrency.runs === 1;
+  if (!onUpdate || oneRun) return;
+  const handled = new Set();
+  walk(flow.def.actions, (n, a) => { for (const [dep, st] of Object.entries(a.runAfter || {})) if ((st || []).some((s) => /^Failed$/i.test(s))) handled.add(dep); });
+  for (const g of grants) {
+    if (g.path.some((p) => handled.has(p.name))) continue;
+    add('warn', 'grantaccess-duplicate-runs', `'${g.name}' runs in a flow triggered on ${MESSAGE[msg] || 'Update'} with no limit on concurrent runs and ` +
+      `nothing after it on Failed: two runs for one row (two quick saves) share it at once and one fails with 0x80048105. Handle it: ` +
+      `after the share on Failed, check the share exists and end the run as Succeeded, or set the trigger's concurrency to 1.`);
+  }
+}
+
 // Activation refuses a Recurrence whose startTime is more than 49 years ahead (measured:
 // InvalidWorkflowTriggerRecurrence). A far-future start is the usual way to make a scheduled flow
 // run only on demand, so the date that looks safest is the one that fails.
@@ -977,6 +1052,7 @@ export function lint(flows, { entitySets = null, dateOnly = null, safeRecipients
     checkSelfWrite(flow, t, add);
     if (safeRecipients) checkSafeRecipients(flow, add);
     checkApprovals(flow, add, safeRecipients);
+    checkGrantConcurrency(flow, t, add);
     checkRecurrence(flow, add);
     checkApostrophes(flow, add);
     checkExpressionBalance(flow, add);
@@ -1003,7 +1079,7 @@ function fixture(bad) {
     file: bad ? 'bad.json' : 'good.json', name: bad ? 'bad' : 'good', refs: cr,
     def: {
       triggers: {
-        When_a_request_is_updated: { type: 'OpenApiConnectionWebhook', inputs: { host: host('SubscribeWebhookTrigger'),
+        When_a_request_is_updated: { type: 'OpenApiConnectionWebhook', ...(bad ? {} : { runtimeConfiguration: { concurrency: { runs: 1 } } }), inputs: { host: host('SubscribeWebhookTrigger'),
           parameters: { 'subscriptionRequest/message': bad ? 2 : 3, 'subscriptionRequest/entityname': 'app_request', 'subscriptionRequest/scope': 4,
             ...(bad ? {} : { 'subscriptionRequest/filteringattributes': 'app_status' }) } } },
         ...(bad ? { Every_morning: { type: 'Recurrence', recurrence: { frequency: 'Day', interval: 1 } } } : {}),
@@ -1161,6 +1237,36 @@ const APPROVAL_CASES = [
   ['approval: requestor set directly', approvalFlow({ requestor: 'someone@example.invalid' }), true, 'unsafe-recipient'],
 ];
 
+// GrantAccess shapes: one record shared from two branches, from a loop, and from an Update-triggered run.
+function grantFlow({ parallel = false, loop = null, perItem = false, message = 1, handled = false, oneRun = false } = {}) {
+  const host = { connectionName: 'shared_commondataserviceforapps', operationId: 'PerformUnboundAction' };
+  const grant = (who) => ({ type: 'OpenApiConnection', runAfter: {}, inputs: { host, parameters: { actionName: 'GrantAccess',
+    'item/Target': { '@@odata.type': 'Microsoft.Dynamics.CRM.app_request', app_requestid: perItem ? "@items('Each')?['id']" : "@triggerOutputs()?['body/app_requestid']" },
+    'item/PrincipalAccess': { Principal: { '@@odata.type': 'Microsoft.Dynamics.CRM.systemuser', systemuserid: who }, AccessMask: 'ReadAccess' } } } });
+  const actions = {
+    Share_with_approver: { type: 'If', runAfter: {}, expression: { equals: [1, 1] }, actions: { Grant_approver: grant("@triggerOutputs()?['body/_app_approver_value']") } },
+    Share_with_owner: { type: 'If', runAfter: parallel ? {} : { Share_with_approver: ['Succeeded'] }, expression: { equals: [1, 1] },
+      actions: { Grant_owner: grant("@triggerOutputs()?['body/_ownerid_value']") }, else: { actions: { Grant_owner_too: grant("@triggerOutputs()?['body/_app_lead_value']") } } },
+  };
+  if (loop) actions.Each = { type: 'Foreach', foreach: "@body('People')", runAfter: { Share_with_owner: ['Succeeded'] }, actions: { Grant_each: grant("@items('Each')?['id']") },
+    ...(loop === 'serial' ? { runtimeConfiguration: { concurrency: { repetitions: 1 } } } : {}) };
+  if (handled) actions.Check_the_share = { type: 'Compose', runAfter: { Share_with_approver: ['Failed'], Share_with_owner: ['Failed'] }, inputs: 'read principalobjectaccess' };
+  const trig = { type: 'OpenApiConnectionWebhook', inputs: { host: { operationId: 'SubscribeWebhookTrigger' }, parameters: { 'subscriptionRequest/message': message,
+    'subscriptionRequest/entityname': 'app_request', 'subscriptionRequest/scope': 4, 'subscriptionRequest/filteringattributes': 'app_status' } } };
+  if (oneRun) trig.runtimeConfiguration = { concurrency: { runs: 1 } };
+  return { file: 'g.json', name: 'g', refs: {}, def: { triggers: { When_a_request_changes: trig }, actions } };
+}
+const GRANT_CASES = [
+  ['grant: two shares in sequence, Create trigger', grantFlow(), []],
+  ['grant: two branches with no runAfter between them', grantFlow({ parallel: true }), ['grantaccess-parallel']],
+  ['grant: same record in a parallel loop', grantFlow({ loop: 'parallel' }), ['grantaccess-parallel']],
+  ['grant: same record in a loop of one at a time', grantFlow({ loop: 'serial' }), []],
+  ['grant: a different record per iteration', grantFlow({ loop: 'parallel', perItem: true }), []],
+  ['grant: Update trigger, failure not handled', grantFlow({ message: 3 }), ['grantaccess-duplicate-runs']],
+  ['grant: Update trigger, failure handled', grantFlow({ message: 3, handled: true }), []],
+  ['grant: Update trigger, one run at a time', grantFlow({ message: 3, oneRun: true }), []],
+];
+
 function selftest() {
   const dateOnly = new Set(['app_approvedon']);
   const bad = lint([fixture(true)], { dateOnly }).results[0].items.filter((i) => i.level !== 'info').map((i) => i.code);
@@ -1181,6 +1287,10 @@ function selftest() {
     const codes = lint([flow], { safeRecipients: safe }).results[0].items.filter((i) => /^(approval-|unsafe-)/.test(i.code)).map((i) => i.code);
     const okCase = expect === null ? codes.length === 0 : codes.length === 1 && codes[0] === expect;
     if (!okCase) graphFails.push(`${name}: expected ${expect || 'none'}, got ${codes.join(', ') || 'none'}`);
+  }
+  for (const [name, flow, expect] of GRANT_CASES) {
+    const codes = [...new Set(lint([flow]).results[0].items.filter((i) => /^grantaccess-/.test(i.code)).map((i) => i.code))].sort();
+    if (JSON.stringify(codes) !== JSON.stringify([...expect].sort())) graphFails.push(`${name}: expected [${expect.join(', ')}], got [${codes.join(', ')}]`);
   }
   {
     const now = new Date('2026-11-10T00:00:00Z');
@@ -1233,7 +1343,7 @@ function selftest() {
   const ok = missing.length === 0 && good.length === 0 && guardFails.length === 0 && parsed.length === 0 && graphFails.length === 0;
   console.log(ok ? `selftest ok: bad fixture -> ${bad.length} findings (${[...new Set(bad)].join(', ')}), good fixture -> 0, ` +
                    `${GUARD_CASES.length} guard shapes and 2 filteringattributes cases decided as expected, ${GRAPH_CASES.length} loop-graph ` +
-                   `shapes, ${RECIPIENT_CASES.length} recipient shapes, ${APPROVAL_CASES.length} approval shapes and the unfiltered-trigger rule as expected, parser cases ok, run record ok`
+                   `shapes, ${RECIPIENT_CASES.length} recipient shapes, ${APPROVAL_CASES.length} approval shapes, ${GRANT_CASES.length} share shapes and the unfiltered-trigger rule as expected, parser cases ok, run record ok`
                  : `selftest FAILED: missing [${missing.join(', ')}]; good fixture produced: ${good.map((g) => g.code + ': ' + g.msg).join(' | ')}; ` +
                    `guard shapes: [${guardFails.join(' | ')}]; loop graph / recipients: [${graphFails.join(' | ')}]; parser: [${parsed.join(' | ')}]`);
   process.exit(ok ? 0 : 1);

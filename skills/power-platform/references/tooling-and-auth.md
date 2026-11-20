@@ -74,6 +74,16 @@ $t = Invoke-RestMethod -Method Post -Uri $tokenUrl -Body $body
 Set-Content -Path $cachePath -Value $t.refresh_token   # rotate
 ```
 
+- **One sign-in, every audience.** The same cached refresh token redeems for other first-party
+  audiences: `scope = https://service.flow.microsoft.com/.default offline_access` (flow run history)
+  or `https://api.fabric.microsoft.com/.default offline_access` (Fabric items and jobs). Measured: both
+  silent, no second prompt, on a machine with no Azure CLI and no Az sign-in. The bundled
+  `dv-token.ps1 -Resource <audience>` does this and keeps the org's cache; `flow-runs.py` reads it from
+  `"flowTokenCommand"` in `scripts/canvas-app.json`, and every Fabric tool takes it as `--token-cmd`.
+- **Never capture the token script's output in a way that hides its prompt.** A helper that captured
+  the script's whole output swallowed the device-code prompt, so the first sign-in waited unseen; the
+  bundled script writes the prompt to stderr. A sign-in started in the background is killed when a
+  headless turn ends: run the first one in the foreground.
 - **Fetch a fresh access token before each long step.** Access tokens last about an hour; a long
   seed load or migration that obtains one token at the start fails part-way, half-written.
 - **Refresh-token lifetime is tenant policy** - about 90 days of silent access in one tenant. Plan
@@ -207,7 +217,7 @@ command must also work as `powershell -File`):
 | empty `HashSet` returned from a function | arrives as `$null`; `-contains` misbehaves | return a plain array |
 | `$row[$col]` on an `Import-Csv` row | silently yields nothing (0 rows created) | `$row.$col` |
 | `$pid` as a variable name | read-only automatic variable; throws at use | pick another name |
-| variable names are case-insensitive | `$appendix` and `$APPENDIX` are the same variable; a patch body `$b` overwrote the option-value base `$B` ("Hashtable does not contain op_Subtraction"), and result rows `$s`/`$b` overwrote lakehouse names `$S`/`$B` | never rely on case; no single-letter names in scripts |
+| variable names are case-insensitive | `$appendix` and `$APPENDIX` are the same variable; a patch body `$b` overwrote the option-value base `$B` ("Hashtable does not contain op_Subtraction"), and result rows `$s`/`$b` overwrote lakehouse names `$S`/`$B`; a local `$apply = @()` overwrote the `[switch]$Apply` parameter, so the plan/apply branch read an array | never rely on case; no single-letter names in scripts; never reuse a parameter's name, in any case, for a local |
 | `Invoke-WebRequest` non-interactively | null reference, sometimes after the POST succeeded | `-UseBasicParsing` |
 | error body in a `catch` | the response stream is already consumed; reading it returns "" | `($_.ErrorDetails.Message \| ConvertFrom-Json).error.message` |
 | TLS defaults | older hosts negotiate below TLS 1.2 | `[Net.ServicePointManager]::SecurityProtocol = 'Tls12'` |

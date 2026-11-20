@@ -187,8 +187,23 @@ copying a working control from the same app.
   patches the opposite value has no state to lose. Audit rule: a checkbox with a formula `Visible`
   and an initial state must define both `OnCheck` and `OnUncheck`. Prove by reading back true, false
   and blank from Dataverse.
+- **Checkbox state: a mirrored variable must be reset with its box.** That pattern keeps two copies
+  of one state, and they part the moment a formula resets the variable but not the box. Measured: a
+  delete confirmation gated its button on `locAck` (set by OnCheck/OnUncheck); after a successful
+  delete the formula set `locAck` to false, and OnVisible did the same, but the box stayed ticked, so
+  the screen showed "confirmed" with the button disabled. Where the box is visible when the screen
+  loads, gate on `chkAck.Value` and `Reset(chkAck)`; where the variable is needed (the hidden-at-load
+  case above), every formula that sets it also calls `Reset(<box>)`, or the box's `Default` reads the
+  variable. `check-canvas-format.mjs` warns on each formula that sets a mirrored variable without
+  resetting the box (`checkbox-mirror-reset`; a context variable is matched on its own screen only).
 
 ## 5. ComboBox: pickers
+
+- **When people know rows by a code, the picker searches the code too.** A delete picker over a
+  table whose rows people name by an auto-number ID searched only the name; the user typed the ID,
+  saw an empty list and reported "delete does not work" (reproduced in the published app). Put a
+  find box beside it with a delegable `StartsWith` on the name, on the ID, and on the ID prefix plus
+  the typed text (so "1140" finds `ORD-1140`), and show the ID as a second `ComboBoxDataField`.
 
 - **A modern ComboBox with no `ComboBoxDataField` child renders an EMPTY list**, silently - compiles,
   audits and ships clean. The obvious diagnosis ("my collection is empty") is wrong; the tell is
