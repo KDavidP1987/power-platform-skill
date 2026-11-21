@@ -313,6 +313,12 @@ evidence. Design each one so the broken version gives a different answer.
   implements, trigger it in the published app, record the message, and confirm the target row's
   `modifiedon` and any totals are unchanged. Run it on real data in the problem shape, not only a
   fixture. Report a guard the data can never exercise as "live but never observed refusing".
+- **A walk script that writes, even once, plans by default.** A walk that types one value into a
+  grid is a Dataverse write like any other: by default it prints the target row and the values it
+  would type, writes only with `--apply`, and refuses if the row changed since the plan. The plugin's
+  write gate asks for this; it does not count requests to the local browser driver (`localhost`,
+  `127.0.0.1`) as writes, so a read-only walk needs no plan mode, and a refusal quotes the line it
+  judged to be the write.
 - **A negative test whose gate turns out to be open writes a real row.** Treat every negative test as
   a potential write: declare it as one, park what watches the table, and have the restore ready.
 - **A no-change Save proves a write path.** Record `modifiedon` and the lookup GUIDs, press Save

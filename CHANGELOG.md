@@ -11,6 +11,44 @@ The skill's own version is `metadata.version` in `skills/power-platform/SKILL.md
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-20
+
+Feedback from issues 2 to 5: a model-driven app built entirely by Web API script and walked in the
+browser, plus a write-gate false positive found on the way.
+
+### Fixed
+
+- `plugin-gate.mjs` rule D (select before apply) no longer counts a request to the local machine
+  (`localhost`, `127.0.0.1`, `[::1]`, or a variable holding one) as a Dataverse write, even when its
+  body names a Dataverse page or carries a page-side GET to `/api/data/`. Read-only browser walks that
+  POSTed to a local Playwright server were refused until they faked a plan mode (issue 5). A real
+  Dataverse write in the same file is still refused, and every refusal now quotes the line it
+  matched. Six selftest cases added.
+
+### Added
+
+- `model-driven-and-docs.md` 1: editable grids per form or per table (the list grid's
+  `customcontroldefaultconfigs` row, and the blast-radius check that counts only apps that still
+  exist); bulk-edit views that show identifiers through a link-entity (read-only cells); grid events
+  run on a form-hosted grid only, never on the list page, with the `eventsxml` refusals and the
+  all-records subgrid; form scripts run in a sandbox frame, and Bulk Edit opens the form as `formType`
+  6; porting canvas rules to a web resource as one pure function with Node tests; quick view forms
+  take one-column sections; web resource panels with live FetchXML aggregates; a form layout check
+  (issue 2).
+- `model-driven-and-docs.md` 8: menus per role (`SubArea` `Privilege`), icons per app (`VectorIcon`),
+  and hiding classic commands in one app through `appactions`, with the PascalCase bind names and
+  what cannot be hidden (issue 3); reporting inside a model-driven app - scripted dashboards that
+  never opened, charts that ignored their colours, the chart XML traps, and the sitemap web resource
+  page that worked (issue 4); verification recipes (default view by name, view URLs, the "Rows: N"
+  footer against an aggregate count, `col-id` and `row-index` selectors), cache clearing before every
+  visual check including service workers, and verifying scripts by effect.
+- `reporting.md` 2: in a model-driven app, prefer the web resource page over scripted dashboards
+  and multi-series charts.
+- `browser-verification.md` 8: a walk that writes even once plans by default; walks that only talk
+  to the local driver need no plan mode.
+- `rules-and-scope.md`: rule D's new scope, and three model-driven ways-of-working rows.
+- README: model-driven apps move from "Documentation only" to "Partly proved"; ROADMAP 8 updated.
+
 ## [0.49.1] - 2026-11-20
 
 Model-driven lessons captured while 0.49.0 was being released.
