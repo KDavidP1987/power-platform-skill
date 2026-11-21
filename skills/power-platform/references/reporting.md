@@ -155,6 +155,11 @@ three.
 - Collections stop at the data row limit. Say so on the screen and send larger or cross-project
   questions to Power BI.
 
+**In a model-driven app**, prefer a sitemap web resource page with FetchXML aggregates over a
+scripted dashboard or chart: in a measured build a scripted dashboard never opened, and the charts
+ignored their series colours and drew a blue-violet and a magenta. The page pattern, its checks and
+the chart traps are in `model-driven-and-docs.md` 8, "Reporting inside a model-driven app".
+
 ## 3. Metrics: definitions that survive scrutiny
 
 Define each metric on the screen or in the model, in one line, where its reader sees it.

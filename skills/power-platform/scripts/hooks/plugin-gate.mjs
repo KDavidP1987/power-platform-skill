@@ -695,23 +695,29 @@ export function evaluatePre(root, input = {}, env = process.env) {
   // A heredoc body is a script (written to a file or fed to an interpreter), so it is judged as a script
   // is: refused only without a plan mode. Measured: a plan-by-default script created in a heredoc was
   // refused as an inline write, twice, and passed once it was saved with the Write tool.
-  if (isShell && inlineDataverseWrite(withoutHeredocs(cmd))) {
+  // Each message quotes the line judged to be the write, so a false positive is obvious. Requests to
+  // localhost or 127.0.0.1 (a browser driver) are never writes.
+  const inlineHit = isShell ? inlineDataverseWrite(withoutHeredocs(cmd)) : '';
+  if (inlineHit) {
     return 'Power Platform order gate (power-platform plugin) [Dataverse]: select before apply. This command sends a Dataverse write ' +
-      'inline. An inline write is refused even when its GET already ran, because the plan must come from the same code path as the write. ' +
+      `inline (matched: ${inlineHit}). An inline write is refused even when its GET already ran, because the plan must come from the same code path as the write. ` +
       'Save the write as a script file (Write tool) that plans by default - selects the rows with the same $filter, prints them and the exact ' +
       'request bodies - and writes only with --apply (or -Apply). Run it once without the switch, read the plan, then run it with the switch ' +
       '(references/dataverse-web-api.md section 16).';
   }
-  if (isShell && heredocBodies(cmd).some((b) => writeScriptWithoutPlan(b))) {
+  const docHit = isShell ? heredocBodies(cmd).map((b) => writeScriptWithoutPlan(b)).find(Boolean) : '';
+  if (docHit) {
     return 'Power Platform order gate (power-platform plugin) [Dataverse]: select before apply. The script in this heredoc sends Dataverse ' +
-      'writes but has no plan mode. Give it one (plan by default, write only with --apply or -Apply), or save it with the Write tool, ' +
+      `writes but has no plan mode (matched: ${docHit}). Give it one (plan by default, write only with --apply or -Apply), or save it with the Write tool, ` +
       'run it without the switch, read the plan, then run it with the switch (references/dataverse-web-api.md section 16).';
   }
-  if (tool === 'Write' && /\.(py|ps1|psm1|mjs|js|cjs|ts|sh)$/i.test(String(ti.file_path || '')) && writeScriptWithoutPlan(String(ti.content || ''))) {
+  const fileHit = tool === 'Write' && /\.(py|ps1|psm1|mjs|js|cjs|ts|sh)$/i.test(String(ti.file_path || '')) ? writeScriptWithoutPlan(String(ti.content || '')) : '';
+  if (fileHit) {
     return 'Power Platform order gate (power-platform plugin) [Dataverse]: select before apply. This script sends Dataverse writes ' +
-      '(POST, PATCH, PUT or DELETE to /api/data/) but has no plan mode. Make plan the default: select the target rows with the same ' +
+      `(POST, PATCH, PUT or DELETE to /api/data/) but has no plan mode (matched: ${fileHit}). Make plan the default: select the target rows with the same ` +
       'filter the write will use, print them and the exact request bodies, and write only with --apply (or -Apply); the apply acts on ' +
-      'the rows the plan selected and refuses if they changed (references/dataverse-web-api.md section 16).';
+      'the rows the plan selected and refuses if they changed (references/dataverse-web-api.md section 16). A request to localhost ' +
+      '(a browser driver) is not counted as a write.';
   }
   // B. plan before schema
   if (isShell && runsDeployer(cmd)) {
@@ -799,19 +805,62 @@ export function runsDeployer(cmd) {
 // Invoke-RestMethod / Invoke-WebRequest, an inline python or node one-liner). Running a script that does
 // the write is not matched here; the script's own plan mode is (writeScriptWithoutPlan).
 const DV_URL = /\/api\/data\/v\d/i;
-const WRITE_METHOD = /(?:-X\s*|--request\s+|-Method\s+['"]?|method\s*[:=]\s*['"]|requests\.)(POST|PATCH|PUT|DELETE|MERGE)\b/i;
+const WRITE_METHOD = /(?:-X\s*|--request\s+|-Method\s+['"]?|method\s*[:=]\s*['"]|requests\.)(POST|PATCH|PUT|DELETE|MERGE)\b/gi;
+const SCRIPT_WRITE = /(?:-Method\s+['"]?|method\s*[:=]\s*['"]|-X\s*|\b(?:call|request|_req|send)\(\s*['"])(POST|PATCH|PUT|DELETE|MERGE)\b|requests\.(post|patch|put|delete)\(/gi;
+// A request to the local machine (a browser driver, a local command server) is not a Dataverse write,
+// even when its body names a Dataverse page or carries a page-side GET to /api/data/. Measured: every
+// read-only screenshot and click-through walk that POSTed to a local Playwright server was refused.
+const LOCAL_URL = /^['"`]?https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?:[:/'"`]|$)/i;
+const OPENER = /\b(?:fetch|request|_req|call|send|requests\.(?:post|patch|put|delete)|curl|Invoke-RestMethod|Invoke-WebRequest|irm|iwr)\b/gi;
+function localNames(s) {
+  const names = new Set();
+  for (const m of s.matchAll(/(\$?[A-Za-z_][\w$]*)\s*=\s*['"`]https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])\b/gi)) names.add(m[1].replace(/^\$/, '').toLowerCase());
+  return names;
+}
+// The write is local when the request it belongs to (from the nearest opener at or before the method to the
+// end of that line) names a local target before any other URL: a localhost literal or a variable holding one.
+function writeIsLocal(s, at, names) {
+  const from = Math.max(0, at - 400);
+  let open = -1;
+  for (const m of s.slice(from, at + 24).matchAll(OPENER)) if (from + m.index <= at) open = from + m.index;
+  if (open < 0) open = s.lastIndexOf('\n', at) + 1;
+  let end = s.indexOf('\n', at);
+  if (end < 0) end = s.length;
+  const tok = /['"`]?https?:\/\/[^\s'"`]+|\/api\/data\/|\$?[A-Za-z_][\w$]*/g;
+  for (const m of s.slice(open, end).matchAll(tok)) {
+    const t = m[0];
+    if (/^['"`]?https?:/i.test(t)) return LOCAL_URL.test(t);
+    if (/^\/api\/data\//i.test(t)) return false;
+    if (names.has(t.replace(/^\$/, '').toLowerCase())) return true;
+  }
+  return false;
+}
+function lineAt(s, at) {
+  const a = s.lastIndexOf('\n', at) + 1;
+  const b = s.indexOf('\n', at);
+  return s.slice(a, b < 0 ? s.length : b).trim().slice(0, 160);
+}
+// The first write in the text that does not go to the local machine, as its line (for the message), or ''.
+function firstRemoteWrite(s, re) {
+  const names = localNames(s);
+  for (const m of s.matchAll(re)) {
+    if (!writeIsLocal(s, m.index, names)) return lineAt(s, m.index) || m[0];
+  }
+  return '';
+}
 export function inlineDataverseWrite(cmd) {
   const c = String(cmd);
-  return DV_URL.test(c) && WRITE_METHOD.test(c);
+  if (!DV_URL.test(c)) return '';
+  return firstRemoteWrite(c, WRITE_METHOD);
 }
 
-// Script source that sends Dataverse writes and has no plan/apply switch.
+// Script source that sends Dataverse writes and has no plan/apply switch: the matched line, or ''.
 export function writeScriptWithoutPlan(src) {
   const s = String(src);
-  if (!DV_URL.test(s) && !/crm[0-9]*\.dynamics\.com/i.test(s)) return false;
-  const writes = /(?:-Method\s+['"]?|method\s*[:=]\s*['"]|-X\s*|\b(?:call|request|_req|send)\(\s*['"])(POST|PATCH|PUT|DELETE|MERGE)\b|requests\.(post|patch|put|delete)\(/i;
-  if (!writes.test(s)) return false;
-  return !/--apply|-Apply\b|-WhatIf|SupportsShouldProcess|--plan\b|dry[-_ ]?run|read_only\s*=|plan[-_ ]?only/i.test(s);
+  if (!DV_URL.test(s) && !/crm[0-9]*\.dynamics\.com/i.test(s)) return '';
+  const hit = firstRemoteWrite(s, SCRIPT_WRITE);
+  if (!hit) return '';
+  return /--apply|-Apply\b|-WhatIf|SupportsShouldProcess|--plan\b|dry[-_ ]?run|read_only\s*=|plan[-_ ]?only/i.test(s) ? '' : hit;
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -894,6 +943,16 @@ function selftest() {
     check('D: a heredoc script with a plan mode is a script, not an inline write', pre('Bash', { command: `cat > scripts/move.py <<'EOF'\n${withPlan}EOF\npython scripts/move.py` }), silent);
     check('D: a heredoc script fed to python with a plan mode is allowed', pre('Bash', { command: `python - <<'EOF'\n${withPlan}EOF` }), silent);
     check('D: a heredoc script with no plan mode is denied', pre('Bash', { command: `python - <<'EOF'\n${noPlan}EOF` }), denies('select before apply', 'heredoc', 'no plan mode'));
+    const drv = "const r = await fetch('http://localhost:8931', { method: 'POST', body: JSON.stringify({ a: 'goto', url: 'https://org.crm.dynamics.com/main.aspx' }) });\n";
+    check('D: a POST to the local browser driver is not a Dataverse write', pre('Write', { file_path: path.join(tmp, 'scripts/walk.mjs'), content: drv }), silent);
+    const drvGet = "const DRV = 'http://127.0.0.1:8931';\nawait fetch(DRV, {\n  method: 'POST', body: JSON.stringify({ a: 'eval', code: \"fetch('/api/data/v9.2/app_orders?$top=1')\" }) });\nawait page.evaluate(() => indexedDB.deleteDatabase('x'));\n";
+    check('D: a driver POST through a variable, carrying a page-side GET, is not a write', pre('Write', { file_path: path.join(tmp, 'scripts/walk2.mjs'), content: drvGet }), silent);
+    check('D: an inline curl POST to localhost naming /api/data is not a write', pre('Bash', { command: "curl -s -X POST http://localhost:8931 -d '{\"a\":\"goto\",\"url\":\"https://org.crm.dynamics.com/api/data/v9.2/app_orders\"}'" }), silent);
+    check('D: an inline PowerShell POST to a localhost variable is not a write', pre('PowerShell', { command: "$drv = 'http://localhost:8931'; Invoke-RestMethod $drv -Method Post -Body (@{a='eval';code=\"fetch('/api/data/v9.2/x')\"} | ConvertTo-Json)" }), silent);
+    const mixed = drv + "await fetch('https://org.crm.dynamics.com/api/data/v9.2/app_orders(1)', { method: 'PATCH', body: b });\n";
+    check('D: a driver POST beside a real Dataverse PATCH is still denied, naming the line', pre('Write', { file_path: path.join(tmp, 'scripts/walk3.mjs'), content: mixed }), denies('no plan mode', "matched: await fetch('https://org.crm"));
+    const afterLocal = drv + "requests.patch(ORG + 'app_orders(1)', json=b)\n";
+    check('D: a remote write on the line after a local one is still a write', pre('Write', { file_path: path.join(tmp, 'scripts/walk4.py'), content: afterLocal }), denies('no plan mode', 'requests.patch'));
     check('D: an inline write after a heredoc is still denied', pre('Bash', { command: `cat > n.txt <<'EOF'\nnote\nEOF\ncurl -X PATCH 'https://org.crm.dynamics.com/api/data/v9.2/app_orders(1)' -d @b.json` }), denies('select before apply', 'even when its GET already ran', 'Write tool'));
     check('B: deploy-tables --plan is allowed', pre('Bash', { command: 'python scripts/deploy-tables.py --plan' }), silent);
     fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });

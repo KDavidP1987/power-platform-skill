@@ -133,6 +133,72 @@ table's own list grid are unchanged; switching editing on for the table's grid c
 with `isdefault` true. When cloning entity XML by hand, regenerate form and view GUIDs - they are
 unique across the organisation (`dataverse.md`).
 
+**Editable grids: per form or per table.** The subgrid above is a per-form choice. A table's list
+page (its home grid) is set by the table's `customcontroldefaultconfigs` row
+(`primaryentitytypecode` = the table; every table has one, with an empty `<controlDescriptions />`
+until set). To make it editable, copy the `controldescriptionxml` of a platform table that already
+uses the Power Apps grid there (`asyncoperation` did, in a measured environment: one
+`<controlDescription>` with no `forControl`, a `<customControl id="{E7A81278-...}">` default entry,
+then `Microsoft.PowerApps.PowerAppsOneGrid` for form factors 0, 1 and 2), switch `EnableEditing` to
+`yes`, PATCH it, and `PublishXml` the entity. This changes **every** model-driven app that shows the
+table, so check the blast radius first: list the apps whose `appmodulecomponents` include the table,
+and count only apps that exist (the union of `appmodules` and `RetrieveUnpublishedMultiple()`).
+Measured: `appmodulecomponents` still held 14 rows for an app deleted months earlier, and a check
+that counted them refused a safe change.
+
+**A bulk-edit view shows identifiers through a link.** The Power Apps grid lets a person type into
+every column of the row's own table that the view shows - keys and lookups included, which the app
+depends on. Columns brought in through a `<link-entity alias="p">` (layout cell `p.app_code`) render
+read-only ("This cell is not editable"). So put the fields that identify a row (the parent's code,
+the period from a shared calendar) in the view through a link, and the row's own columns only for
+what may be edited. Linked headers read "Field (Table)" and cannot be relabelled in the view.
+
+**Grid events run on a form-hosted grid only.** Events on the Power Apps grid (`OnRecordSelect`, a
+cell's `OnChange`), used to lock cells by rule, ran on a subgrid placed on a form and **never** on the
+table's list page: a handler stored in `customcontroldefaultconfig.eventsxml` was accepted, but its
+library never loaded (no request for the web resource; locked cells stayed editable). Register them
+on the form instead: `<events><event name="OnRecordSelect" control="<subgrid id>">` with the
+handler, plus the library in the form's `<formLibraries>`. To
+govern bulk editing:
+
+- Host the editable grid on a form and keep the table's list page read-only, so nothing can be
+  edited outside the rules.
+- A grid over **all** records works on any form: a subgrid with an empty `RelationshipName`. Measured:
+  placed on a single "year" record's form, it showed about 3,200 rows and opened in about 7 s cold.
+- `eventsxml` refuses a `<formLibraries>` element, an empty string and null alike (`0x80040216`);
+  clear it with `<events />`.
+
+**Form scripts run in a sandbox frame.** A value a form script set on `window` was not visible from
+the page's top frame, while the cells it disabled plainly were. Verify a form or grid script by its
+effect, not by a global: click the cell, press Enter, check whether an input took focus, press
+Escape. The multi-row **Bulk Edit** dialog opens the main form with `formType` 6; a governance
+script must handle 6 explicitly, or it applies its single-record rules to a many-record edit.
+
+**Porting canvas rules to a web resource, with tests.** When a model-driven app must keep a canvas
+app's editing rules (closed periods, locks, who may edit what), write them as one pure function -
+`allow(context, field, row, period) -> { ok, why }` - that both the form script and a Node test file
+call. The web resource exports it for Node with `if (typeof module !== 'undefined') module.exports
+= ...`. Measured: 45 rule tests covered the roles an admin session cannot exercise, and the test
+file was shown to fail with a rule broken on purpose. Browser checks as an admin then only need to
+prove the wiring, and the rules still move server-side before non-admin roles get the app (section 2).
+
+**Quick view forms take one-column sections.** `POST systemforms` with `type` 6 and a two-column
+section returned `0x80040203` ("Columns in a section must be set to 1"). Embed one on a main form
+with the standard quick view control classid, `datafieldname` = the lookup it follows, and the
+`QuickForms` parameter = the escaped `<QuickFormIds>` XML naming the quick view form.
+
+**A web resource panel shows live figures on a form.** An HTML web resource placed with the
+standard web resource control (`PassParameters` true, `Data` = a custom string) reads `id`,
+`typename` and `data` from its query string and calls the Web API from the same origin with FetchXML
+aggregates, as the signed-in user. Measured: its totals matched a Dataverse query exactly. Size the
+cell by `rowspan`: 6 left a blank band, 3 fitted a row of five cards.
+
+**Check the layout as a person doing the task.** Screenshots of a scripted form caught one that put
+context on the first tab and the fields the task needs on the second. Ask of every form: is the
+reason to open it above the fold? One tab worked, with the task's fields on the left and context
+(a quick view card, notes, a figures panel) on the right. Clear the browser cache before each look
+(section 8): a republished form otherwise shows its previous layout.
+
 ## 2. The model-driven app is a write path and a dependency
 
 - **It bypasses every canvas gate.** Hidden buttons and disabled inputs do nothing against the
@@ -470,6 +536,67 @@ measured, seven warnings came back with a null `Message`. Four traps:
   app. Take the colours from the project's design standard; check the header in the browser after a
   cache clear (below).
 
+### Menus, icons and commands per app and per role
+
+All three can be set by script for one app, with no ribbon solution and no change to table
+metadata, so other apps that show the same tables are unaffected. Each has limits:
+
+- **Menus per role.** A sitemap `SubArea` with `<Privilege Entity="app_adminsetting"
+  Privilege="Write" />` (placed after its `Titles`) is hidden from roles without that privilege. A
+  table only administrators can write works as the proxy for "administrator". Views inside a visible
+  table cannot be hidden per role, only per app (the app's view components).
+- **Icons per app.** `SubArea VectorIcon="$webresource:app_/icons/orders.svg"` sets the menu icon for
+  this app only; a shared table keeps its own icon everywhere else.
+- **Hiding a classic command in one app.** `POST appactions` with `name` = the command id, a
+  `uniquename` with your prefix, `hidden` true, `location` (0 form, 1 main grid, 2 subgrid),
+  `context` 1, `contextvalue` = the table's logical name, `origin` 1, `type` 0, and the navigation
+  properties bound with the usual annotation: `ContextEntity@odata.bind` =
+  `/entities(<EntityId from EntityDefinitions>)` and `AppModuleId@odata.bind` = `/appmodules(<id>)`.
+  Then publish the app. The navigation names are PascalCase: lower case returned `0x80048d19`
+  ("undeclared property"). Read command ids from the running page (each button's `data-id`).
+  Measured: about 290 overrides hid Assign, Deactivate, Activate, Run Flow (form and main grid), Run
+  Report, the Word and Excel templates, Email a Link, Visualize this view and New, with no effect on
+  other apps. Three cautions:
+  - **Not everything can be hidden this way.** Check Access (`AccessChecker.OpenDialog.<table>.Button`)
+    and the Flow menu on a form subgrid still showed after the override rows were written and the
+    cache cleared.
+  - **A subgrid with no relationship** uses `Mscrm.SubGrid.<table>.NewRecord`, not `AddNewStandard`;
+    hide both.
+  - **Hiding frees space**, which brings buttons out of the overflow menu (a form's Reports appeared).
+    Re-read the ids after each round.
+
+### Reporting inside a model-driven app
+
+The platform's dashboards and charts can be created by script, but in a measured build they could
+not be relied on. A web resource page on the sitemap could.
+
+- **A dashboard created by Web API may never open.** A `systemform` of type 0 that matched a working
+  system dashboard in every column but `ismanaged`, published and in the app, was missing from the
+  dashboard picker, and opening it (as the sitemap's default dashboard, by URL with its id, by URL
+  with `type=system`) fell back to a system dashboard. On the way, `IsUserDefined` on its tabs and
+  sections was refused (`0x8004e303`). The cause was not found, so do not promise a scripted
+  dashboard: open it in the browser before relying on it.
+- **Charts ignore their series colours.** A `savedqueryvisualization`'s `presentationdescription`
+  stored `Color="R,G,B"` (with or without a custom palette), but Unified Interface drew its own
+  palette: first a blue-violet, second a magenta. Under a palette that bans those hues, use one
+  series per chart, or the page below. Chart XML traps: one `measurecollection` per series
+  (`0x8004e003` otherwise), and an `order` on a grouped alias sits in the same entity or
+  link-entity as the alias (`0x8004110a` otherwise).
+- **The route that worked: a sitemap web resource page.**
+  - Setup: `SubArea Url="$webresource:app_/pages/overview.html"`, with a shared `pages.js` and
+    `pages.css` loaded by relative path.
+  - Queries: FetchXML aggregates from the same origin run as the signed-in user, so each role sees
+    only what it can read. A `groupby` on a lookup inside a link-entity works.
+  - Navigation: `window.parent.Xrm.Navigation.navigateTo` with `entityrecord`, `entitylist` (with a
+    `viewId`) and `webresource` (with a `data` string), for drill-down and links between pages.
+  - Checks: the totals matched Dataverse to the unit; a group row expanded to the right number of
+    records, and a person's row opened that person's page.
+  - Colours: validate the chart palette with a checker. Two series and a dashed neutral reference
+    line passed where three hues failed.
+
+  It is branded, testable in the browser like any page, and needs no Power BI licence. For history,
+  trends and cross-table questions, `reporting.md` still applies.
+
 ### Microsoft's app builder (not measured here)
 
 Microsoft's official `model-apps` plugin (`microsoft/power-platform-skills`) builds a whole
@@ -499,11 +626,22 @@ Dataverse. What differs:
   (`appmoduleid`, filtered by `uniquename`).
 - **Add nothing else to the URL.** An unknown query parameter on `main.aspx` - a cache-buster such
   as `&v=2` - returns the generic "An error has occurred" page, which reads like a broken app.
-- **Clear the metadata cache before judging a change.** Unified Interface caches form, sitemap and
-  app metadata in the browser (IndexedDB and Cache Storage for the org's origin), so a published
-  change can stay invisible in a profile that has opened the app before. Clear the origin's storage
-  (in Playwright, delete every `indexedDB.databases()` entry and every `caches.keys()` entry on the
-  org's page, then reload) before checking a form, sitemap or theme change.
+- **Clear the metadata cache before every visual check.** Unified Interface caches form, sitemap
+  and app metadata in the browser (IndexedDB, Cache Storage and a service worker for the org's
+  origin), so a published change stays invisible in a profile that has opened the app before.
+  Measured: after a form was PATCHed and published, a plain navigation still drew the old layout.
+  Clear the origin's storage (in Playwright, delete every `indexedDB.databases()` entry and every
+  `caches.keys()` entry, unregister the service workers, then reload) before checking a form,
+  sitemap, command or theme change.
+- **Recipes that worked.** A list opens on the app's first view by name, case-insensitive, so name
+  the intended default to sort first. Open a specific view with
+  `&pagetype=entitylist&etn=app_order&viewid=<id>&viewType=1039`. The list footer prints
+  "Rows: N"; compare it with an aggregate FetchXML count of the same filter. Grid cells carry
+  `col-id` = the attribute (or `alias.attribute` for a linked column) and rows carry `row-index`,
+  which make stable selectors. The multi-row Edit and Export to Excel are on the list command bar
+  (Excel under the overflow).
+- **Verify a script by its effect.** Form scripts run in a sandbox frame (section 1): check what the
+  script did on screen, not a variable it set.
 - **Subgrids do not render on an unsaved record.** A related-rows section on a new form is empty
   until the parent is saved; that is the platform, not a defect. Check subgrids on a saved record.
 - **An editable grid saves each cell when focus leaves it**, with no Save: measured, a test's

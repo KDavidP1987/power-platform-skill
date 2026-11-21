@@ -4,7 +4,7 @@
 </picture>
 
 [![validate](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/KDavidP1987/power-platform-skill/actions/workflows/validate.yml)
-[![plugin 0.49.1](https://img.shields.io/badge/plugin-0.49.1-1F3A5F)](.claude-plugin/plugin.json)
+[![plugin 0.50.0](https://img.shields.io/badge/plugin-0.50.0-1F3A5F)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 [![evaluation 133/148 vs 98/148](https://img.shields.io/badge/evaluation-133%2F148%20vs%2098%2F148-0B6E72)](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
@@ -16,7 +16,7 @@ Build Power Apps canvas apps, Dataverse solutions and Power Automate flows with 
 git, a portable artifact built from it, a deliberate deployment, and every change proved by
 performing the task in the published app, driven by Playwright. A clean compile is not enough.
 
-Version 0.49.1 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
+Version 0.50.0 · MIT · an [Agent Skill](https://agentskills.io) by [SkillEra](https://skillera.io) · [Changelog](CHANGELOG.md) · [Evaluation report](https://kdavidp1987.github.io/power-platform-skill/evaluation.html)
 
 > [!NOTE]
 > On ten realistic Power Platform tasks, run twice each, the same model passed **133 of 148** graded
@@ -58,7 +58,7 @@ is being worked. It is kept in step with the [roadmap](ROADMAP.md#backlog-to-10)
 | 5 | Stabilise (0.9): one interface table, the compatibility file, upgrade notes | Users need options, exit codes and finding codes that stop moving | Interface table and compatibility file drafted in 0.21; freeze at 0.9 |
 | 6 | Re-run the graded evaluation on the current version: ten or more task types (adding Power Pages, model-driven and SharePoint), three runs each, the held-out triggering set | A 1.0 criterion; the last graded run was 0.7.1 (217/222 with the skill, 136/222 without) and much has changed since | Open |
 | 7 | Publish the 0.7.x results and the measured builds on the evaluation page | The page still shows the 0.5.1 run | Open |
-| 8 | A model-driven app with a responsive canvas companion, built and verified in a tenant | Clears most of the snippets still marked "confirm in your tenant" | Open |
+| 8 | A model-driven app with a responsive canvas companion, built and verified in a tenant | Clears most of the snippets still marked "confirm in your tenant" | Open: a model-driven app built by script and walked as an administrator (0.49.1-0.50); the canvas companion and a non-admin walk remain |
 | 9 | SharePoint as a data source: delegation, the 5,000-item threshold, staying on a standard licence | Common in real tenants; written down nowhere yet | Partly done in 0.38 and 0.39: `references/sharepoint-lists-and-forms.md` (lists, views and site pages by REST; customised list forms; required columns, deletes and throttled walks). Open: delegation, the 5,000-item threshold, licence limits |
 | 10 | Approvals in Teams and Outlook, and the one-Approvals-connection-per-person limit | Every approval flow meets it | Done in 0.45: `power-automate.md` 19 and four lint rules; proved live (create, wait, one approve and one reject, read back in run history and the Approvals tables, assigned to the owner only) |
 | 11 | Two independent real builds in different tenants | A 1.0 criterion; every build so far ran in one tenant | Open: needs a second tenant |
@@ -119,7 +119,7 @@ written from Microsoft's documentation and marked so in the reference (`[Unteste
 | `datadict.py` data dictionaries | Proved | 0.48: a 58-table production Dataverse app, 996 of 996 columns described (822 curated), live drift and row counts, 36 tables matched to the medallion dataflows that read them, evaluate 9 of 10 (the warning: no meanings stored in Dataverse) | Global choices from another solution; a lakehouse-layer dictionary; writing curated meanings back to Dataverse descriptions | ROADMAP 18 |
 | `lineage.py` data lineage documents | Proved | 0.46: a production medallion chain (Dataverse and SharePoint bronze, silver, gold, a Gen1 consumer), 50 of 50 columns traced, live drift and runs read; 0.47: `evaluate` on the same document (7 of 7, and an older copy correctly failed for missing notes) | Notebook (Python or Spark) transforms, DAX in semantic models, Gen1 dataflows as producers | ROADMAP 17 |
 | SharePoint as a data source: delegation, the 5,000-item threshold, licence limits | Not written | Lists, views, pages and list forms (0.38, 0.39) | These three topics | ROADMAP 9 |
-| Model-driven apps checked in the browser | Documentation only | Forms edited by script | A model-driven app built and walked | ROADMAP 8 |
+| Model-driven apps checked in the browser | Partly proved | 0.49.1-0.50: an app built entirely by Web API script and walked as an administrator - editable form and list grids, rule-governed bulk editing, quick view and web resource panels, per-role menus, app-scoped command hiding, an in-app reporting page whose totals matched Dataverse | Walked as a non-admin role; a canvas companion beside it | ROADMAP 8 |
 
 ### Power Pages
 
@@ -650,7 +650,7 @@ touches it, it points there rather than repeating it.
 | | [`security-and-access`](skills/power-platform/references/security-and-access.md) | Roles kept out of the solution, roles as code, impersonation, sharing, column security, onboarding |
 | | [`data-migration`](skills/power-platform/references/data-migration.md) | Profiling, crosswalk keys, spreadsheet loads, backfills on watched tables, read models, cut-over |
 | | [`documentation-set`](skills/power-platform/references/documentation-set.md) | The documentation set for a finished app: user, manager, administrator and developer guides, screenshots per role, the doc kit |
-| | [`model-driven-and-docs`](skills/power-platform/references/model-driven-and-docs.md) | Model-driven apps (when they fit, the schema and shared-table rules, Microsoft's app builder, browser verification), forms by script, guides generated from the running product, licensing as a dependency |
+| | [`model-driven-and-docs`](skills/power-platform/references/model-driven-and-docs.md) | Model-driven apps (when they fit, the schema and shared-table rules, Microsoft's app builder, menus and commands per role, in-app reporting pages, browser verification), forms, editable grids and grid rules by script, guides generated from the running product, licensing as a dependency |
 | Power Automate | [`power-automate`](skills/power-platform/references/power-automate.md) | Solution flow JSON, `runtimeSource`, SDK message codes, trigger loops and sentinel guards, activation as the only compile, notification safety, diagnosing a failed run |
 | Reporting | [`reporting`](skills/power-platform/references/reporting.md) | History first (an append-only event table, baseline, labelled demo history, commitment fields); a change log for plan-vs-actual variance, planned against unplanned; in-app charts from galleries and their compile traps; metric definitions (burn-down, burn-up, velocity, say/do, throughput, cycle time, aging, flow, mix); Power BI over a Fabric medallion, embedded in the app or linked with a filter; viewer licensing |
 | | [`data-dictionary`](skills/power-platform/references/data-dictionary.md) | Data dictionaries for Dataverse apps from the solution: meanings curated per column, choices by label, lookups and delete behaviour, sensitive columns, live drift, evaluation |
